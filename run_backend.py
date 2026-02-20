@@ -12,7 +12,7 @@ if __name__ == "__main__":
     import uvicorn
     from backend.config import Config
     uvicorn.run(
-        "backend.api.app:app",
+        "backend.server.api.app:app",
         host=Config.API_HOST,
         port=Config.API_PORT,
         reload=Config.DEBUG,

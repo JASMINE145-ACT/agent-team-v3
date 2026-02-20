@@ -157,7 +157,7 @@ def main():
 
     try:
         from backend.config import Config
-        from backend.core.single_agent import SingleAgent
+        from backend.agent import SingleAgent
     except Exception as e:
         _print_error(f"导入失败: {e}")
         sys.exit(1)

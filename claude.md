@@ -12,46 +12,36 @@
 
 ## 目录结构
 
+（已按 `doc/项目结构规整方案.md` 规整：单 Agent 心智，工具归入 backend/tools，网络层归入 backend/server。）
+
 ```
 Agent Team version3/
 ├── doc/
+│   ├── 项目结构规整方案.md       # 规整方案与 import 替换规则
 │   ├── ReAct范式对比.md           # version3 与 OpenCode 的 ReAct 范式对比
-│   ├── OpenClaw_agent借鉴.md     # OpenClaw 可借鉴点与落地；含「为何不加 tool_result_persist」与工具钩子接入点汇总
-│   ├── OpenManus_agent借鉴.md    # OpenManus 可借鉴点；含「工具变多时的处理」学习案例汇总（OpenCode/OpenManus/OpenClaw）
-│   ├── pi-mono_agent借鉴.md      # pi-mono 可借鉴点：事件驱动、transformContext/convertToLlm、steering/follow-up、工具校验、统一 LLM 抽象
-│   ├── 管材支持计划系统_可行性研究报告.md  # CAD图纸+报价自动生成管材支持计划与物流计划的可行性研究
-│   └── Prompt工程_OpenCode与OpenClaw对比.md  # Prompt 工程：OpenCode/OpenClaw 分层、按需、可配置做法与 version3 可借鉴点
+│   └── …（其他文档）
 ├── backend/
-│   ├── config.py
-│   ├── core/
-│   │   ├── context_system/        # SessionStore（多轮会话）
-│   │   └── single_agent/          # SingleAgent + 合并工具
-│   ├── agents/
-│   │   ├── quote/                 # 报价单工具（与 v2 同源副本）
-│   │   │   └── quote_tools.py
-│   │   └── quote_sheet/           # 询价填充流程（与 v2 同源副本）
-│   │       ├── flow_orchestrator.py
-│   │       └── shortage_report.py
-│   ├── api/
-│   └── ws_gateway/              # OpenClaw UI 适配：/ws、connect/sessions/chat 等
-│       ├── gateway.py
-│       ├── run_store.py
-│       ├── handlers/
-│       └── test_gateway_manual.py  # 手动测试脚本（需先 run_backend.py）
-├── inventory_agent/               # 库存与万鼎工具（与 v2 同源副本）
-├── quotation_tracker/            # 无货登记/列表/统计（与 v2 同源副本）
-├── src/                          # OpenClaw UI 共享 TS 源码（sessions/gateway/infra…）+ v2 同源 Python（cache/api/agents）
-├── control-ui/                   # OpenClaw UI 源码（Vite + Lit），构建产出在 dist/control-ui/
-├── dist/control-ui/              # 前端构建产物，由 app 挂载到 /
-├── config.py                     # 仅做 quotation_tracker 配置的 re-export，供从根目录运行时 quotation_tracker 内 from config 可解析
-├── models/                       # 仅做 quotation_tracker.models 的 re-export，供 from models.models import 可解析
-├── run_backend.py
-├── cli_agent.py
+│   ├── config.py                 # 后端全局配置（.env 含根目录、backend/tools/oos）
+│   ├── agent/                    # 唯一 Agent（ReAct 主循环 + 工具分发 + 会话）
+│   │   ├── agent.py
+│   │   ├── tools.py
+│   │   └── session.py
+│   ├── tools/                    # Agent 的工具实现
+│   │   ├── inventory/            # 库存与万鼎（原 inventory_agent + src→lib）
+│   │   ├── quotation/            # 报价单 + 询价填充（原 agents/quote + quote_sheet）
+│   │   └── oos/                  # 无货登记/列表/统计（原 quotation_tracker）
+│   └── server/                   # 网络层
+│       ├── api/                  # FastAPI HTTP（原 api/）
+│       └── gateway/              # WebSocket Gateway（原 ws_gateway/）
+├── control-ui/                   # 前端（Vite + Lit），构建产出 dist/control-ui/
+├── run_backend.py                # 入口：uvicorn backend.server.api.app:app
+├── cli_agent.py                  # 入口：backend.agent.SingleAgent
+├── start.py
 ├── requirements.txt
 └── claude.md
 ```
 
-**独立运行**：version3 不依赖 version2。已将 `inventory_agent`、`quotation_tracker`、`src` 及 `backend.agents.quote`、`backend.agents.quote_sheet` 的完整实现复制到本仓库，可直接 `python run_backend.py` 或 `python cli_agent.py`，无需与 version2 同目录或设置 PYTHONPATH。
+**独立运行**：从项目根目录执行 `python run_backend.py` 或 `python cli_agent.py` 即可；无根目录 `config.py`/`models/`，配置与模型均用 `backend.tools.oos` 等包内模块。
 
 ## 技能与工具（prompt 内描述）
 
@@ -61,9 +51,9 @@ Agent Team version3/
 4. **询价填充**：run_quotation_fill。目标：整单流水线（提取→万鼎匹配→库存→回填）。
 5. **澄清**：ask_clarification。目标：无法判断意图时向用户提问。
 
-详见 `backend/core/single_agent/agent.py`：5 个技能常量 + `_ALL_SKILLS` + `_PROMPT_OUTPUT_FORMAT`（110-173 行），`_build_system_prompt()` 组装（176-185 行）；按需注入时可改为 `_build_system_prompt(active_skills=None)` 并在 `execute_react` 里按 context 传参。
+详见 `backend/agent/agent.py`：5 个技能常量 + `_ALL_SKILLS` + `_PROMPT_OUTPUT_FORMAT`（110-173 行），`_build_system_prompt()` 组装（176-185 行）；按需注入时可改为 `_build_system_prompt(active_skills=None)` 并在 `execute_react` 里按 context 传参。
 
-**工具入参校验**（`backend/core/single_agent/tools.py`）：  
+**工具入参校验**（`backend/agent/tools.py`）：  
 - 校验辅助：`_VALID_CUSTOMER_LEVELS`（合法枚举 `{"A","B","C","D"}`）、`_QUOTE_TOOLS_WITH_FILE`（需校验 file_path 的报价单工具集）、`_tool_error(msg)`（统一错误 observation：`{"success": false, "error": "..."}` 便于模型理解）、`_validate_file_path(path, tool_name)`（空路径/文件不存在 → 返回错误字符串，否则 None）。  
 - `run_quotation_fill`：文件不存在时立即返回错误、不进入 flow_orchestrator；`customer_level` 不在 `{A,B,C,D}` 时返回清晰错误并列出合法值。  
 - 带 `file_path` 的 4 个报价单工具在执行前先经 `_validate_file_path`，失败则直接返回错误 observation。  
@@ -108,6 +98,6 @@ Agent Team version3/
 - `GET /health`：健康检查。
 - `POST /api/quotation/upload`：上传报价单，返回 file_path、file_name。
 - `POST /api/query` 或 `POST /api/master/query`：Body `{ "query": "用户输入", "session_id": "可选", "context": { "file_path": "可选" } }`，返回 `answer`、`trace`、`thinking` 等。
-- **WebSocket `/ws`（Gateway 适配层）**：供 OpenClaw 控制台 1:1 复刻使用。连接后收 `connect.challenge`，发 `connect` 得 `hello-ok`；支持 `sessions.list`、`chat.history`、`chat.send`、`chat.abort`、`agent.identity.get` 等。`sessions.list` 返回的 `updatedAt` 为毫秒时间戳（前端相对时间展示）；`inputTokens`/`outputTokens`/`totalTokens` 来自 SessionStore 持久化的 `last_input_tokens`、`last_output_tokens`（execute_react 流式/非流式调用后写入）。测试：先 `python run_backend.py`，再 `python backend/ws_gateway/test_gateway_manual.py`（需 `pip install websockets`）。
+- **WebSocket `/ws`（Gateway 适配层）**：供 OpenClaw 控制台 1:1 复刻使用。连接后收 `connect.challenge`，发 `connect` 得 `hello-ok`；支持 `sessions.list`、`chat.history`、`chat.send`、`chat.abort`、`agent.identity.get` 等。`sessions.list` 返回的 `updatedAt` 为毫秒时间戳（前端相对时间展示）；`inputTokens`/`outputTokens`/`totalTokens` 来自 SessionStore 持久化的 `last_input_tokens`、`last_output_tokens`（execute_react 流式/非流式调用后写入）。测试：先 `python run_backend.py`，再 `python backend/server/gateway/test_gateway_manual.py`（需 `pip install websockets`）。
 
-- **Jagent 控制台（前端）**：已接好，界面展示品牌为 **Jagent**（标题、侧栏 LOGO 文案、助手名称）。`control-ui/` 为 OpenClaw UI 拷贝并改品牌展示，默认 WS 为 `ws://${host}/ws`；构建产出 `dist/control-ui/`，由 `app.py` 在存在时挂载到 `/`。运行 `python run_backend.py` 后访问 `http://localhost:8000/` 即可。若需重构建：`cd control-ui && npm run build`。**SPA 会话直链**：直接打开或刷新 `/chat?session=xxx`、`/sessions` 等前端路由时，后端对无对应静态文件的路径回退为返回 `index.html`，避免 404。**注意**：前端使用 Lit 装饰器，需 Vite 6 + `vite-ts-decorators`（`control-ui/tsconfig.json` 中 `experimentalDecorators: true`），否则构建后浏览器会报 "Unsupported decorator location: field" 导致页面空白。
+- **Jagent 控制台（前端）**：已接好，界面展示品牌为 **Jagent**（标题、侧栏 LOGO 文案、助手名称）。`control-ui/` 为 OpenClaw UI 拷贝并改品牌展示，默认 WS 为 `ws://${host}/ws`；构建产出 `dist/control-ui/`，由 `backend/server/api/app.py` 在存在时挂载到 `/`。运行 `python run_backend.py` 后访问 `http://localhost:8000/` 即可。若需重构建：`cd control-ui && npm run build`。**SPA 会话直链**：直接打开或刷新 `/chat?session=xxx`、`/sessions` 等前端路由时，后端对无对应静态文件的路径回退为返回 `index.html`，避免 404。**注意**：前端使用 Lit 装饰器，需 Vite 6 + `vite-ts-decorators`（`control-ui/tsconfig.json` 中 `experimentalDecorators: true`），否则构建后浏览器会报 "Unsupported decorator location: field" 导致页面空白。

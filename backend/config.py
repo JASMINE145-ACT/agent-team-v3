@@ -6,7 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 base_dir = Path(__file__).parent.parent
-for env_path in [base_dir / ".env", base_dir / "quotation_tracker" / ".env"]:
+for env_path in [base_dir / ".env", base_dir / "backend" / "tools" / "oos" / ".env"]:
     if env_path.exists():
         load_dotenv(env_path)
         print(f"[Config] Loaded from: {env_path}")
