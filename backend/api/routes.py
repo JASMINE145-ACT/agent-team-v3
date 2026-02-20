@@ -31,15 +31,15 @@ async def health_check():
 
 @router.post("/api/quotation/upload")
 async def quotation_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
-    """上传报价单 Excel，返回 file_path、file_name，供无货登记/询价填充时放入 context。"""
+    """上传报价单或文档（Excel/PDF），返回 file_path、file_name，供无货登记/询价填充或解析时放入 context。"""
     try:
         Config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         content = await file.read()
         if len(content) > Config.MAX_UPLOAD_MB * 1024 * 1024:
             raise HTTPException(status_code=413, detail=f"文件超过 {Config.MAX_UPLOAD_MB}MB 限制")
         suffix = Path(file.filename or "upload.xlsx").suffix or ".xlsx"
-        if suffix.lower() not in (".xlsx", ".xls", ".xlsm"):
-            raise HTTPException(status_code=400, detail="仅支持 .xlsx / .xls / .xlsm")
+        if suffix.lower() not in (".xlsx", ".xls", ".xlsm", ".pdf"):
+            raise HTTPException(status_code=400, detail="仅支持 .xlsx / .xls / .xlsm / .pdf")
         safe_name = f"{uuid.uuid4().hex[:12]}_{(file.filename or 'upload')[:80]}"
         out_path = Config.UPLOAD_DIR / safe_name
         out_path.write_bytes(content)

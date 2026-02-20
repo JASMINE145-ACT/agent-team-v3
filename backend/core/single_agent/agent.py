@@ -60,17 +60,26 @@ def _call_llm_streaming_sync(
     client: OpenAI,
     kwargs: dict,
     on_token: Callable[[str], None],
-) -> Tuple[str, List]:
+) -> Tuple[str, List, Optional[Dict[str, int]]]:
     """
     同步流式调用，设计在 asyncio.to_thread 中执行。
-    实时调用 on_token 推送文本 token（含 <think> 内容）。
-    返回 (content, tool_calls)，tool_calls 为 SimpleNamespace 列表。
+    返回 (content, tool_calls, usage)。usage 为 {"prompt_tokens", "completion_tokens"} 或 None。
     """
-    stream = client.chat.completions.create(**{**kwargs, "stream": True})
+    create_kw = {**kwargs, "stream": True}
+    if "stream_options" not in create_kw:
+        create_kw["stream_options"] = {"include_usage": True}
+    stream = client.chat.completions.create(**create_kw)
     content_parts: List[str] = []
     tool_calls_raw: Dict[int, dict] = {}
+    last_usage: Optional[Dict[str, int]] = None
 
     for chunk in stream:
+        if getattr(chunk, "usage", None):
+            u = chunk.usage
+            last_usage = {
+                "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+                "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
+            }
         if not chunk.choices:
             continue
         delta = chunk.choices[0].delta
@@ -104,7 +113,7 @@ def _call_llm_streaming_sync(
         )
         for k in sorted(tool_calls_raw)
     ]
-    return content, tool_calls
+    return content, tool_calls, last_usage
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +273,7 @@ class SingleAgent:
         thinking_parts: List[str] = []
         trace: List[dict] = []
         last_answer = ""
+        last_usage: Optional[Dict[str, int]] = None
         ctx = context or {}
 
         try:
@@ -290,8 +300,9 @@ class SingleAgent:
                 kwargs["tool_choice"] = "auto"
 
             # 升级 3：流式调用（on_token 时）或阻塞调用
+            step_usage: Optional[Dict[str, int]] = None
             if on_token is not None:
-                content, tool_calls = await asyncio.to_thread(
+                content, tool_calls, step_usage = await asyncio.to_thread(
                     _call_llm_streaming_sync, self.client, kwargs, on_token
                 )
             else:
@@ -301,6 +312,11 @@ class SingleAgent:
                     break
                 content = (msg.content or "").strip()
                 tool_calls = list(getattr(msg, "tool_calls", None) or [])
+                u = getattr(resp, "usage", None)
+                if u:
+                    step_usage = {"prompt_tokens": getattr(u, "prompt_tokens", 0) or 0, "completion_tokens": getattr(u, "completion_tokens", 0) or 0}
+            if step_usage:
+                last_usage = step_usage
 
             # 提取 <think>
             content, thought = _extract_tag(content, "think")
@@ -405,12 +421,16 @@ class SingleAgent:
 
         if session_id and self._store and last_answer:
             try:
+                in_tok = last_usage.get("prompt_tokens") if last_usage else None
+                out_tok = last_usage.get("completion_tokens") if last_usage else None
                 self._store.save_turn(
                     session_id=session_id,
                     query=user_input,
                     agent="single",
                     answer=last_answer,
                     file_path=ctx.get("file_path"),
+                    input_tokens=in_tok,
+                    output_tokens=out_tok,
                 )
             except Exception as e:
                 logger.warning("Session save_turn failed: %s", e)

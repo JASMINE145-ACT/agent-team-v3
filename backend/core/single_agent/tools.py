@@ -103,6 +103,35 @@ EXTRA_TOOLS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# 前置校验辅助（把错误作为 tool observation 返回，让模型自行纠错）
+# ---------------------------------------------------------------------------
+
+_VALID_CUSTOMER_LEVELS = {"A", "B", "C", "D"}
+
+# 需要校验 file_path 存在的报价单工具
+_QUOTE_TOOLS_WITH_FILE = {
+    "extract_quotation_data",
+    "fill_quotation_sheet",
+    "parse_excel_smart",
+    "edit_excel",
+}
+
+
+def _tool_error(msg: str) -> str:
+    """返回标准错误 observation，模型可读并自行纠错。"""
+    return json.dumps({"success": False, "error": msg}, ensure_ascii=False)
+
+
+def _validate_file_path(path: str, tool_name: str) -> Optional[str]:
+    """若文件不存在返回错误字符串，否则返回 None。"""
+    from pathlib import Path as _Path
+    if not path:
+        return _tool_error(f"[{tool_name}] 缺少 file_path，请先上传文件或在 context 中提供")
+    if not _Path(path).exists():
+        return _tool_error(f"[{tool_name}] 文件不存在: {path}，请确认路径是否正确")
+    return None
+
 
 
 # 工具名分发表（避免 try/except 漏传）
@@ -272,9 +301,15 @@ async def execute_tool(
     # 询价填充
     if name == "run_quotation_fill":
         file_path = (arguments.get("file_path") or "").strip() or (ctx.get("file_path") or "").strip()
-        if not file_path:
-            return json.dumps({"error": "缺少 file_path，请先上传报价单或在 context 中提供"}, ensure_ascii=False)
+        err = _validate_file_path(file_path, "run_quotation_fill")
+        if err:
+            return err
         customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
+        if customer_level not in _VALID_CUSTOMER_LEVELS:
+            return _tool_error(
+                f"[run_quotation_fill] customer_level 无效: {customer_level!r}，"
+                f"合法值为 {sorted(_VALID_CUSTOMER_LEVELS)}，请重新调用"
+            )
         try:
             from backend.agents.quote_sheet.flow_orchestrator import run_quotation_fill_flow
             result = await asyncio.to_thread(
@@ -344,6 +379,11 @@ async def execute_tool(
 
     # 报价单工具
     if name in _QUOTE_TOOLS:
+        if name in _QUOTE_TOOLS_WITH_FILE:
+            fp = (arguments.get("file_path") or "").strip() or (ctx.get("file_path") or "").strip()
+            err = _validate_file_path(fp, name)
+            if err:
+                return err
         try:
             from backend.agents.quote.quote_tools import execute_quote_tool
             out = await asyncio.to_thread(execute_quote_tool, name, arguments)

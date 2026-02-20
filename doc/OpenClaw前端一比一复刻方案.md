@@ -4,6 +4,33 @@
 
 ---
 
+## 〇、已实现（Gateway 适配层）
+
+- **WebSocket**：`/ws` 已挂载在 FastAPI 上，启动后端即可连 `ws://localhost:8000/ws`。
+- **握手**：连接后立即推送 `connect.challenge`，客户端发 `connect` 后返回 `hello-ok`。
+- **方法**：`connect`、`agent.identity.get`、`agents.list`、`sessions.list`、`sessions.patch`、`sessions.delete`、`chat.history`、`chat.send`（含流式 delta/final）、`chat.abort`，以及所有 stub（`config.get`、`skills.status`、`cron.status` 等）。
+- **SessionStore**：已增加 `list_sessions()`、`delete_session(session_id)`。
+- **目录**：`backend/ws_gateway/`（`gateway.py`、`run_store.py`、`handlers/`）。
+
+**下一步**：✅ 已完成。已拷贝 UI 至 `control-ui/`，默认 WS 为 `ws://${host}/ws`，构建产出 `dist/control-ui/`，由 `app.py` 挂载到 `/`。
+
+---
+
+## 〇.1 接前端实施计划（Plan）
+
+| 步 | 内容 | 说明 |
+|----|------|------|
+| **1** | **拷贝 OpenClaw UI 到 control-ui/** | 从 `学习案例/openclaw/ui`（或 `瀛︿範妗堜緥/openclaw/ui`）完整拷贝到 `Agent Team version3/control-ui/`，保持目录结构（src、package.json、vite.config.ts 等）。 |
+| **2** | **修改默认 WS URL（必须）** | `storage.ts` 的 `defaultUrl` 是 `` `${proto}://${location.host}` ``，即 `ws://localhost:8000`——**不含 `/ws` path**，与后端 `/ws` 路由不匹配，必须修复。方案：在 `control-ui/src/ui/storage.ts` 里把 defaultUrl 改为 `` `${proto}://${location.host}/ws` ``（仅加 `/ws`，一行改动）。改动后同源部署零配置直连；或跳过此步，首次打开 UI 时在设置页手动填 `ws://localhost:8000/ws`。 |
+| **3** | **安装依赖并构建** | `cd control-ui && npm install && npm run build`。⚠️ **输出目录是 `../dist/control-ui`**（`vite.config.ts` 写死：`outDir: path.resolve(here, "../dist/control-ui")`），即构建产物在项目根的 `dist/control-ui/`，不是 `control-ui/dist/`。 |
+| **4** | **FastAPI 挂载静态** | 在 `backend/api/app.py` 末尾追加（`include_router` 之后）：`app.mount("/", StaticFiles(directory=str(Path(__file__).resolve().parent.parent.parent / "dist" / "control-ui"), html=True), name="ui")`。同时在文件顶部 import `StaticFiles` 和 `Path`。路由注册顺序：先 `include_router(router)` → `include_router(ws_router)` → 最后 `mount("/",...)`，避免静态覆盖 API/WS 路由。 |
+| **5** | **验证路径** | 启动前确认 `dist/control-ui/index.html` 已存在（即步骤 3 构建成功）。若用绝对路径：`Path(__file__) = backend/api/app.py`，`.parent.parent.parent` = `Agent Team version3/`，所以拼出 `Agent Team version3/dist/control-ui`，正确。 |
+| **6** | **端到端验证** | 启动后端 → 浏览器打开 `http://localhost:8000/` → 若已改 defaultUrl 则直连；若未改则在 URL 输入框填 `ws://localhost:8000/ws` → 连接 → 会话列表加载、选会话、发消息、流式回复正常。 |
+
+**顺序小结**：1 拷贝 → 2 改 defaultUrl（+`/ws`，1 行）→ 3 `npm run build`（产出 `dist/control-ui/`）→ 4 追加静态挂载到 `app.py` → 5 验证。
+
+---
+
 ## 一、整体架构
 
 ```
@@ -170,17 +197,20 @@ for turn in session.turns[-limit//2:]:
 ```
 req.params: {
   sessionKey: string,
-  message: string,              // 用户输入文本
+  message: string,              // 用户输入文本（可与 attachments 二选一，即仅发图也可）
   deliver: boolean,
   idempotencyKey: string,       // UUID，可用于去重
   attachments?: [{
     type: "image",
     mimeType: string,
     content: string             // base64
-  }]
+  }],
+  context?: Record<string, any>,  // 可选，会原样传给 agent.execute_react(context=...)
+  file_path?: string            // 可选，会并入 context 传给 agent（如报价单 Excel 路径）
 }
 res.payload: { ok: true, runId: string }    // 立即返回 runId
 ```
+实现说明：`message` 与 `attachments` 至少其一；若有 `context` 或 `file_path`，会传入 agent 的 `execute_react(context=...)`；图片附件当前会在用户输入后追加说明文案，暂不将图片送入模型。
 
 流式推送（在返回 res 之后异步推）：
 ```
@@ -265,14 +295,13 @@ res.payload: { ok: true }
 
 ## 四、文件上传支持（可选）
 
-OpenClaw UI 支持在 `chat.send` 里带 `attachments`（base64 图片）。如需支持报价单上传，需要另行实现 HTTP 端点（UI 本身通过独立 `POST /upload` 接口上传，再把 `file_path` 注入到 context）：
+OpenClaw UI 支持在 `chat.send` 里带 `attachments`（base64 图片）。**version3 控制台已实现**：聊天输入区有「上传 Excel/PDF」按钮，调用 `POST /api/quotation/upload`（支持 .xlsx/.xls/.xlsm/.pdf），上传后在发送下一条消息时自动带 `params.context: { file_path }`。
 
 ```
-POST /api/quotation/upload     （version3 已有）
+POST /api/quotation/upload     （version3 已有，支持 Excel + PDF）
   → { file_path, file_name }
 
-chat.send 时检查 params.message 是否含 [file_path=...] 标记，
-或前端在 params 里额外传 { context: { file_path } }（需少量 UI 改动）。
+控制台：上传后 state.chatUploadedFile 保存路径，sendChatMessage 时传入 chat.send 的 context/file_path。
 ```
 
 ---

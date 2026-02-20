@@ -74,7 +74,16 @@ class SessionStore:
         self._mem[session_id] = s
         return s
 
-    def save_turn(self, session_id: str, query: str, agent: str, answer: str, file_path: Optional[str] = None):
+    def save_turn(
+        self,
+        session_id: str,
+        query: str,
+        agent: str,
+        answer: str,
+        file_path: Optional[str] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
+    ):
         session = self.load(session_id)
         session.turns.append(Turn(query=query[:200], agent=agent or "", answer=(answer or "")[:self.ANSWER_TRIM], ts=time.time()))
         if len(session.turns) > self.MAX_TURNS:
@@ -84,7 +93,16 @@ class SessionStore:
         f = self._file(session_id)
         if f:
             try:
-                f.write_text(json.dumps({"session_id": session_id, "turns": [t.to_dict() for t in session.turns], "file_path": session.file_path}, ensure_ascii=False, indent=2), encoding="utf-8")
+                payload = {
+                    "session_id": session_id,
+                    "turns": [t.to_dict() for t in session.turns],
+                    "file_path": session.file_path,
+                }
+                if input_tokens is not None:
+                    payload["last_input_tokens"] = input_tokens
+                if output_tokens is not None:
+                    payload["last_output_tokens"] = output_tokens
+                f.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception as e:
                 logger.warning("Session 持久化失败: %s", e)
 
@@ -100,6 +118,38 @@ class SessionStore:
         if session.file_path:
             lines.append(f"\n[已上传文件]: {Path(session.file_path).name} → {session.file_path}")
         return "\n".join(lines)
+
+    def list_sessions(self) -> list:
+        """扫描持久化目录，返回 [(session_id, updated_at_ts, label, input_tokens, output_tokens)]。"""
+        out = []
+        if not self._persist_dir or not self._persist_dir.exists():
+            return out
+        for f in self._persist_dir.glob("*.json"):
+            try:
+                raw = json.loads(f.read_text(encoding="utf-8"))
+                sid = raw.get("session_id", "")
+                turns = raw.get("turns", [])
+                updated_at = turns[-1].get("ts", 0.0) if turns else 0.0
+                label = (turns[0].get("query", "")[:20]) if turns else ""
+                in_tok = raw.get("last_input_tokens")
+                out_tok = raw.get("last_output_tokens")
+                out.append((sid, updated_at, label, in_tok, out_tok))
+            except Exception as e:
+                logger.debug("list_sessions 跳过 %s: %s", f.name, e)
+        return out
+
+    def delete_session(self, session_id: str) -> bool:
+        """删除会话：从内存移除并删除持久化文件。"""
+        if session_id in self._mem:
+            del self._mem[session_id]
+        f = self._file(session_id)
+        if f and f.exists():
+            try:
+                f.unlink()
+                return True
+            except Exception as e:
+                logger.warning("delete_session 删文件失败 %s: %s", session_id, e)
+        return True
 
 
 _store: Optional[SessionStore] = None

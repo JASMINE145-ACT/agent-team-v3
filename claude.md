@@ -18,6 +18,7 @@ Agent Team version3/
 │   ├── ReAct范式对比.md           # version3 与 OpenCode 的 ReAct 范式对比
 │   ├── OpenClaw_agent借鉴.md     # OpenClaw 可借鉴点与落地；含「为何不加 tool_result_persist」与工具钩子接入点汇总
 │   ├── OpenManus_agent借鉴.md    # OpenManus 可借鉴点；含「工具变多时的处理」学习案例汇总（OpenCode/OpenManus/OpenClaw）
+│   ├── pi-mono_agent借鉴.md      # pi-mono 可借鉴点：事件驱动、transformContext/convertToLlm、steering/follow-up、工具校验、统一 LLM 抽象
 │   ├── 管材支持计划系统_可行性研究报告.md  # CAD图纸+报价自动生成管材支持计划与物流计划的可行性研究
 │   └── Prompt工程_OpenCode与OpenClaw对比.md  # Prompt 工程：OpenCode/OpenClaw 分层、按需、可配置做法与 version3 可借鉴点
 ├── backend/
@@ -31,10 +32,17 @@ Agent Team version3/
 │   │   └── quote_sheet/           # 询价填充流程（与 v2 同源副本）
 │   │       ├── flow_orchestrator.py
 │   │       └── shortage_report.py
-│   └── api/
+│   ├── api/
+│   └── ws_gateway/              # OpenClaw UI 适配：/ws、connect/sessions/chat 等
+│       ├── gateway.py
+│       ├── run_store.py
+│       ├── handlers/
+│       └── test_gateway_manual.py  # 手动测试脚本（需先 run_backend.py）
 ├── inventory_agent/               # 库存与万鼎工具（与 v2 同源副本）
 ├── quotation_tracker/            # 无货登记/列表/统计（与 v2 同源副本）
-├── src/                          # AOL/缓存等（与 v2 同源副本）
+├── src/                          # OpenClaw UI 共享 TS 源码（sessions/gateway/infra…）+ v2 同源 Python（cache/api/agents）
+├── control-ui/                   # OpenClaw UI 源码（Vite + Lit），构建产出在 dist/control-ui/
+├── dist/control-ui/              # 前端构建产物，由 app 挂载到 /
 ├── config.py                     # 仅做 quotation_tracker 配置的 re-export，供从根目录运行时 quotation_tracker 内 from config 可解析
 ├── models/                       # 仅做 quotation_tracker.models 的 re-export，供 from models.models import 可解析
 ├── run_backend.py
@@ -54,6 +62,12 @@ Agent Team version3/
 5. **澄清**：ask_clarification。目标：无法判断意图时向用户提问。
 
 详见 `backend/core/single_agent/agent.py`：5 个技能常量 + `_ALL_SKILLS` + `_PROMPT_OUTPUT_FORMAT`（110-173 行），`_build_system_prompt()` 组装（176-185 行）；按需注入时可改为 `_build_system_prompt(active_skills=None)` 并在 `execute_react` 里按 context 传参。
+
+**工具入参校验**（`backend/core/single_agent/tools.py`）：  
+- 校验辅助：`_VALID_CUSTOMER_LEVELS`（合法枚举 `{"A","B","C","D"}`）、`_QUOTE_TOOLS_WITH_FILE`（需校验 file_path 的报价单工具集）、`_tool_error(msg)`（统一错误 observation：`{"success": false, "error": "..."}` 便于模型理解）、`_validate_file_path(path, tool_name)`（空路径/文件不存在 → 返回错误字符串，否则 None）。  
+- `run_quotation_fill`：文件不存在时立即返回错误、不进入 flow_orchestrator；`customer_level` 不在 `{A,B,C,D}` 时返回清晰错误并列出合法值。  
+- 带 `file_path` 的 4 个报价单工具在执行前先经 `_validate_file_path`，失败则直接返回错误 observation。  
+- 效果：避免「文件不存在时整段并发匹配流程跑完才报错」；模型收到错误后可自行补 `file_path` 或提示用户上传。
 
 **ReAct 范式对比**：详见独立文档 `doc/ReAct范式对比.md`（version3 vs OpenCode）。下文为摘要。
 ## ReAct 范式：与 OpenCode 对比（摘要）
@@ -82,6 +96,7 @@ Agent Team version3/
 
 ## 运行
 
+- **一键启动**：双击 `启动 Jagent.bat` 或执行 `python start.py`，会在新窗口启动后端并自动打开浏览器。
 - **后端**：`cd "Agent Team version3"` → `python run_backend.py`（默认 8000）。
 - **CLI**：`python cli_agent.py`。
 - **环境变量**：与 version2 一致（OPENAI_API_KEY/ZHIPU_API_KEY、OPENAI_BASE_URL、LLM_MODEL、AOL_* 等），.env 可放在 version3 根或 quotation_tracker（version2 下）。
@@ -93,3 +108,6 @@ Agent Team version3/
 - `GET /health`：健康检查。
 - `POST /api/quotation/upload`：上传报价单，返回 file_path、file_name。
 - `POST /api/query` 或 `POST /api/master/query`：Body `{ "query": "用户输入", "session_id": "可选", "context": { "file_path": "可选" } }`，返回 `answer`、`trace`、`thinking` 等。
+- **WebSocket `/ws`（Gateway 适配层）**：供 OpenClaw 控制台 1:1 复刻使用。连接后收 `connect.challenge`，发 `connect` 得 `hello-ok`；支持 `sessions.list`、`chat.history`、`chat.send`、`chat.abort`、`agent.identity.get` 等。`sessions.list` 返回的 `updatedAt` 为毫秒时间戳（前端相对时间展示）；`inputTokens`/`outputTokens`/`totalTokens` 来自 SessionStore 持久化的 `last_input_tokens`、`last_output_tokens`（execute_react 流式/非流式调用后写入）。测试：先 `python run_backend.py`，再 `python backend/ws_gateway/test_gateway_manual.py`（需 `pip install websockets`）。
+
+- **Jagent 控制台（前端）**：已接好，界面展示品牌为 **Jagent**（标题、侧栏 LOGO 文案、助手名称）。`control-ui/` 为 OpenClaw UI 拷贝并改品牌展示，默认 WS 为 `ws://${host}/ws`；构建产出 `dist/control-ui/`，由 `app.py` 在存在时挂载到 `/`。运行 `python run_backend.py` 后访问 `http://localhost:8000/` 即可。若需重构建：`cd control-ui && npm run build`。**SPA 会话直链**：直接打开或刷新 `/chat?session=xxx`、`/sessions` 等前端路由时，后端对无对应静态文件的路径回退为返回 `index.html`，避免 404。**注意**：前端使用 Lit 装饰器，需 Vite 6 + `vite-ts-decorators`（`control-ui/tsconfig.json` 中 `experimentalDecorators: true`），否则构建后浏览器会报 "Unsupported decorator location: field" 导致页面空白。
