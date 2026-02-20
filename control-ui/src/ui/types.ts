@@ -318,6 +318,44 @@ export type PresenceEntry = {
   ts?: number | null;
 };
 
+/** 无货看板：统计 */
+export type OosStats = {
+  total_records: number;
+  out_of_stock_count: number;
+  notified_count: number;
+  today_count: number;
+  email_sent_product_count: number;
+};
+
+/** 无货看板：产品记录（按 product_key 聚合后的一条） */
+export type OosRecord = {
+  id?: number;
+  product_name?: string;
+  specification?: string;
+  unit?: string;
+  quantity?: number | string;
+  sheet_name?: string;
+  file_name?: string;
+  uploaded_at?: string | null;
+  product_key?: string;
+  count?: number;
+  email_status?: string;
+  email_sent_count?: number;
+};
+
+/** 无货看板：按文件汇总 */
+export type OosByFileRow = {
+  file_name?: string;
+  uploaded_at?: string | null;
+  total_records?: number;
+};
+
+/** 无货看板：按日统计 */
+export type OosByTimeRow = {
+  date?: string;
+  count?: number;
+};
+
 export type GatewaySessionsDefaults = {
   model: string | null;
   contextTokens: number | null;

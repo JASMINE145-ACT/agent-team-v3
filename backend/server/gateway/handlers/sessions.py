@@ -34,7 +34,11 @@ def handle_sessions_list(params: dict) -> dict:
 
 
 def handle_sessions_patch(params: dict) -> dict:
-    # label 可选写入；version3 SessionStore 无 label 字段，仅返回 ok
+    key = (params.get("key") or "").strip()
+    label = params.get("label")
+    if key and label is not None:
+        store = get_session_store()
+        store.set_label(key, str(label).strip()[:80])
     return {"ok": True}
 
 

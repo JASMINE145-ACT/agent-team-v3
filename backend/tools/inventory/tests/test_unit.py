@@ -278,7 +278,7 @@ class TestTableAgent:
         assert item.qty_warehouse == 20.0
         assert item.qty_available == 20.0
     
-    @patch('inventory_agent.agents.table_agent.AccurateOnlineAPIClient')
+    @patch('backend.tools.inventory.agents.table_agent.AccurateOnlineAPIClient')
     def test_call_list_api_empty_result(self, mock_client):
         """Test calling list.do API with empty result"""
         mock_instance = Mock()
@@ -289,7 +289,7 @@ class TestTableAgent:
         result = agent._call_list_api("nonexistent")
         assert result == []
     
-    @patch('inventory_agent.agents.table_agent.AccurateOnlineAPIClient')
+    @patch('backend.tools.inventory.agents.table_agent.AccurateOnlineAPIClient')
     def test_call_list_api_with_data(self, mock_client):
         """Test calling list.do API with data"""
         mock_instance = Mock()
@@ -306,7 +306,7 @@ class TestTableAgent:
         assert len(result) == 1
         assert result[0]["no"] == "001"
     
-    @patch('inventory_agent.agents.table_agent.AccurateOnlineAPIClient')
+    @patch('backend.tools.inventory.agents.table_agent.AccurateOnlineAPIClient')
     def test_call_list_api_error_response(self, mock_client):
         """Test calling list.do API with error response"""
         mock_instance = Mock()

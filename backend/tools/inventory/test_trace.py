@@ -6,7 +6,7 @@
 3. ✅ 能看到整个执行流程的时间轴
 """
 import json
-from services.agent_runner import run_inventory_agent
+from backend.tools.inventory.services.agent_runner import run_inventory_agent
 
 
 def test_trace_output():

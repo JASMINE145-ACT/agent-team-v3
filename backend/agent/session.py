@@ -93,10 +93,17 @@ class SessionStore:
         f = self._file(session_id)
         if f:
             try:
+                existing_label = None
+                if f.exists():
+                    try:
+                        existing_label = json.loads(f.read_text(encoding="utf-8")).get("label")
+                    except Exception:
+                        pass
                 payload = {
                     "session_id": session_id,
                     "turns": [t.to_dict() for t in session.turns],
                     "file_path": session.file_path,
+                    "label": existing_label,
                 }
                 if input_tokens is not None:
                     payload["last_input_tokens"] = input_tokens
@@ -137,6 +144,18 @@ class SessionStore:
             except Exception as e:
                 logger.debug("list_sessions 跳过 %s: %s", f.name, e)
         return out
+
+    def set_label(self, session_id: str, label: str) -> None:
+        """更新会话标题（LLM 生成或用户编辑）。"""
+        f = self._file(session_id)
+        if not f or not f.exists():
+            return
+        try:
+            raw = json.loads(f.read_text(encoding="utf-8"))
+            raw["label"] = (label or "").strip()[:80]
+            f.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.warning("set_label 失败 %s: %s", session_id, e)
 
     def delete_session(self, session_id: str) -> bool:
         """删除会话：从内存移除并删除持久化文件。"""

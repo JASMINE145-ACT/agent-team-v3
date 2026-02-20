@@ -30,14 +30,14 @@ def _check_env():
 
 
 def main():
-    # 独立运行：以 Agent Team 为根（inventory_agent 的父目录）；src 已复制到项目根
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    # 以项目根为 PYTHONPATH（backend.tools.inventory 的上级 3 层：inventory -> tools -> backend -> 根）
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     if root not in sys.path:
         sys.path.insert(0, root)
 
     _check_env()
 
-    from inventory_agent import InventoryAgent, USE_REACT_AGENT
+    from backend.tools.inventory import InventoryAgent, USE_REACT_AGENT
 
     agent = InventoryAgent()
     mode = "ReAct（思考→工具→观察）" if USE_REACT_AGENT else "Pipeline（Plan→Table→SQL）"

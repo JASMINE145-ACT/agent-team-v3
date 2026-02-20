@@ -9,7 +9,7 @@
 import pytest
 import os
 
-from inventory_agent import InventoryAgent
+from backend.tools.inventory import InventoryAgent
 from backend.tools.inventory.agents.table_agent import InventoryTableAgent
 
 # PRD §6 测试数据

@@ -18,7 +18,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from inventory_agent import InventoryAgent, Item, QueryIntent
+    from backend.tools.inventory import InventoryAgent
+from backend.tools.inventory.models import Item, QueryIntent
     from backend.tools.inventory.models import QueryIntent
     
     print("=" * 60)

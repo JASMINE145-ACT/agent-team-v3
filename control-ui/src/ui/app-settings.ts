@@ -18,6 +18,7 @@ import { loadDevices } from "./controllers/devices.ts";
 import { loadExecApprovals } from "./controllers/exec-approvals.ts";
 import { loadLogs } from "./controllers/logs.ts";
 import { loadNodes } from "./controllers/nodes.ts";
+import { loadOos } from "./controllers/oos.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadSkills } from "./controllers/skills.ts";
@@ -186,7 +187,7 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadChannelsTab(host);
   }
   if (host.tab === "instances") {
-    await loadPresence(host as unknown as OpenClawApp);
+    await loadOos(host as unknown as OpenClawApp);
   }
   if (host.tab === "sessions") {
     await loadSessions(host as unknown as OpenClawApp);

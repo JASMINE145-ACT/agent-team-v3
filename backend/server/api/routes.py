@@ -144,3 +144,68 @@ async def query_stream(
         await task
 
     return StreamingResponse(_gen(), media_type="text/event-stream")
+
+
+# ---------- 无货看板 API（供 control-ui 使用） ----------
+
+
+def _get_oos_data_service():
+    from backend.tools.oos.services.data_service import DataService
+    return DataService()
+
+
+@router.get("/api/oos/stats")
+async def oos_stats() -> Dict[str, Any]:
+    """无货统计：总记录数、无货产品数、今日新增、被报≥2次、已发邮件数。"""
+    try:
+        ds = _get_oos_data_service()
+        stats = ds.get_statistics()
+        return {"success": True, "data": stats}
+    except Exception as e:
+        logger.exception("oos/stats 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/oos/list")
+async def oos_list(limit: int = 100) -> Dict[str, Any]:
+    """无货产品列表（按 product_key 聚合，每产品取被报无货次数最大的一条）。"""
+    try:
+        ds = _get_oos_data_service()
+        records = ds.get_all_records(limit=limit * 5)
+        by_key: Dict[str, dict] = {}
+        for r in records:
+            key = r.get("product_key") or ""
+            if not key:
+                continue
+            cnt = r.get("count") or 1
+            if key not in by_key or (by_key[key].get("count") or 0) < cnt:
+                by_key[key] = r
+        product_list = list(by_key.values())[:limit]
+        return {"success": True, "data": product_list}
+    except Exception as e:
+        logger.exception("oos/list 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/oos/by-file")
+async def oos_by_file(limit: int = 50) -> Dict[str, Any]:
+    """无货按文件汇总。"""
+    try:
+        ds = _get_oos_data_service()
+        files = ds.get_files_summary()
+        return {"success": True, "data": (files or [])[:limit]}
+    except Exception as e:
+        logger.exception("oos/by-file 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/oos/by-time")
+async def oos_by_time(days: int = 30) -> Dict[str, Any]:
+    """无货按时间（按日）统计，最近 N 天。"""
+    try:
+        ds = _get_oos_data_service()
+        rows = ds.get_records_grouped_by_date(last_n_days=max(1, min(365, days)))
+        return {"success": True, "data": rows or []}
+    except Exception as e:
+        logger.exception("oos/by-time 失败")
+        raise HTTPException(status_code=500, detail=str(e))

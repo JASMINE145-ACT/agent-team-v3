@@ -125,6 +125,12 @@ export type AppViewState = {
   presenceEntries: PresenceEntry[];
   presenceError: string | null;
   presenceStatus: string | null;
+  oosLoading: boolean;
+  oosError: string | null;
+  oosStats: import("./types.js").OosStats | null;
+  oosList: import("./types.js").OosRecord[];
+  oosByFile: import("./types.js").OosByFileRow[];
+  oosByTime: import("./types.js").OosByTimeRow[];
   agentsLoading: boolean;
   agentsList: AgentsListResult | null;
   agentsError: string | null;

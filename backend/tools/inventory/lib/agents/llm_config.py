@@ -18,12 +18,12 @@ except ImportError:
     ChatOpenAI = None
     ChatAnthropic = None
 
-# 适配 Agent Team version2：src/agents -> src -> 项目根
+# 项目根：lib/agents -> lib -> inventory -> tools -> backend -> 根
 _current_file = Path(__file__).resolve()
-_project_root = _current_file.parent.parent.parent  # src/agents -> src -> Agent Team version2
+_project_root = _current_file.parent.parent.parent.parent.parent
 
 load_dotenv(_project_root / ".env")
-load_dotenv(_project_root / "quotation_tracker" / ".env")
+load_dotenv(_project_root / "backend" / "tools" / "oos" / ".env")
 
 # 自动禁用 LangSmith
 if not os.getenv("LANGCHAIN_TRACING_V2"):

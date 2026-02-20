@@ -8,7 +8,7 @@ import pytest
 import os
 import time
 
-from inventory_agent import InventoryAgent
+from backend.tools.inventory import InventoryAgent
 
 
 @pytest.mark.integration

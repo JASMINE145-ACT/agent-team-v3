@@ -3,7 +3,9 @@
 import asyncio
 import logging
 import uuid
-from typing import Any, Callable
+from typing import Any, Callable, Optional
+
+from openai import OpenAI
 
 from backend.agent.session import get_session_store
 from backend.agent.agent import SingleAgent
@@ -13,6 +15,44 @@ from backend.server.gateway.run_store import register as run_register, unregiste
 logger = logging.getLogger(__name__)
 
 _single_agent: SingleAgent | None = None
+
+
+def _generate_title_via_llm(user_query: str, assistant_answer: str) -> Optional[str]:
+    """同步调用 LLM 生成 5–10 字会话标题。失败返回 None。"""
+    q = (user_query or "").strip()[:300]
+    a = (assistant_answer or "").strip()[:400]
+    if not q and not a:
+        return None
+    try:
+        client = OpenAI(
+            api_key=Config.OPENAI_API_KEY,
+            base_url=Config.OPENAI_BASE_URL,
+        )
+        prompt = (
+            "你是一个助手。根据下面的一轮对话，生成一个简短的会话标题（5-10个字），只输出标题，不要引号或解释。\n"
+            f"用户：{q}\n助手：{a}"
+        )
+        model = getattr(Config, "SESSION_TITLE_MODEL", None) or getattr(Config, "LLM_MODEL", "glm-4-flash")
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=30,
+            temperature=0.3,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        return text[:80] if text else None
+    except Exception as e:
+        logger.debug("生成会话标题失败: %s", e)
+        return None
+
+
+async def _generate_and_set_session_title(session_id: str, user_query: str, assistant_answer: str) -> None:
+    """后台任务：LLM 生成标题并写回 session。"""
+    store = get_session_store()
+    title = await asyncio.to_thread(_generate_title_via_llm, user_query, assistant_answer)
+    if title:
+        store.set_label(session_id, title)
+        logger.info("会话标题已更新: %s -> %s", session_id[:8], title)
 
 
 def _get_agent() -> SingleAgent:
@@ -143,6 +183,13 @@ async def handle_chat_send(
         "event": "chat",
         "payload": {"runId": run_id, "sessionKey": session_key, "state": state},
     })
+
+    # 首轮对话结束后，用 LLM 生成会话标题并写回（不阻塞响应）
+    if state == "final" and accumulated[0]:
+        store = get_session_store()
+        session = store.load(session_key)
+        if len(session.turns) == 1:
+            asyncio.create_task(_generate_and_set_session_title(session_key, user_input, accumulated[0]))
 
 
 def handle_chat_abort(params: dict) -> dict:
