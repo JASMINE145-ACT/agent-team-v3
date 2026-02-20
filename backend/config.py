@@ -1,0 +1,57 @@
+"""
+Backend 配置（version3 单 Agent）
+"""
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+base_dir = Path(__file__).parent.parent
+for env_path in [base_dir / ".env", base_dir / "quotation_tracker" / ".env"]:
+    if env_path.exists():
+        load_dotenv(env_path)
+        print(f"[Config] Loaded from: {env_path}")
+        break
+
+class Config:
+    _OPENAI_BASE_URL_RAW = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_BASE_URL_ZHIPU") or "https://open.bigmodel.cn/api/paas/v4"
+    OPENAI_BASE_URL = (_OPENAI_BASE_URL_RAW or "").rstrip("/") + "/"
+    _IS_ZHIPU = "bigmodel.cn" in (OPENAI_BASE_URL or "")
+    OPENAI_API_KEY = (
+        os.getenv("ZHIPU_API_KEY") or os.getenv("OPENAI_API_KEY")
+        if _IS_ZHIPU
+        else (os.getenv("OPENAI_API_KEY") or os.getenv("ZHIPU_API_KEY"))
+    )
+    LLM_MODEL = os.getenv("LLM_MODEL", "glm-4-flash")
+    LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "5000"))
+    AOL_ACCESS_TOKEN = os.getenv("AOL_ACCESS_TOKEN")
+    AOL_SIGNATURE_SECRET = os.getenv("AOL_SIGNATURE_SECRET")
+    AOL_DATABASE_ID = os.getenv("AOL_DATABASE_ID")
+    API_HOST = os.getenv("API_HOST", "0.0.0.0")
+    API_PORT = int(os.getenv("API_PORT", "8000"))
+    DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+    UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(base_dir / "uploads")))
+    MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))
+    _WANDING_FILENAME = "Copy of 万鼎国际集团最新价格库更新20250814.xlsx"
+    _v3_data = base_dir / "data" / _WANDING_FILENAME
+    _v2_data = base_dir.parent / "Agent Team version2" / "data" / _WANDING_FILENAME
+    PRICE_LIBRARY_PATH = Path(
+        os.getenv("PRICE_LIBRARY_PATH")
+        or (str(_v3_data) if _v3_data.exists() else str(_v2_data) if _v2_data.exists() else str(_v3_data))
+    )
+    SESSION_STORE_DIR = Path(os.getenv("SESSION_STORE_DIR", str(base_dir / "data" / "sessions")))
+
+    @classmethod
+    def validate(cls):
+        errors = []
+        if not cls.OPENAI_API_KEY:
+            errors.append("缺少 OPENAI_API_KEY 或 ZHIPU_API_KEY")
+        if not cls.AOL_ACCESS_TOKEN:
+            errors.append("缺少 AOL_ACCESS_TOKEN（库存查询需要）")
+        if errors:
+            print("[Config] Warnings:", *[f"  - {e}" for e in errors])
+        return len(errors) == 0
+
+if __name__ != "__main__":
+    Config.validate()
+
+__all__ = ["Config"]

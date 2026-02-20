@@ -1,0 +1,487 @@
+# OpenClaw 前端一比一复刻方案
+
+目标：把学习案例里的 OpenClaw 控制 UI（`学习案例/openclaw/ui`）原样跑起来，对接到 Agent Team version3 后端，尽量不改 UI 代码。
+
+---
+
+## 一、整体架构
+
+```
+浏览器
+  └─ OpenClaw UI (Lit + Vite, 静态)
+       │  WebSocket ws://localhost:8000/ws
+       ▼
+  Gateway 适配层（FastAPI WebSocket）
+       │  Python 调用
+       ├─ SingleAgent.execute_react(...)
+       ├─ SessionStore.load / save_turn / build_injection
+       └─ 文件上传目录（uploads/）
+```
+
+**核心原则**：UI 代码零改动，仅改连接 URL 配置（一个 `.env` 或 `vite.config.ts` 里的变量）。
+
+---
+
+## 二、WebSocket 帧协议（完整版）
+
+### 2.1 三种帧类型
+
+```typescript
+// 客户端 → 服务端
+{ type: "req", id: string, method: string, params?: unknown }
+
+// 服务端 → 客户端（对应 req）
+{ type: "res", id: string, ok: boolean, payload?: unknown,
+  error?: { code: string, message: string, details?: unknown } }
+
+// 服务端 → 客户端（主动推）
+{ type: "event", event: string, payload?: unknown,
+  seq?: number,                        // 顺序号，客户端用于检测丢帧
+  stateVersion?: { presence: number, health: number } }
+```
+
+### 2.2 握手流程（必须实现）
+
+```
+服务端建立连接后立即推送：
+  {"type":"event","event":"connect.challenge","payload":{"nonce":"<随机字符串>"}}
+
+客户端发送 req：
+  {
+    "type": "req", "id": "<uuid>", "method": "connect",
+    "params": {
+      "minProtocol": 3, "maxProtocol": 3,
+      "client": { "id": "openclaw-control-ui", "version": "dev",
+                  "platform": "web", "mode": "webchat" },
+      "role": "operator",
+      "scopes": ["operator.admin", "operator.approvals", "operator.pairing"],
+      "caps": [],
+      "userAgent": "<navigator.userAgent>",
+      "locale": "<navigator.language>"
+    }
+  }
+  注意：本地无需校验 device 签名，忽略 params.device 即可。
+
+服务端返回（特殊 res，payload 嵌在顶层）：
+  {
+    "type": "res", "id": "<同 req.id>", "ok": true,
+    "payload": {
+      "type": "hello-ok",
+      "protocol": 3,
+      "features": { "methods": [...已实现的方法名...] },
+      "snapshot": {
+        "sessionDefaults": {
+          "defaultAgentId": "version3",
+          "mainKey": "main",
+          "mainSessionKey": "main"
+        }
+      }
+    }
+  }
+```
+
+### 2.3 重连机制
+
+UI 内置指数退避重连：初始 800ms，每次 ×1.7，上限 15s。服务端无需做任何处理，重连后 UI 自动重发 connect req。
+
+---
+
+## 三、方法实现清单
+
+### 3.1 必须实现（最小可运行集）
+
+#### `connect`
+见 2.2。本地忽略 device auth，只需返回合法的 hello-ok。
+
+---
+
+#### `agent.identity.get`
+```
+req.params: { agentId: string }
+res.payload: {
+  agentId: string,
+  name: string,        // 显示名，如 "Version3 助手"
+  avatar: string,      // emoji 或 URL，如 "🤖"
+  emoji?: string
+}
+```
+直接硬编码固定值返回。
+
+---
+
+#### `sessions.list`
+```
+req.params: {
+  includeGlobal: boolean,
+  includeUnknown: boolean,
+  activeMinutes?: number,
+  limit?: number
+}
+res.payload: {
+  ts: number,                   // Date.now() / 1000
+  path: string,                 // sessions 目录路径
+  count: number,
+  defaults: { model: null, contextTokens: null },
+  sessions: GatewaySessionRow[]
+}
+
+GatewaySessionRow: {
+  key: string,                  // session_id
+  kind: "direct",
+  label?: string,               // 可用 turns[0].query 前 20 字
+  updatedAt: number | null,     // 最后一条 turn 的 ts
+  thinkingLevel?: string,       // 可不传
+  inputTokens?: number,
+  outputTokens?: number
+}
+```
+实现：扫描 `SessionStore._persist_dir/*.json`，读取每份文件的 key + turns[-1].ts + turns[0].query。
+
+---
+
+#### `chat.history`
+```
+req.params: { sessionKey: string, limit: number }
+res.payload: {
+  messages: OpenClawMessage[],
+  thinkingLevel?: string
+}
+
+OpenClawMessage: {
+  role: "user" | "assistant",
+  content: [{ type: "text", text: string }],
+  timestamp?: number          // unix ms
+}
+```
+实现：`SessionStore.load(sessionKey)` → 把每条 `Turn` 展开成两条消息：
+```python
+for turn in session.turns[-limit//2:]:
+    messages.append({ "role": "user",
+                       "content": [{"type":"text","text": turn.query}],
+                       "timestamp": int(turn.ts * 1000) })
+    messages.append({ "role": "assistant",
+                       "content": [{"type":"text","text": turn.answer}],
+                       "timestamp": int(turn.ts * 1000) })
+```
+
+---
+
+#### `chat.send`（核心，含流式）
+```
+req.params: {
+  sessionKey: string,
+  message: string,              // 用户输入文本
+  deliver: boolean,
+  idempotencyKey: string,       // UUID，可用于去重
+  attachments?: [{
+    type: "image",
+    mimeType: string,
+    content: string             // base64
+  }]
+}
+res.payload: { ok: true, runId: string }    // 立即返回 runId
+```
+
+流式推送（在返回 res 之后异步推）：
+```
+// 每个 on_token 回调时推送：
+{ "type": "event", "event": "chat",
+  "payload": {
+    "runId": "<uuid>",
+    "sessionKey": "<key>",
+    "state": "delta",
+    "message": {
+      "role": "assistant",
+      "content": [{ "type": "text", "text": "<累积文本>" }]
+    }
+  }
+}
+
+// execute_react 完成（loop_end 事件）时推送：
+{ "type": "event", "event": "chat",
+  "payload": { "runId": "...", "sessionKey": "...", "state": "final" } }
+
+// 异常时：
+{ "type": "event", "event": "chat",
+  "payload": { "runId": "...", "sessionKey": "...",
+               "state": "error", "errorMessage": "..." } }
+
+// chat.abort 取消时：
+{ "type": "event", "event": "chat",
+  "payload": { "runId": "...", "sessionKey": "...", "state": "aborted" } }
+```
+
+**重要**：`content` 中的 `text` 建议用**累积文本**而不是增量片段，UI 渲染更稳定（取决于 UI 的处理逻辑，如发现重叠可改为增量）。
+
+---
+
+#### `chat.abort`
+```
+req.params: { sessionKey: string, runId?: string }
+res.payload: { ok: true }
+```
+实现：在 Gateway 层用 `asyncio.Event` 或 `dict` 记录「当前 runId 对应的 cancel flag」；`on_token` 回调里检查 flag，若置位则抛 `CancelledError` 跳出循环，之后推 `state: "aborted"`。
+
+---
+
+### 3.2 中优先级（会话管理完整）
+
+#### `sessions.patch`
+```
+req.params: { key: string, label?: string | null, thinkingLevel?: string | null }
+res.payload: { ok: true }
+```
+仅 label 有意义时写入 session JSON；其他字段直接 ok。
+
+#### `sessions.delete`
+```
+req.params: { key: string, deleteTranscript: boolean }
+res.payload: { ok: true }
+```
+实现：删内存 `_mem[key]` + 删对应 JSON 文件。
+
+---
+
+### 3.3 必须 stub（UI 启动时会调用，不实现会报错）
+
+以下方法返回固定空结构即可，不影响聊天核心功能：
+
+| 方法 | 最小合法响应 |
+|------|------------|
+| `config.get` | `{ path: "", exists: false, raw: "", valid: true, config: {}, issues: [] }` |
+| `skills.status` | `{ workspaceDir: "", managedSkillsDir: "", skills: [] }` |
+| `cron.status` | `{ enabled: false, jobs: 0 }` |
+| `node.list` | `{ nodes: {} }` |
+| `models.list` | `{ models: [] }` |
+| `health` | `{ ok: true }` |
+| `status` | `{ ok: true }` |
+| `last-heartbeat` | `{}` |
+| `system-presence` | `[]` |
+| `agents.list` | `{ defaultId: "version3", mainKey: "main", scope: "global", agents: [{ id: "version3", name: "Version3 助手" }] }` |
+| `device.pair.list` | `{ pending: [], paired: [] }` |
+| `exec.approvals.get` | `{ path: "", exists: false, hash: "", file: {} }` |
+
+---
+
+## 四、文件上传支持（可选）
+
+OpenClaw UI 支持在 `chat.send` 里带 `attachments`（base64 图片）。如需支持报价单上传，需要另行实现 HTTP 端点（UI 本身通过独立 `POST /upload` 接口上传，再把 `file_path` 注入到 context）：
+
+```
+POST /api/quotation/upload     （version3 已有）
+  → { file_path, file_name }
+
+chat.send 时检查 params.message 是否含 [file_path=...] 标记，
+或前端在 params 里额外传 { context: { file_path } }（需少量 UI 改动）。
+```
+
+---
+
+## 五、目录结构与构建
+
+### 5.1 目录布局
+
+```
+Agent Team version3/
+├── backend/
+│   └── ws_gateway/
+│       ├── __init__.py
+│       ├── gateway.py          # FastAPI WebSocket 路由，帧分发
+│       ├── handlers/
+│       │   ├── connect.py      # 握手
+│       │   ├── chat.py         # chat.send / chat.history / chat.abort
+│       │   ├── sessions.py     # sessions.list / patch / delete
+│       │   ├── agent.py        # agent.identity.get / agents.list
+│       │   └── stubs.py        # 所有 stub 方法统一返回
+│       └── run_store.py        # 进行中的 runId → cancel_event 映射
+├── control-ui/                 # OpenClaw UI 源码（完整拷贝）
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.ts          # 修改 WS_URL 指向 ws://localhost:8000/ws
+└── run_backend.py              # 启动时挂载 /ws 路由 + 静态 control-ui/dist
+```
+
+### 5.2 UI 构建步骤
+
+```bash
+# 1. 拷贝 UI
+cp -r "学习案例/openclaw/ui/" "Agent Team version3/control-ui/"
+
+# 2. 修改连接 URL（control-ui/src 里找 GatewayBrowserClientOptions 的 url 配置）
+#    通常在 src/config.ts 或 src/gateway-client.ts，改为：
+#    url: "ws://localhost:8000/ws"
+#    或通过 VITE_GATEWAY_URL 环境变量注入
+
+# 3. 构建
+cd "Agent Team version3/control-ui"
+npm install
+npm run build          # 产出 dist/
+
+# 4. 在 run_backend.py 里挂载静态目录
+app.mount("/", StaticFiles(directory="control-ui/dist", html=True), name="ui")
+```
+
+### 5.3 run_backend.py 改动
+
+```python
+from fastapi.staticfiles import StaticFiles
+from backend.ws_gateway.gateway import router as ws_router
+
+app.include_router(ws_router)       # 添加 /ws WebSocket 路由
+app.mount("/", StaticFiles(directory="control-ui/dist", html=True), name="ui")
+```
+
+---
+
+## 六、Gateway 核心实现骨架
+
+### 6.1 gateway.py
+
+```python
+import asyncio, json, uuid
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+router = APIRouter()
+
+@router.websocket("/ws")
+async def ws_endpoint(ws: WebSocket):
+    await ws.accept()
+    # 1. 握手：推送 challenge
+    await ws.send_text(json.dumps({
+        "type": "event", "event": "connect.challenge",
+        "payload": {"nonce": str(uuid.uuid4())}
+    }))
+    try:
+        while True:
+            raw = await ws.receive_text()
+            frame = json.loads(raw)
+            if frame.get("type") == "req":
+                asyncio.create_task(handle_req(ws, frame))
+    except WebSocketDisconnect:
+        pass
+```
+
+### 6.2 chat.py（chat.send 流式核心）
+
+```python
+import asyncio, uuid, json
+from backend.core.single_agent.agent import SingleAgent
+from backend.ws_gateway.run_store import RunStore   # { run_id: cancel_event }
+
+async def handle_chat_send(ws, params, agent: SingleAgent, run_store: RunStore):
+    session_key = params["sessionKey"]
+    message = params["message"]
+    run_id = str(uuid.uuid4())
+    cancel_event = asyncio.Event()
+    run_store.register(run_id, cancel_event)
+
+    accumulated = ""
+
+    def on_token(token: str):
+        nonlocal accumulated
+        if cancel_event.is_set():
+            raise asyncio.CancelledError()
+        accumulated += token
+        asyncio.get_event_loop().call_soon_threadsafe(
+            lambda: asyncio.ensure_future(ws.send_text(json.dumps({
+                "type": "event", "event": "chat",
+                "payload": {
+                    "runId": run_id, "sessionKey": session_key,
+                    "state": "delta",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": accumulated}]
+                    }
+                }
+            })))
+        )
+
+    try:
+        result = await agent.execute_react(
+            user_input=message,
+            session_id=session_key,
+            on_token=on_token,
+        )
+        state = "aborted" if cancel_event.is_set() else "final"
+    except asyncio.CancelledError:
+        state = "aborted"
+    except Exception as e:
+        await ws.send_text(json.dumps({
+            "type": "event", "event": "chat",
+            "payload": {"runId": run_id, "sessionKey": session_key,
+                        "state": "error", "errorMessage": str(e)}
+        }))
+        return
+    finally:
+        run_store.unregister(run_id)
+
+    await ws.send_text(json.dumps({
+        "type": "event", "event": "chat",
+        "payload": {"runId": run_id, "sessionKey": session_key, "state": state}
+    }))
+
+    return {"ok": True, "runId": run_id}
+```
+
+> **注意**：`on_token` 在 `asyncio.to_thread`（流式 LLM 调用）的子线程里触发，不能直接 `await`，需用 `call_soon_threadsafe` 转回事件循环。
+
+### 6.3 stubs.py
+
+```python
+STUB_RESPONSES = {
+    "config.get":       { "path": "", "exists": False, "valid": True, "config": {}, "issues": [] },
+    "skills.status":    { "workspaceDir": "", "managedSkillsDir": "", "skills": [] },
+    "cron.status":      { "enabled": False, "jobs": 0 },
+    "node.list":        { "nodes": {} },
+    "models.list":      { "models": [] },
+    "health":           { "ok": True },
+    "status":           { "ok": True },
+    "last-heartbeat":   {},
+    "system-presence":  [],
+    "device.pair.list": { "pending": [], "paired": [] },
+    "exec.approvals.get": { "path": "", "exists": False, "hash": "", "file": {} },
+    "agents.list": {
+        "defaultId": "version3", "mainKey": "main", "scope": "global",
+        "agents": [{"id": "version3", "name": "Version3 助手",
+                    "identity": {"emoji": "🤖", "name": "Version3 助手"}}]
+    },
+}
+
+def handle_stub(method: str):
+    return STUB_RESPONSES.get(method, {})
+```
+
+---
+
+## 七、实施顺序
+
+| 步 | 内容 | 预计时间 |
+|----|------|---------|
+| 1 | 搭 WebSocket 路由骨架 + 握手（connect.challenge → hello-ok） | 1h |
+| 2 | 实现所有 stub（返回固定空结构），能让 UI 启动不报错 | 30min |
+| 3 | `agent.identity.get` + `agents.list`（硬编码）| 15min |
+| 4 | `sessions.list` + `chat.history`（读 SessionStore）| 45min |
+| 5 | `chat.send`（核心：on_token 流式推送 delta/final）| 2h |
+| 6 | 验证：UI 打开 → 选会话 → 发消息 → 流式显示 | 30min |
+| 7 | `chat.abort` + `sessions.delete` + `sessions.patch` | 1h |
+| 8 | 拷贝 UI + 配置 URL + npm build + 挂载静态 | 1h |
+
+总计：约 **7 小时**可完成核心可用版本。
+
+---
+
+## 八、已知坑与注意事项
+
+1. **on_token 跨线程**：LLM 流式调用在 `asyncio.to_thread` 里跑，`on_token` 触发时不在事件循环线程，必须用 `loop.call_soon_threadsafe` 或 `asyncio.run_coroutine_threadsafe`，不能直接 `await ws.send_text`。
+
+2. **seq 顺序号**：UI 代码有 gap 检测，如果推送的 event 带了 `seq` 但顺序乱了会触发 `onGap`。简单做法：所有 event **不带 seq 字段**，UI 只在有 seq 时才检测 gap。
+
+3. **hello-ok 格式**：UI 期望 `res.payload.type === "hello-ok"`，且 `features.methods` 里有已实现的方法名，建议把全部已实现方法都列进去，避免 UI 因不认识方法而禁用某些功能。
+
+4. **sessions.list 的 kind 字段**：UI 可能按 `kind: "direct"` 过滤，确保返回正确值。`kind: "global"` 的 session 通常是 main session，会被特殊处理。
+
+5. **chat.history 的 limit**：UI 首次拉历史时 limit 通常较大（50-200），但 version3 的 `SessionStore.MAX_TURNS=8`，直接返回全部 turns 即可，不需要实现分页。
+
+6. **UI 配置 URL**：在 `control-ui/src` 里搜 `GatewayBrowserClient` 的初始化或 `ws://` / `wss://`，改为指向本地。大概率在一个 config/env 文件里，不需要改业务逻辑代码。
+
+7. **CORS / 同源**：如果前端和 WS 在同一端口（FastAPI 同时提供静态 + WS），天然同源无问题。如果开发期间前端用 `vite dev`（5173 端口）而后端在 8000，需在 FastAPI 加 `CORSMiddleware` 并允许 WS upgrade。

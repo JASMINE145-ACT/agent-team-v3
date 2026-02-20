@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+ENV/
+
+# 环境变量与密钥
+.env
+.env.local
+.env.*.local
+*.pem
+
+# 数据与上传
+data/sessions/*.json
+uploads/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 测试与覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# 日志
+*.log
+logs/
+
+# Node（若后续加入 control-ui）
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 其他
+.DS_Store
+Thumbs.db

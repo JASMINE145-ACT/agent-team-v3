@@ -1,0 +1,114 @@
+{
+  "manifest_path": "D:\\Projects\\agent-jk\\opencode_agent\\external_services\\data_platform\\src\\inventory_agent\\quotation_tracker\\evaluation\\golden_samples.json",
+  "dataset_root": "D:\\Projects\\agent-jk\\Agent Team\\报价单",
+  "generated_at": "2026-02-13T14:20:13",
+  "files": [
+    {
+      "file": "TOPSTAR MR HU2.7报价单.xlsx",
+      "exists": true,
+      "sheets": [
+        {
+          "sheet_name": "询价单",
+          "success": true,
+          "error": null,
+          "debug_per_sheet": [
+            {
+              "sheet": "询价单",
+              "total_rows": 43,
+              "data_section_rows": 25,
+              "has_wu_huo": true,
+              "llm_count": 1,
+              "error": null
+            }
+          ],
+          "ground_truth_count": 1,
+          "predicted_count": 1,
+          "matched_count": 1,
+          "recall": 1.0,
+          "missing_items": []
+        }
+      ]
+    },
+    {
+      "file": "凌威2.2报价单(1).xlsx",
+      "exists": true,
+      "sheets": [
+        {
+          "sheet_name": "询价单",
+          "success": true,
+          "error": null,
+          "debug_per_sheet": [
+            {
+              "sheet": "询价单",
+              "total_rows": 43,
+              "data_section_rows": 36,
+              "has_wu_huo": true,
+              "llm_count": 3,
+              "error": null
+            }
+          ],
+          "ground_truth_count": 3,
+          "predicted_count": 3,
+          "matched_count": 3,
+          "recall": 1.0,
+          "missing_items": []
+        },
+        {
+          "sheet_name": "Sheet1",
+          "success": true,
+          "error": null,
+          "debug_per_sheet": [
+            {
+              "sheet": "Sheet1",
+              "total_rows": 17,
+              "data_section_rows": 5,
+              "has_wu_huo": true,
+              "llm_count": 0,
+              "error": null
+            }
+          ],
+          "ground_truth_count": 0,
+          "predicted_count": 0,
+          "matched_count": 0,
+          "recall": 1.0,
+          "missing_items": []
+        }
+      ]
+    },
+    {
+      "file": "凌威报价单2.13(1).xlsx",
+      "exists": true,
+      "sheets": [
+        {
+          "sheet_name": "询价单",
+          "success": true,
+          "error": null,
+          "debug_per_sheet": [
+            {
+              "sheet": "询价单",
+              "total_rows": 32,
+              "data_section_rows": 23,
+              "has_wu_huo": true,
+              "llm_count": 2,
+              "error": null
+            }
+          ],
+          "ground_truth_count": 2,
+          "predicted_count": 2,
+          "matched_count": 2,
+          "recall": 1.0,
+          "missing_items": []
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "files_total": 3,
+    "sheets_total": 4,
+    "ground_truth_total": 6,
+    "matched_total": 6,
+    "predicted_total": 6,
+    "sheet_failures": 0,
+    "recall": 1.0
+  }
+}

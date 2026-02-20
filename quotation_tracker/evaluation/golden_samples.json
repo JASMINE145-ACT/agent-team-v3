@@ -1,0 +1,86 @@
+{
+  "dataset_root": "D:/Projects/agent-jk/Agent Team/报价单",
+  "notes": [
+    "这是第一版小型黄金样本集，先用于建立可度量 baseline。",
+    "row_index 使用 Excel 1-based 行号。",
+    "如果你修订了人工标注，请保持字段完整：product_name/specification/unit/quantity。"
+  ],
+  "samples": [
+    {
+      "file": "TOPSTAR MR HU2.7报价单.xlsx",
+      "sheets": [
+        {
+          "sheet_name": "询价单",
+          "ground_truth": [
+            {
+              "row_index": 15,
+              "product_name": "皮垫",
+              "specification": "4弗150",
+              "unit": "个",
+              "quantity": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "file": "凌威2.2报价单(1).xlsx",
+      "sheets": [
+        {
+          "sheet_name": "询价单",
+          "ground_truth": [
+            {
+              "row_index": 3,
+              "product_name": "法兰",
+              "specification": "DN125",
+              "unit": "",
+              "quantity": 3
+            },
+            {
+              "row_index": 16,
+              "product_name": "大小头",
+              "specification": "DN125*100",
+              "unit": "个",
+              "quantity": 3
+            },
+            {
+              "row_index": 18,
+              "product_name": "盲板",
+              "specification": "DN100",
+              "unit": "个",
+              "quantity": 1
+            }
+          ]
+        },
+        {
+          "sheet_name": "Sheet1",
+          "ground_truth": []
+        }
+      ]
+    },
+    {
+      "file": "凌威报价单2.13(1).xlsx",
+      "sheets": [
+        {
+          "sheet_name": "询价单",
+          "ground_truth": [
+            {
+              "row_index": 6,
+              "product_name": "三角阀",
+              "specification": null,
+              "unit": "个",
+              "quantity": 750
+            },
+            {
+              "row_index": 8,
+              "product_name": "进水软管",
+              "specification": "50cm",
+              "unit": "根",
+              "quantity": 150
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

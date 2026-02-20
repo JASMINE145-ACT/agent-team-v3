@@ -1,0 +1,22 @@
+# version3 单 Agent 后端（独立运行，不依赖 version2）
+
+# Web
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.9.0
+
+# LLM
+openai>=1.50.0
+
+# 环境与工具
+python-dotenv>=1.0.0
+
+# 报价单 / 无货 / 询价填充（来自 quotation_tracker、quote_tools）
+openpyxl>=3.1.0
+pandas>=2.0.0
+sqlalchemy>=2.0.0
+chardet>=5.0.0
+
+# 可选：企业微信回调（若需可取消注释）
+# pycryptodome>=3.19.0
+# requests>=2.28.0

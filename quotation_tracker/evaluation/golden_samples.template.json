@@ -1,0 +1,305 @@
+{
+  "dataset_root": "D:\\Projects\\agent-jk\\Agent Team\\报价单",
+  "generated_at": "2026-02-13T14:19:13",
+  "instructions": [
+    "Fill each sheet.ground_truth manually.",
+    "Each ground_truth item must include row_index, product_name, specification, unit, quantity.",
+    "Use row_index as 1-based Excel row number."
+  ],
+  "samples": [
+    {
+      "file": "TOPSTAR MR HU2.7报价单.xlsx",
+      "sheets": [
+        {
+          "sheet_name": "询价单",
+          "candidate_rows": [
+            {
+              "row_index": 15,
+              "row_preview": "10 | 皮垫 | 4弗150 | 个 | 10 | 无货"
+            }
+          ],
+          "ground_truth": []
+        }
+      ]
+    },
+    {
+      "file": "凌威2.2报价单(1).xlsx",
+      "sheets": [
+        {
+          "sheet_name": "询价单",
+          "candidate_rows": [
+            {
+              "row_index": 3,
+              "row_preview": "1 | 法兰 | DN125 | 3 | 无货"
+            },
+            {
+              "row_index": 16,
+              "row_preview": "5 | 大小头 | DN125*100 | 个 | 3 | 无货"
+            },
+            {
+              "row_index": 18,
+              "row_preview": "7 | 盲板 | DN100 | 个 | 1 | 无货"
+            }
+          ],
+          "ground_truth": []
+        },
+        {
+          "sheet_name": "Sheet1",
+          "candidate_rows": [
+            {
+              "row_index": 3,
+              "row_preview": "无货"
+            }
+          ],
+          "ground_truth": []
+        }
+      ]
+    },
+    {
+      "file": "凌威报价单2.13(1).xlsx",
+      "sheets": [
+        {
+          "sheet_name": "询价单",
+          "candidate_rows": [
+            {
+              "row_index": 6,
+              "row_preview": "4 | 三角阀 | 个 | 750 | 无货"
+            },
+            {
+              "row_index": 8,
+              "row_preview": "6 | 进水软管 | 50cm | 根 | 150 | 无货"
+            }
+          ],
+          "ground_truth": []
+        }
+      ]
+    },
+    {
+      "file": "报价单2.2.2026(1).xlsx...xlsx",
+      "sheets": [
+        {
+          "sheet_name": "询价单",
+          "candidate_rows": [
+            {
+              "row_index": 10,
+              "row_preview": "8 | 镀锌钢管 | DN150 | 米 | 126 | 无货"
+            },
+            {
+              "row_index": 11,
+              "row_preview": "9 | 防锈漆 | 25L | 桶 | 2 | 无货"
+            },
+            {
+              "row_index": 13,
+              "row_preview": "11 | 镀锌焊接三通 | DN100*100，1.0MPa(10bar) | 个 | 8 | 无货"
+            },
+            {
+              "row_index": 14,
+              "row_preview": "12 | 镀锌活接 | DN50， 1.0MPa(10bar) | 个 | 11 | 无货"
+            },
+            {
+              "row_index": 21,
+              "row_preview": "19 | 镀锌焊接弯头 | DN65，SCH40 | 个 | 12 | 无货"
+            },
+            {
+              "row_index": 23,
+              "row_preview": "21 | 焊接变径 | DN80*65，SCH40 | 个 | 1 | 无货"
+            },
+            {
+              "row_index": 30,
+              "row_preview": "28 | 成品弯头 | DN20 | 个 | 100 | 无货"
+            },
+            {
+              "row_index": 31,
+              "row_preview": "29 | 弯管器 | DN20 | 个 | 3 | 无货"
+            },
+            {
+              "row_index": 32,
+              "row_preview": "30 | 吊筋（3m/根，每根配4个螺丝） | φ8 | 米 | 510 | 无货"
+            },
+            {
+              "row_index": 33,
+              "row_preview": "31 | 吊筋（3m/根，每根配4个螺丝） | φ10 | 米 | 510 | 无货"
+            },
+            {
+              "row_index": 34,
+              "row_preview": "32 | 吊筋（3m/根，每根配4个螺丝） | φ12 | 米 | 510 | 无货"
+            },
+            {
+              "row_index": 35,
+              "row_preview": "33 | 吊筋（3m/根，每根配4个螺丝） | φ16 | 米 | 210 | 无货"
+            },
+            {
+              "row_index": 36,
+              "row_preview": "34 | 预埋钢块 | 150mm*150mm*8mm | 块 | 500 | 无货"
+            },
+            {
+              "row_index": 37,
+              "row_preview": "35 | 镀锌槽钢 | 50*31*2.5*6000mm | 米 | 150 | 无货"
+            },
+            {
+              "row_index": 40,
+              "row_preview": "38 | C型钢 | 热镀锌的 41×41，壁厚2mm | 米 | 1500 | 无货"
+            },
+            {
+              "row_index": 41,
+              "row_preview": "39 | 手动打压泵 | 1.6MPa | 个 | 1 | 无货"
+            },
+            {
+              "row_index": 42,
+              "row_preview": "40 | 电动打压泵 | 2.5MPa | 个 | 1 | 无货"
+            },
+            {
+              "row_index": 43,
+              "row_preview": "41 | 无边镀锌丝堵 | 15mm | 个 | 80 | 无货"
+            },
+            {
+              "row_index": 44,
+              "row_preview": "42 | 镀锌螺母 | M8，英标（小号的） | 个 | 500 | 无货"
+            },
+            {
+              "row_index": 48,
+              "row_preview": "46 | 脚手架 | 带万向轮，刹车 | 套 | 12 | 无货 | 0.0 | stock"
+            },
+            {
+              "row_index": 50,
+              "row_preview": "48 | PVC伸缩节 | De110 | 个 | 15 | 无货 | 0.0 | stock"
+            },
+            {
+              "row_index": 51,
+              "row_preview": "49 | PVC伸缩节 | De50 | 个 | 15 | 无货 | 0.0 | stock"
+            },
+            {
+              "row_index": 52,
+              "row_preview": "50 | PVC伸缩节 | De40 | 个 | 15 | 无货 | 0.0 | stock"
+            },
+            {
+              "row_index": 57,
+              "row_preview": "55 | 灯笼吊卡 | De32 | 个 | 80 | 无货"
+            },
+            {
+              "row_index": 58,
+              "row_preview": "56 | 灯笼吊卡 | De25 | 个 | 24 | 无货"
+            },
+            {
+              "row_index": 59,
+              "row_preview": "57 | 灯笼吊卡 | De15 | 个 | 100 | 无货"
+            },
+            {
+              "row_index": 60,
+              "row_preview": "58 | 通丝丝杆 | Φ8，3米/根 | 根 | 50 | 无货"
+            },
+            {
+              "row_index": 61,
+              "row_preview": "59 | 膨胀螺栓 | M14，长度10公分， | 套 | 1000 | 无货"
+            },
+            {
+              "row_index": 62,
+              "row_preview": "60 | 冲孔机模具 | Φ6，8，10，12-20 | 套 | 2 | 无货"
+            },
+            {
+              "row_index": 63,
+              "row_preview": "61 | 大锤 | 8公斤 | 个 | 1 | 无货"
+            },
+            {
+              "row_index": 64,
+              "row_preview": "62 | 镀锌万用钢板 | 150*150mm,厚8mm | 块 | 300 | 无货"
+            },
+            {
+              "row_index": 65,
+              "row_preview": "63 | 镀锌钢管 | DN20，P=1.6Mpa | 米 | 12 | 无货"
+            },
+            {
+              "row_index": 66,
+              "row_preview": "64 | 头灯 | 个 | 20 | 无货"
+            },
+            {
+              "row_index": 67,
+              "row_preview": "65 | 切割片 | Φ107mm | 片 | 400 | 无货"
+            },
+            {
+              "row_index": 68,
+              "row_preview": "66 | U型龙骨卡 | Φ25mm | 个 | 100 | 无货"
+            },
+            {
+              "row_index": 69,
+              "row_preview": "67 | U型龙骨卡 | Φ20mm | 个 | 300 | 无货"
+            },
+            {
+              "row_index": 70,
+              "row_preview": "68 | 不锈钢Ω卡 | Φ20mm | 个 | 400 | 无货"
+            },
+            {
+              "row_index": 71,
+              "row_preview": "69 | 记号笔 | 黑色，红色，蓝色均分 | 支 | 150 | 无货"
+            },
+            {
+              "row_index": 72,
+              "row_preview": "70 | 发泡胶 | 个 | 10 | 无货"
+            },
+            {
+              "row_index": 73,
+              "row_preview": "71 | 切割机 | 380V，切割片400mm规格 | 台 | 2 | 无货"
+            },
+            {
+              "row_index": 74,
+              "row_preview": "72 | 切割片 | 400mm | 片 | 40 | 无货"
+            },
+            {
+              "row_index": 75,
+              "row_preview": "73 | 墨斗 | 个 | 7 | 无货"
+            },
+            {
+              "row_index": 76,
+              "row_preview": "74 | 墨水 | 瓶子 | 10 | 无货"
+            },
+            {
+              "row_index": 77,
+              "row_preview": "75 | 大锤 | 16磅 | 个 | 1 | 无货"
+            },
+            {
+              "row_index": 78,
+              "row_preview": "76 | 人字梯 | 单侧4m高，非折叠型 | 把 | 4 | 无货"
+            },
+            {
+              "row_index": 79,
+              "row_preview": "77 | 电锤 | 把 | 6 | 无货"
+            },
+            {
+              "row_index": 80,
+              "row_preview": "78 | 角磨机 | 把 | 5 | 无货"
+            },
+            {
+              "row_index": 81,
+              "row_preview": "79 | 云石机 | 把 | 2 | 无货"
+            },
+            {
+              "row_index": 82,
+              "row_preview": "80 | 脚手架 | 套 | 12 | 无货"
+            },
+            {
+              "row_index": 83,
+              "row_preview": "81 | 充电扳手 | 把 | 4 | 无货"
+            },
+            {
+              "row_index": 84,
+              "row_preview": "82 | 充电钻 | 把 | 2 | 无货"
+            },
+            {
+              "row_index": 85,
+              "row_preview": "83 | 铁皮（制作工具箱） | 0.8mm厚 | ㎡ | 25 | 无货"
+            },
+            {
+              "row_index": 86,
+              "row_preview": "84 | 黑角铁 | 25*25*4mm | m | 40 | 无货"
+            },
+            {
+              "row_index": 87,
+              "row_preview": "85 | 槽钢 | 5 | 150米 | 防锈银粉 | 无货"
+            }
+          ],
+          "ground_truth": []
+        }
+      ]
+    }
+  ]
+}
