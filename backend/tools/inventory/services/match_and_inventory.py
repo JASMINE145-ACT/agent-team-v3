@@ -47,10 +47,12 @@ def match_wanding_price_candidates(
     customer_level: str = "B",
     price_library_path: Optional[str] = None,
     max_candidates: int = 20,
+    max_score_tiers: Optional[int] = None,
 ) -> List[dict[str, Any]]:
     """
     DataBase-style 模糊匹配，返回候选列表（含 score）。
     返回 [{code, matched_name, unit_price, score}, ...]。
+    若传 max_score_tiers（如 2），则返回前 N 个分数档的全部候选；否则取前 max_candidates 条。
     """
     from backend.tools.inventory.services.wanding_fuzzy_matcher import match_fuzzy_candidates
 
@@ -59,6 +61,7 @@ def match_wanding_price_candidates(
         customer_level=customer_level,
         price_library_path=price_library_path,
         max_candidates=max_candidates,
+        max_score_tiers=max_score_tiers,
     )
 
 

@@ -273,9 +273,12 @@ def match_fuzzy_candidates(
     customer_level: str = "B",
     price_library_path: Optional[str | Path] = None,
     max_candidates: int = 20,
+    max_score_tiers: Optional[int] = None,
 ) -> List[dict[str, Any]]:
     """
     返回候选列表，每项含 code, matched_name, unit_price, score。
+    - max_score_tiers 为 None：按分数排序取前 max_candidates 条。
+    - max_score_tiers 为 N（如 2）：取分数前 N 档，每档全部返回（如 top1 有 3 条、top2 有 2 条则共 5 条）。
     """
     keywords = (keywords or "").strip()
     if not keywords:
@@ -294,7 +297,18 @@ def match_fuzzy_candidates(
     if df.empty:
         return []
 
-    results = search_fuzzy(df, keywords)[:max_candidates]
+    results = search_fuzzy(df, keywords)
+    if max_score_tiers is not None and max_score_tiers > 0:
+        # 取前 max_score_tiers 个分数档，每档全部返回
+        tiers: List[float] = []
+        for _rd, score in results:
+            if score not in tiers:
+                tiers.append(score)
+                if len(tiers) >= max_score_tiers:
+                    break
+        results = [(rd, s) for rd, s in results if s in tiers]
+    else:
+        results = results[:max_candidates]
     out = []
     for row_dict, score in results:
         out.append({

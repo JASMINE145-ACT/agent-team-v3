@@ -63,13 +63,13 @@ class InventoryConfig:
     # 重试次数
     API_RETRY_COUNT = 1
 
-    # --- 万鼎价格库（询价填充时匹配 product_name + spec → code + unit_price）---
-    _WANDING_FILENAME = "Copy of 万鼎国际集团最新价格库更新20250814.xlsx"
-    _v3_data = _AGENT_TEAM_DIR / "data" / _WANDING_FILENAME
-    _v2_data = _AGENT_TEAM_DIR.parent / "Agent Team version2" / "data" / _WANDING_FILENAME
+    # --- 万鼎价格库（仅用 version3/data，不依赖 version2）---
+    _v3_data_dir = _AGENT_TEAM_DIR / "data"
+    _v3_standard = _v3_data_dir / "万鼎价格库_管材与国标管件_标准格式.xlsx"
+    _v3_old = _v3_data_dir / "Copy of 万鼎国际集团最新价格库更新20250814.xlsx"
     PRICE_LIBRARY_PATH: str = os.environ.get(
         "PRICE_LIBRARY_PATH",
-        str(_v3_data) if _v3_data.exists() else str(_v2_data) if _v2_data.exists() else str(_v3_data),
+        str(_v3_standard) if _v3_standard.exists() else str(_v3_old) if _v3_old.exists() else str(_v3_standard),
     )
     # 万鼎匹配：CONTAINS + 向量 fallback（数据源仅万鼎，不用 item-list-slim）
     ENABLE_WANDING_VECTOR: bool = os.environ.get("ENABLE_WANDING_VECTOR", "1").strip().lower() in ("1", "true", "yes")
