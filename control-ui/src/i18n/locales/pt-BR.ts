@@ -24,7 +24,7 @@ export const pt_BR: TranslationMap = {
   tabs: {
     agents: "Agentes",
     overview: "Visão Geral",
-    channels: "Canais",
+    channels: "Conhecimento de Negócios",
     instances: "Sem Estoque",
     sessions: "Sessões",
     usage: "Uso",
@@ -39,7 +39,7 @@ export const pt_BR: TranslationMap = {
   subtitles: {
     agents: "Gerenciar espaços de trabalho, ferramentas e identidades de agentes.",
     overview: "Status do gateway, pontos de entrada e leitura rápida de saúde.",
-    channels: "Gerenciar canais e configurações.",
+    channels: "Editar wanding_business_knowledge.md para seleção e correspondência.",
     instances: "Painel de produtos sem estoque, sem precisar perguntar ao agente.",
     sessions: "Inspecionar sessões ativas e ajustar padrões por sessão.",
     usage: "Monitorar uso e custos da API.",

@@ -28,7 +28,26 @@ SYNONYM_GROUPS = [
     {"穿线管", "电线管"},
     {"半弯", "弯头"},
     {"承插", "承插式"},
+    {"堵头", "管帽"},
 ]
+
+# 询价关键词中的英文/印尼语 → 中文品名，用于筛选时命中库内品名（筛选逻辑完善）
+QUERY_TERM_TO_CHINESE = [
+    ("4 cabang", "管四通圆接线盒"),
+    ("conduit", "电线管"), ("counduit", "电线管"), ("pipa", "管"),
+    ("socket", "管直通"), ("套筒", "管直通"),
+    ("klem", "管夹"),
+    ("cabang", "四通"), ("tdust", "四通"),
+    ("热熔器", "焊接机"), ("热熔机", "焊接机"), ("熔接器", "焊接机"),
+]
+
+
+def _normalize_keyword_terms(keywords: str) -> str:
+    """将询价中的英文/印尼语替换为中文品名词，便于筛选命中库内品名。"""
+    s = (keywords or "").strip()
+    for eng, ch in QUERY_TERM_TO_CHINESE:
+        s = re.sub(r"\b" + re.escape(eng) + r"\b", ch, s, flags=re.I)
+    return s.strip()
 
 MM_TO_INCH = {
     "16": '1/2"', "20": '3/4"', "25": '1"', "32": '1-1/4"', "40": '1-1/2"',
@@ -91,7 +110,12 @@ def _split_tokens(text: str) -> List[str]:
         tokens.append(m.group())
     text = re.sub(r"\d+(?:\.\d+)?", " ", text)
     for m in re.finditer(r"[\u4e00-\u9fff]+", text):
-        tokens.append(m.group())
+        tok = m.group()
+        tokens.append(tok)
+        # 长中文整段（如「度弯头带检查口」）在品名中常被括号/符号隔开，拆成单字以便「度」→「°」、「弯头」「带」「检查口」等能分别命中
+        if len(tok) > 2:
+            for c in tok:
+                tokens.append(c)
     return list(dict.fromkeys(tokens))
 
 
@@ -132,11 +156,12 @@ def search_fuzzy(
         query_material = material_tokens[0] if material_tokens else None
 
         for row in df.itertuples(index=False):
+            row_id = getattr(row, "Material", getattr(row, "Describrition", str(row)))
             raw_text = str(getattr(row, field, ""))
             normalized_text = _normalize(raw_text)
-            row_id = getattr(row, "Material", getattr(row, "Describrition", str(row)))
 
-            if material_tokens and not all(m.lower() in normalized_text for m in material_tokens):
+            material_ok = not material_tokens or all(m.lower() in normalized_text for m in material_tokens)
+            if not material_ok:
                 continue
 
             product_tokens = _split_tokens(raw_text)
@@ -153,6 +178,9 @@ def search_fuzzy(
             text_hits = 0
             for token in query_text_tokens:
                 if token.lower() in normalized_text:
+                    text_hits += 1
+                elif token == "度" and "°" in normalized_text:
+                    # 询价「90度」与品名「90°」等价
                     text_hits += 1
             if query_text_tokens and text_hits == 0:
                 continue
@@ -175,12 +203,32 @@ def search_fuzzy(
     return out
 
 
+def _load_one_sheet(ws, price_col: int) -> list[dict]:
+    """从已打开的 worksheet 读出一张表的行（Material, Describrition, unit_price）。"""
+    rows = []
+    for row in ws.iter_rows(max_col=16):
+        cells = [getattr(c, "value", None) for c in row]
+        if len(cells) > 2 and cells[2]:
+            up = 0.0
+            if len(cells) > price_col and cells[price_col] is not None:
+                try:
+                    up = float(cells[price_col])
+                except (ValueError, TypeError):
+                    pass
+            rows.append({
+                "Material": str(cells[1] or "").strip(),
+                "Describrition": str(cells[2] or "").strip(),
+                "unit_price": up,
+            })
+    return rows
+
+
 def load_wanding_df(
     path: str | Path,
     sheet_name: str = "管材",
     customer_level: str = "B",
 ) -> pd.DataFrame:
-    """Load 万鼎 price library as DataFrame."""
+    """Load 万鼎 price library as DataFrame. 默认加载「管材」+「国标管件」两个 sheet 并合并，以便匹配带检查口弯头、管帽等国标管件。"""
     try:
         import openpyxl
     except ImportError:
@@ -202,24 +250,15 @@ def load_wanding_df(
 
     try:
         wb = openpyxl.load_workbook(p, read_only=True, data_only=True)
-        ws = wb[sheet_name] if sheet_name in wb.sheetnames else (wb.active or wb[wb.sheetnames[0]])
-        rows = []
-        for row in ws.iter_rows(max_col=16):
-            cells = [getattr(c, "value", None) for c in row]
-            if len(cells) > 2 and cells[2]:
-                up = 0.0
-                if len(cells) > price_col and cells[price_col] is not None:
-                    try:
-                        up = float(cells[price_col])
-                    except (ValueError, TypeError):
-                        pass
-                rows.append({
-                    "Material": str(cells[1] or "").strip(),
-                    "Describrition": str(cells[2] or "").strip(),
-                    "unit_price": up,
-                })
+        all_rows: list[dict] = []
+        # 先加载管材
+        ws_guan = wb["管材"] if "管材" in wb.sheetnames else (wb.active or wb[wb.sheetnames[0]])
+        all_rows.extend(_load_one_sheet(ws_guan, price_col))
+        # 若存在国标管件 sheet，一并加载（8020020643 带检查口弯头、8020020205 管帽等在此表）
+        if "国标管件" in wb.sheetnames:
+            all_rows.extend(_load_one_sheet(wb["国标管件"], price_col))
         wb.close()
-        return pd.DataFrame(rows)
+        return pd.DataFrame(all_rows)
     except Exception as e:
         logger.warning("加载万鼎价格库失败: %s", e)
         return pd.DataFrame()
@@ -238,7 +277,7 @@ def match_fuzzy(
     DataBase-style 模糊匹配，返回最佳单结果。
     返回 {code, matched_name, unit_price} 或 None。
     """
-    keywords = (keywords or "").strip()
+    keywords = _normalize_keyword_terms((keywords or "").strip())
     if not keywords:
         return None
 
@@ -280,7 +319,7 @@ def match_fuzzy_candidates(
     - max_score_tiers 为 None：按分数排序取前 max_candidates 条。
     - max_score_tiers 为 N（如 2）：取分数前 N 档，每档全部返回（如 top1 有 3 条、top2 有 2 条则共 5 条）。
     """
-    keywords = (keywords or "").strip()
+    keywords = _normalize_keyword_terms((keywords or "").strip())
     if not keywords:
         return []
 

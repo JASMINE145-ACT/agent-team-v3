@@ -24,7 +24,7 @@ export const zh_TW: TranslationMap = {
   tabs: {
     agents: "代理",
     overview: "概覽",
-    channels: "頻道",
+    channels: "業務知識",
     instances: "無貨看板",
     sessions: "會話",
     usage: "使用情況",
@@ -39,7 +39,7 @@ export const zh_TW: TranslationMap = {
   subtitles: {
     agents: "管理代理工作區、工具和身份。",
     overview: "網關狀態、入口點和快速健康讀取。",
-    channels: "管理頻道和設置。",
+    channels: "編輯萬鼎業務知識 MD，供選型與匹配使用。",
     instances: "無貨產品總覽與列表，無需向 Agent 提問即可查看。",
     sessions: "檢查活動會話並調整每個會話的默認設置。",
     usage: "監控 API 使用情況和成本。",

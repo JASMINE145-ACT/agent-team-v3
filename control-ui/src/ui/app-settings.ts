@@ -10,6 +10,7 @@ import type { OpenClawApp } from "./app.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
 import { loadAgents } from "./controllers/agents.ts";
+import { loadBusinessKnowledge } from "./controllers/business-knowledge.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { loadConfig, loadConfigSchema } from "./controllers/config.ts";
 import { loadCronJobs, loadCronStatus } from "./controllers/cron.ts";
@@ -184,7 +185,7 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadOverview(host);
   }
   if (host.tab === "channels") {
-    await loadChannelsTab(host);
+    await loadBusinessKnowledge(host as unknown as { basePath: string; bkContent: string; bkLoading: boolean; bkError: string | null; bkSaving: boolean; bkLastSuccess: number | null });
   }
   if (host.tab === "instances") {
     await loadOos(host as unknown as OpenClawApp);

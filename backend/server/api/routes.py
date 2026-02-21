@@ -13,6 +13,7 @@ from typing import Any, Dict
 
 from backend.config import Config
 from backend.agent import SingleAgent
+from backend.agent.remember import try_handle_remember
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -63,6 +64,11 @@ async def query(
     query_text = (body.get("query") or body.get("message") or "").strip()
     if not query_text:
         return {"status": "error", "answer": "", "message": "请提供 query 或 message。"}
+    # 业务知识「记住」命令：你要记住 / 请记住 等 → 追加到 MD，直接返回
+    remember_reply = try_handle_remember(query_text)
+    if remember_reply is not None:
+        session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
+        return {"status": "success", "answer": remember_reply, "thinking": None, "trace": [], "session_id": session_id}
     session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
     context = body.get("context") or {}
     try:
@@ -101,6 +107,13 @@ async def query_stream(
         async def _empty():
             yield f'data: {json.dumps({"type": "error", "message": "请提供 query"}, ensure_ascii=False)}\n\n'
         return StreamingResponse(_empty(), media_type="text/event-stream")
+
+    # 业务知识「记住」命令 → 直接返回一条 done，不跑 ReAct
+    remember_reply = try_handle_remember(query_text)
+    if remember_reply is not None:
+        async def _remember_stream():
+            yield f'data: {json.dumps({"type": "done", "answer": remember_reply, "thinking": None, "session_id": (body.get("session_id") or "").strip() or str(uuid.uuid4())}, ensure_ascii=False)}\n\n'
+        return StreamingResponse(_remember_stream(), media_type="text/event-stream")
 
     session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
     context = body.get("context") or {}
@@ -208,4 +221,51 @@ async def oos_by_time(days: int = 30) -> Dict[str, Any]:
         return {"success": True, "data": rows or []}
     except Exception as e:
         logger.exception("oos/by-time 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------- 业务知识（万鼎 wanding_business_knowledge.md，Control UI 可编辑）----------
+
+def _get_business_knowledge_path() -> Path:
+    from backend.tools.inventory.config import config
+    path = getattr(config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
+    if not path:
+        raise ValueError("WANDING_BUSINESS_KNOWLEDGE_PATH 未配置")
+    p = Path(path)
+    return p
+
+
+@router.get("/api/business-knowledge")
+async def get_business_knowledge() -> Dict[str, Any]:
+    """读取 wanding_business_knowledge.md 内容，供 Control UI 业务知识页展示与编辑。"""
+    try:
+        p = _get_business_knowledge_path()
+        if not p.exists():
+            from backend.tools.inventory.services.llm_selector import _BUSINESS_KNOWLEDGE
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(_BUSINESS_KNOWLEDGE.strip(), encoding="utf-8")
+        content = p.read_text(encoding="utf-8")
+        return {"success": True, "data": {"content": content}}
+    except Exception as e:
+        logger.exception("business-knowledge GET 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/api/business-knowledge")
+async def put_business_knowledge(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """保存 wanding_business_knowledge.md 内容；保存后会使 LLM selector 缓存失效。"""
+    try:
+        content = body.get("content")
+        if content is None:
+            raise HTTPException(status_code=400, detail="请提供 content 字段")
+        p = _get_business_knowledge_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content if isinstance(content, str) else str(content), encoding="utf-8")
+        from backend.tools.inventory.services.llm_selector import invalidate_business_knowledge_cache
+        invalidate_business_knowledge_cache()
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("business-knowledge PUT 失败")
         raise HTTPException(status_code=500, detail=str(e))

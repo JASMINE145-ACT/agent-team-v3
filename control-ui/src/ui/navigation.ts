@@ -132,7 +132,7 @@ export function iconForTab(tab: Tab): IconName {
     case "overview":
       return "barChart";
     case "channels":
-      return "link";
+      return "fileText";
     case "instances":
       return "radio";
     case "sessions":

@@ -24,7 +24,7 @@ export const en: TranslationMap = {
   tabs: {
     agents: "Agents",
     overview: "Overview",
-    channels: "Channels",
+    channels: "Business Knowledge",
     instances: "Out of Stock",
     sessions: "Sessions",
     usage: "Usage",
@@ -39,7 +39,7 @@ export const en: TranslationMap = {
   subtitles: {
     agents: "Manage agent workspaces, tools, and identities.",
     overview: "Gateway status, entry points, and a fast health read.",
-    channels: "Manage channels and settings.",
+    channels: "Edit wanding_business_knowledge.md for selection and matching.",
     instances: "OOS dashboard: stats and product list without asking the agent.",
     sessions: "Inspect active sessions and adjust per-session defaults.",
     usage: "Monitor API usage and costs.",

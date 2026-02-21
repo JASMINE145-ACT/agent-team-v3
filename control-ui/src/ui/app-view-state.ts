@@ -114,6 +114,11 @@ export type AppViewState = {
   channelsSnapshot: ChannelsStatusSnapshot | null;
   channelsError: string | null;
   channelsLastSuccess: number | null;
+  bkContent: string;
+  bkLoading: boolean;
+  bkError: string | null;
+  bkSaving: boolean;
+  bkLastSuccess: number | null;
   whatsappLoginMessage: string | null;
   whatsappLoginQrDataUrl: string | null;
   whatsappLoginConnected: boolean | null;

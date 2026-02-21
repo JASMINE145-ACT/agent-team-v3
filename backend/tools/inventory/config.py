@@ -80,6 +80,12 @@ class InventoryConfig:
     WANDING_VECTOR_COARSE_MAX: int = int(os.environ.get("WANDING_VECTOR_COARSE_MAX", "20"))
     # 询价填充是否启用 Resolver（item-list-slim）fallback，默认 0（仅用万鼎）
     USE_RESOLVER_FALLBACK: bool = os.environ.get("USE_RESOLVER_FALLBACK", "0").strip().lower() in ("1", "true", "yes")
+    # 万鼎选型/LLM selector 业务知识：单独 MD 文件路径，支持用户「你要记住」等命令追加
+    # 默认 backend/tools/data/wanding_business_knowledge.md；可用 WANDING_BUSINESS_KNOWLEDGE_PATH 覆盖
+    WANDING_BUSINESS_KNOWLEDGE_PATH: str = os.environ.get(
+        "WANDING_BUSINESS_KNOWLEDGE_PATH",
+        str(_v3_data_dir / "wanding_business_knowledge.md"),
+    )
 
     # --- Resolver（本地 phrase → Item Code，仅 search_inventory 用；询价填充可禁用）---
     # 默认读包内 item-list-slim.xlsx；可通过 INVENTORY_ITEM_LIST_SLIM_PATH 覆盖。

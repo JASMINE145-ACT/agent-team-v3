@@ -219,6 +219,19 @@ def main():
             print(C.DIM + "  已清除 file_path。" + C.RESET)
             continue
 
+        # 业务知识「记住」命令：你要记住 / 请记住 等 → 追加到 MD，直接回复
+        try:
+            from backend.agent.remember import try_handle_remember
+            remember_reply = try_handle_remember(user_input)
+        except Exception:
+            remember_reply = None
+        if remember_reply is not None:
+            _header("记住", "─")
+            _section("ANSWER", C.GREEN)
+            _indent(remember_reply)
+            print()
+            continue
+
         context = {}
         if file_path:
             context["file_path"] = file_path

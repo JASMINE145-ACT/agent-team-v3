@@ -203,6 +203,13 @@ export class OpenClawApp extends LitElement {
   @state() channelsSnapshot: ChannelsStatusSnapshot | null = null;
   @state() channelsError: string | null = null;
   @state() channelsLastSuccess: number | null = null;
+
+  /** 业务知识页（原 Channels 位）：wanding_business_knowledge.md 内容与加载/保存状态 */
+  @state() bkContent = "";
+  @state() bkLoading = false;
+  @state() bkError: string | null = null;
+  @state() bkSaving = false;
+  @state() bkLastSuccess: number | null = null;
   @state() whatsappLoginMessage: string | null = null;
   @state() whatsappLoginQrDataUrl: string | null = null;
   @state() whatsappLoginConnected: boolean | null = null;

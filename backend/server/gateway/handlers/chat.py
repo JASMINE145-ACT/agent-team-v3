@@ -9,6 +9,7 @@ from openai import OpenAI
 
 from backend.agent.session import get_session_store
 from backend.agent.agent import SingleAgent
+from backend.agent.remember import try_handle_remember
 from backend.config import Config
 from backend.server.gateway.run_store import register as run_register, unregister as run_unregister, cancel as run_cancel
 
@@ -115,6 +116,27 @@ async def handle_chat_send(
         n = len(attachments)
         suffix = f"\n[用户附带了 {n} 张图片，当前版本暂不解析图片内容]"
         user_input = (user_input + suffix) if user_input else suffix.strip()
+
+    # 业务知识「记住」命令 → 直接写入 MD 并回复，不跑 ReAct
+    remember_reply = try_handle_remember(user_input)
+    if remember_reply is not None:
+        await send_res({"ok": True, "runId": run_id})
+        store = get_session_store()
+        try:
+            store.save_turn(session_key, user_input, "single", remember_reply, file_path=context.get("file_path"))
+        except Exception as e:
+            logger.debug("记住命令 save_turn 失败: %s", e)
+        await send_event({
+            "type": "event",
+            "event": "chat",
+            "payload": {
+                "runId": run_id,
+                "sessionKey": session_key,
+                "state": "final",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": remember_reply}]},
+            },
+        })
+        return
 
     cancel_ev = run_register(run_id)
     accumulated: list[str] = [""]

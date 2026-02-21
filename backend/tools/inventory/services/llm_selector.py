@@ -13,16 +13,21 @@ from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# 业务知识缓存：同一路径且 mtime 未变时直接返回，避免重复读盘（用户「记住」追加后 mtime 变化会触发重读）
+_business_knowledge_cache: dict = {}  # {"path": str, "mtime": float | None, "content": str}
+
 _BUSINESS_KNOWLEDGE = """
 【业务知识】
 1. 三角阀 ≠ 角阀：询价「三角阀」而候选只有「角阀」时，应判定无匹配（输出 0）。
 2. 软管：管材库无软管类产品，询价含「软管」时应返回无匹配。
 3. 规格精确匹配优先：dn25 对 dn25，不应选 dn20。
-4. PPR 优先于 PVC（同规格下）。
-5. 长度 vs 管径：「50cm」表示长度（软管），不应与 dn50（管径）混淆。
-6. 等径三通 > 异径三通（除非询价明确指定异径）。
-7. 联塑品牌优先（同等条件下）。
-8. 【规格转换规则（主径×副径 → 英寸）】
+4. PPR 优先于 PVC（同规格下）；但**排水场景**（如止水节、排水配件、dn110 等大口径、或关键词未提 PPR）应优先 **PVC-U排水配件**，不选 PPR 给水/印尼系列。
+5. 「直接」「直通」：口语「50直接」「110直接」通常指**排水**用直通(管箍)PVC-U排水配件，优先于 PPR 直通/印尼管件。
+6. 长度 vs 管径：「50cm」表示长度（软管），不应与 dn50（管径）混淆。
+7. 等径三通 > 异径三通（除非询价明确指定异径）。
+8. 联塑品牌优先（同等条件下）。
+9. 90°弯头 + 规格（如 110）：优先 **90°直角弯头/90°弯头 PVC-U排水配件** 白色 dn110，不选 90°弯头 PPR 配件/PE 配件。
+10. 【规格转换规则（主径×副径 → 英寸）】
    - 询价中「A*B」「A×B」「AB」（如 32*20、32×20、3220）表示：主径 A（mm）、副径 B（mm）。内丝/外丝三通、弯头等多用此写法。
    - 副径 B（mm）与英寸对应关系，选型时必须按此选候选名中的英寸：
      · 15、16、20 → 1/2"（候选名中选带 x1/2" 或 1/2" 的，不选 x3/4"、x1"）
@@ -33,21 +38,64 @@ _BUSINESS_KNOWLEDGE = """
    - 主径 A 对应：20→dn20，25→dn25，32→dn32，40→dn40；候选名中的 dn 与主径一致。
    - 示例：「32*20内丝三通」= 主径 dn32、副径 20→1/2"，应选「内螺纹三通…dn32x1/2"」，不选 dn32x3/4"；「25*20」= dn25×1/2"，选 x1/2"。
    - 若关键词仅一个数（如「32弯头」无*20），则只按主径匹配，不推断副径。
+11. 【电工套管/印尼常用词】
+   - PIPA COUNDUIT / conduit / 电线管 / 穿线管：选「PVC电线管(B管)」管材（名称含电线管、B管、M/根），不选给水管件。
+   - SOCKET：选「管直通(套筒)」电工套管配件（名称含管直通、套筒），规格与询价一致（如 Φ25）。
+   - KLEM：选「管夹」电工套管配件（名称含管夹），规格与询价一致。
+   - TDUST 4 cabang / 四通接线盒：选「管四通圆接线盒(带盖)」电工套管配件（名称含管四通圆接线盒），规格如 65x40/4/Φ25。
+   - 热熔器 / 热熔机 / 熔接器：选「焊接机」PPR 配件（名称含焊接机），规格范围覆盖询价 dn（如 dn20-63）。
 """
 
 
 def _load_business_knowledge() -> str:
-    """从配置文件加载业务知识，若无则用内置。"""
+    """
+    从 wanding_business_knowledge.md 加载业务知识，供 LLM 每次选型使用。
+    使用路径 + 文件 mtime 缓存，避免同进程内重复读盘；文件被「记住」命令修改后会自动重读。
+    """
+    global _business_knowledge_cache
     try:
         from backend.tools.inventory.config import config
-        path = getattr(config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
-        if path:
-            p = Path(path)
-            if p.exists():
-                return p.read_text(encoding="utf-8").strip()
+        path_str = getattr(config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
+        if not path_str:
+            return _BUSINESS_KNOWLEDGE.strip()
+        p = Path(path_str)
+        mtime: Optional[float] = None
+        if p.exists():
+            try:
+                mtime = p.stat().st_mtime
+            except OSError:
+                pass
+            # 命中缓存：同一路径且 mtime 未变，直接返回，避免重复读取
+            if (
+                _business_knowledge_cache.get("path") == path_str
+                and _business_knowledge_cache.get("mtime") == mtime
+            ):
+                return _business_knowledge_cache["content"]
+            content = p.read_text(encoding="utf-8").strip()
+            _business_knowledge_cache = {"path": path_str, "mtime": mtime, "content": content}
+            return content
+        # 路径已配置但文件不存在：用内置内容初始化文件
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(_BUSINESS_KNOWLEDGE.strip(), encoding="utf-8")
+            content = _BUSINESS_KNOWLEDGE.strip()
+            try:
+                mtime = p.stat().st_mtime
+            except OSError:
+                mtime = None
+            _business_knowledge_cache = {"path": path_str, "mtime": mtime, "content": content}
+            return content
+        except Exception as e2:
+            logger.debug("初始化业务知识文件失败: %s", e2)
     except Exception as e:
         logger.debug("加载业务知识失败: %s", e)
     return _BUSINESS_KNOWLEDGE.strip()
+
+
+def invalidate_business_knowledge_cache() -> None:
+    """「记住」命令追加内容后调用，使下次选型时重新从 MD 读取，避免使用旧缓存。"""
+    global _business_knowledge_cache
+    _business_knowledge_cache = {}
 
 
 def llm_select_best(
