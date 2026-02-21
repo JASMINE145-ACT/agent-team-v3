@@ -121,18 +121,18 @@ def _call_llm_streaming_sync(
 # ---------------------------------------------------------------------------
 
 _SKILL_INVENTORY_PRICE = """\
-**1. 库存与万鼎价格**
-- **目标**：查库存、查万鼎报价、查某产品各档位价格/利润率。
-- **search_inventory(keywords)**：按产品名/规格关键词搜库存，返回匹配产品的库存与可售数量。
+**1. 库存与询价/价格**
+- **目标**：查库存、查报价、查各档位价格；询价时先历史匹配再万鼎字段匹配，多候选时用 LLM 选型。
+- **search_inventory(keywords)**：按产品名/规格搜库存，更适配英文关键词。
 - **get_inventory_by_code(code)**：已知 10 位物料编号时直接查库存。
-- **match_wanding_price(keywords, customer_level?)**：万鼎价格库匹配。返回三种情况：未匹配；single（1 条）；needs_selection（多条 candidates）。
-- **select_wanding_match(keywords, candidates)**：从多条候选中**只选 1 个**，用于「需要唯一产品」的场景（见下）。
-- **何时用**：仅当用户**已明确**是「库存/还有多少货/可售」或「价格/报价/万鼎/档位价格/利润率」时，才选用上述工具。若用户只说「查询XX」「查XX」而**未指明**是查库存还是查价格 → **勿直接调用** search_inventory 或 match_wanding_price，应走澄清（见下）。
-- **中文优先万鼎**：用户输入为**中文**产品名/规格（如 25管卡、PVC三通、进水软管）时，**优先用 match_wanding_price** 查价格；查库存时可先 match_wanding_price 得 code 再 get_inventory_by_code，或英文关键词时才用 search_inventory。search_inventory 更适配英文关键词。
-- **needs_selection 时是否选一个**：
-  - 用户要 **「全部类型价格」「所有类型」「全部匹配」「全部价格」** → **不要**调 select_wanding_match；直接用 observation 里的 **candidates 整表**整理成表格回复（即「全部」= 所有 candidates）。
-  - 用户要 **某一款产品的报价**、或 **询价填充/填报价单**（每行需一个产品）→ 必须再调 **select_wanding_match(keywords, candidates)** 从候选中选 1 个。
-  - **用户说「帮我选一个」「你选」「选哪个」「选一个」等**（且上一轮或本会话中已出现过 **candidates 列表**）→ **必须**调用 **select_wanding_match**，**不要**在 <think> 或回复里自己推荐。该工具内嵌专业知识，选型结果必须由工具返回后再整理成回复。"""
+- **match_by_quotation_history(keywords)**：历史匹配，在报价历史映射表（整理产品）中按「询价名称+规格」匹配，取 top3。返回未匹配 / single / needs_selection。
+- **match_wanding_price(keywords, customer_level?)**：字段查询（万鼎价格库），按产品名+规格在万鼎库中匹配，返回 unit_price 为该 customer_level 的单价。customer_level 默认 B；一次调用只返回一档。返回未匹配 / single / needs_selection。
+- **select_wanding_match(keywords, candidates)**：LLM 选型。当 needs_selection 且用户要「选一个/某一款」时调用；从候选中选 1 个。
+- **何时用**：用户已明确「库存/可售」或「价格/报价/万鼎/档位」时选用；只说「查XX」未指明 → 用 ask_clarification 澄清。
+- **默认询价顺序**：先 match_by_quotation_history，无结果再 match_wanding_price；得 code 后可用 get_inventory_by_code 查库存。
+- **仅字段查询（只用万鼎）**：当用户明确说「**用万鼎查**」「**万鼎数据库**」「**直接万鼎**」「**字段查询**」「**不要历史**」「还有什么其他型号」等时，**只调用 match_wanding_price**，不要先调 match_by_quotation_history，直接返回万鼎库中所有匹配型号/价格。
+- **「全部价格」「各档价格」「A B C D 档」**：必须对**同一 keywords** 分别调用 **4 次** match_wanding_price：customer_level="A"、"B"、"C"、"D"，汇总成表格「客户级别 | 客户价」。**只调一次会只得到默认 B 档，不是全部价格。**
+- **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。"""
 
 _SKILL_OOS = """\
 **2. 无货**
@@ -155,7 +155,7 @@ _SKILL_QUOTE = """\
 _SKILL_FILL = """\
 **4. 询价填充（整单流水线）**
 - **目标**：对整张报价单做「提取 → 万鼎匹配 → 库存校验 → 回填」一条龙。
-- **run_quotation_fill(file_path, customer_level?)**：仅当用户明确说「询价填充」「填充报价单」「完整报价」且 context 有 file_path 时调用。customer_level 默认 B。"""
+- **run_quotation_fill(file_path, customer_level?)**：仅当用户明确说「询价填充」「填充报价单」「完整报价」且 context 有 file_path 时调用。内部会先历史匹配、无则万鼎字段匹配，多候选时 LLM 选型。customer_level 默认 B。"""
 
 _SKILL_CLARIFY = """\
 **5. 澄清**
@@ -164,6 +164,10 @@ _SKILL_CLARIFY = """\
   - 用户只说「帮我查一下」等极简输入 → 必须 ask_clarification。
 - 只有在用户已明确提到「库存」「还有多少货」「可售」或「价格」「报价」「万鼎」「档位」等其中之一时，才可直接选用库存类或价格类工具，勿擅自默认成库存或价格。"""
 
+_SKILL_KNOWLEDGE = """\
+**6. 业务知识记录**
+- **append_business_knowledge(content)**：当用户要求将某条知识、规则、纠正**记录到知识库 / 记在 knowledge / 润色后记录 / 把这个记下来**等（任意说法）时，**必须**调用本工具。content 为润色后的完整一条知识（可多句），如「PVC160 不是标准规格，应理解为 DN150(6")」。无需用户先说「请记住」；用户说「记录在 knowledge 里面」「可以润色一下记到知识库」即调用。"""
+
 # 所有技能的默认顺序（按需过滤时维持此顺序）
 _ALL_SKILLS = [
     _SKILL_INVENTORY_PRICE,
@@ -171,6 +175,7 @@ _ALL_SKILLS = [
     _SKILL_QUOTE,
     _SKILL_FILL,
     _SKILL_CLARIFY,
+    _SKILL_KNOWLEDGE,
 ]
 
 _PROMPT_OUTPUT_FORMAT = """\
@@ -181,7 +186,7 @@ _PROMPT_OUTPUT_FORMAT = """\
 2. 若调用工具：紧接 tool_call；工具结果返回后，若目标已完成则直接输出最终回答（无需再调工具）；否则继续下一轮工具调用。
 3. 若不调用工具（如打招呼、能力外）：在 <think> 后直接给出最终回答。
 
-**多轮指代**：会话上下文中已有上一轮回答（如价格表、候选列表）时，用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格中解析），勿在 <think> 里自行推荐。用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_wanding_price，勿用用户本句的简称或错字。"""
+**多轮指代**：用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）。用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_by_quotation_history 或 match_wanding_price，勿用用户本句的简称或错字。"""
 
 
 def _build_system_prompt() -> str:

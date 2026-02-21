@@ -64,9 +64,12 @@ class InventoryConfig:
     API_RETRY_COUNT = 1
 
     # --- 万鼎价格库（仅用 version3/data，不依赖 version2）---
+    # 价格库在 version3/data/ 下，与映射表一致；backend/tools/data 仅放业务知识 md
+    _version3_root = _INVENTORY_AGENT_DIR.parent.parent.parent
     _v3_data_dir = _AGENT_TEAM_DIR / "data"
-    _v3_standard = _v3_data_dir / "万鼎价格库_管材与国标管件_标准格式.xlsx"
-    _v3_old = _v3_data_dir / "Copy of 万鼎国际集团最新价格库更新20250814.xlsx"
+    _price_data_dir = _version3_root / "data"
+    _v3_standard = _price_data_dir / "万鼎价格库_管材与国标管件_标准格式.xlsx"
+    _v3_old = _price_data_dir / "Copy of 万鼎国际集团最新价格库更新20250814.xlsx"
     PRICE_LIBRARY_PATH: str = os.environ.get(
         "PRICE_LIBRARY_PATH",
         str(_v3_standard) if _v3_standard.exists() else str(_v3_old) if _v3_old.exists() else str(_v3_standard),
@@ -85,6 +88,12 @@ class InventoryConfig:
     WANDING_BUSINESS_KNOWLEDGE_PATH: str = os.environ.get(
         "WANDING_BUSINESS_KNOWLEDGE_PATH",
         str(_v3_data_dir / "wanding_business_knowledge.md"),
+    )
+    # 询价→产品映射表（字段名+规格 匹配，命中则模糊取 top3 再 LLM 选，否则走万鼎）
+    # 默认 version3/data/整理产品(2).xlsx；列 A=询价货物名称 B=规格 C=产品编号 D=报价名称
+    MAPPING_TABLE_PATH: str = os.environ.get(
+        "MAPPING_TABLE_PATH",
+        str(_version3_root / "data" / "整理产品(2).xlsx"),
     )
 
     # --- Resolver（本地 phrase → Item Code，仅 search_inventory 用；询价填充可禁用）---
@@ -108,7 +117,7 @@ class InventoryConfig:
     LLM_API_KEY: str = os.environ.get("ZHIPU_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
     LLM_BASE_URL: str = os.environ.get("OPENAI_BASE_URL_ZHIPU") or os.environ.get("OPENAI_BASE_URL") or "https://open.bigmodel.cn/api/paas/v4"
     LLM_MODEL: str = os.environ.get("LLM_MODEL", "glm-4-flash")
-    LLM_MAX_TOKENS: int = int(os.environ.get("LLM_MAX_TOKENS", "5000"))
+    LLM_MAX_TOKENS: int = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
     TOOL_RESULT_MAX_CHARS: int = int(os.environ.get("TOOL_RESULT_MAX_CHARS", "8000"))
     LLM_TIMEOUT: int = int(os.environ.get("LLM_TIMEOUT", "60"))
     TOOL_EXEC_TIMEOUT: int = int(os.environ.get("TOOL_EXEC_TIMEOUT", "90"))  # AOL 多 code 时需多次 API 调用，35s 易超时

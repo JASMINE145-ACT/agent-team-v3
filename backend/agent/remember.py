@@ -80,3 +80,34 @@ def try_handle_remember(user_input: str) -> Optional[str]:
         return f"已记住：{content[:80]}{'…' if len(content) > 80 else ''}\n（已追加到业务知识文件，后续万鼎选型与匹配会参考。）"
     except Exception as e:
         return f"写入业务知识文件失败：{e}"
+
+
+def append_business_knowledge(content: str) -> str:
+    """
+    将一条业务知识追加到 wanding_business_knowledge.md（供 Agent 工具调用）。
+    由 Agent 在用户说「记录到知识库」「记在 knowledge」「润色后记录」等时调用，content 为润色后的完整条目。
+    返回成功或错误文案。
+    """
+    content = (content or "").strip()
+    if not content:
+        return "内容为空，未写入。"
+    path = _get_knowledge_path()
+    if not path:
+        return "当前未配置业务知识文件路径，无法保存。请设置 WANDING_BUSINESS_KNOWLEDGE_PATH。"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            from backend.tools.inventory.services.llm_selector import _BUSINESS_KNOWLEDGE
+            path.write_text(_BUSINESS_KNOWLEDGE.strip(), encoding="utf-8")
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        line = f"\n\n- [用户添加 {date_str}] {content}\n"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(line)
+        try:
+            from backend.tools.inventory.services.llm_selector import invalidate_business_knowledge_cache
+            invalidate_business_knowledge_cache()
+        except Exception:
+            pass
+        return f"已追加到业务知识：{content[:80]}{'…' if len(content) > 80 else ''}\n（后续万鼎选型与匹配会参考。）"
+    except Exception as e:
+        return f"写入业务知识文件失败：{e}"

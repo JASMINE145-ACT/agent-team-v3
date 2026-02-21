@@ -197,6 +197,14 @@ export type AppViewState = {
   usageLogFilterTools: string[];
   usageLogFilterHasTools: boolean;
   usageLogFilterQuery: string;
+  workFilePaths: string[];
+  workPlan: { mode?: string; files?: { path: string; name: string }[]; steps?: { file_index: number; op: string }[] } | null;
+  workPlanLoading: boolean;
+  workRunning: boolean;
+  workResult: { success?: boolean; answer?: string; trace?: unknown[]; plan?: unknown; error?: string } | null;
+  workError: string | null;
+  workCustomerLevel: string;
+  workDoRegisterOos: boolean;
   cronLoading: boolean;
   cronJobs: CronJob[];
   cronStatus: CronStatus | null;

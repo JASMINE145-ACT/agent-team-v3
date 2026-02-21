@@ -45,15 +45,15 @@ def _system_prompt() -> str:
 **2. 调用工具**  
 - **有 code**（如 10 位物料编号 8030020580）：一律用 get_inventory_by_code(code)，直接按 code 查表，不走关键词/Resolver。
 - **按名称/规格查**：用 search_inventory(keywords)，keywords 填用户要查的产品或规格（如 pvc dn20、Tee With Cover dn40）。
-- **仅查价格/客户价（用户未提库存）**：只调用 match_wanding_price(keywords, customer_level?)。若返回 needs_selection，同样调用 select_wanding_match 确定产品后再给出价格，但**不要**调用 get_inventory_by_code，回答里**不要**包含库存/可售。
-- **用户要「所有客户价 / 各档价格 / A B C D 档」**：对同一 keywords 分别调用 match_wanding_price(keywords, customer_level="A")、customer_level="B"、"C"、"D" 共四次（或同轮多 tool_call），汇总成表格列出 客户级别 | 客户价，不要只返回一档。
-- **询价填充**（需物料编号+单价+库存）：① 先用 match_wanding_price(keywords) 在万鼎价格库匹配。若 observation 为 single 或未匹配，按结果继续；② 若 observation 为 needs_selection（含 candidates 数组），必须再调用 select_wanding_match(keywords, candidates) 由 LLM 选 1 个；③ 得到 code 后用 get_inventory_by_code(code) 查库存。
+- **仅查价格/客户价（用户未提库存）**：默认先 match_by_quotation_history(keywords)，若无命中再 match_wanding_price。若用户明确说「用万鼎查」「万鼎数据库」「直接万鼎」「字段查询」「还有什么其他型号」→ **只调 match_wanding_price**，不调历史匹配。任一返回 needs_selection 且用户要「选一个」时再调用 select_wanding_match；若用户要「全部价格/所有候选」则**不调** select_wanding_match，直接整表回复。**不要**调用 get_inventory_by_code，回答里**不要**包含库存/可售。
+- **用户要「全部价格」「各档价格」「所有客户价」「A B C D 档」**：**价格由 match_wanding_price 返回**，但一次只返回一档（默认 B）。要全部档位必须对同一 keywords **分别调用 4 次**：match_wanding_price(keywords, customer_level="A")、customer_level="B"、customer_level="C"、customer_level="D"，汇总成表格「客户级别 | 客户价」。只调一次会只得到默认 B 档。
+- **询价填充**（需物料编号+单价+库存）：① 先 match_by_quotation_history(keywords)，无命中再 match_wanding_price(keywords)；② 若返回 needs_selection，必须调用 select_wanding_match(keywords, candidates)；③ 得到 code 后用 get_inventory_by_code(code) 查库存。
 
 **3. 观察 (observation)**  
 工具会返回 1 条或多条候选（库存与可售数量）。你不要在侧做筛选或提取 codes，只根据 observation 内容理解候选即可。
 
-**3a. match_wanding_price 返回 needs_selection 时**  
-若 observation 为 JSON 且含 needs_selection: true 和 candidates 数组，必须立即调用 select_wanding_match(keywords=<原关键词>, candidates=<observation 中的 candidates>) 进行选择，拿到 code 后再查库存。
+**3a. 历史匹配或字段匹配返回 needs_selection 时**  
+若 observation 为 JSON 且含 needs_selection: true 和 candidates 数组，必须立即调用 select_wanding_match(keywords=<原关键词>, candidates=<observation 中的 candidates>) 进行选择，拿到 code 后再查库存（若需要）。
 
 **4. 最终回答**  
 - **用户只问了价格/客户价**：回答中只给价格信息，不要写库存/可售。若用户要「所有客户价」，必须列出 A/B/C/D 四档价格表。

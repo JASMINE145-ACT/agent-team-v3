@@ -31,8 +31,9 @@
 |----|------|
 | **业务知识文件** | 默认路径：`backend/tools/data/wanding_business_knowledge.md`（由 `backend/tools/inventory/config.py` 的 `WANDING_BUSINESS_KNOWLEDGE_PATH` 决定，可用环境变量覆盖）。 |
 | **首次使用** | 若路径已配置但文件不存在，`llm_selector._load_business_knowledge()` 会用内置常量内容初始化该文件。 |
-| **记住命令** | 用户输入匹配「你要记住」「请记住」「记住：」「/记住」「帮我记住」「记一下」等前缀时，截取其后内容追加到上述 MD（带时间戳与「用户添加」标记）。 |
-| **入口** | 在调用 `execute_react` 前统一走 `backend.agent.remember.try_handle_remember(user_input)`；若返回非空字符串则直接以该字符串为回复，不再跑 ReAct。 |
+| **记住命令（前缀）** | 用户输入**以**「你要记住」「请记住」「记住：」「/记住」「帮我记住」「记一下」等开头时，在 ReAct 前走 `try_handle_remember`，截取其后内容追加到 MD。 |
+| **记住（Agent 工具）** | 用户说「记录到知识库」「记在 knowledge」「润色后记录」等**任意说法**时，由 Agent 调用 **append_business_knowledge(content)**，content 为润色后的完整一条知识；不要求用户先说「请记住」。与 OpenClaw 一致：由 Agent 按意图决定何时写入。 |
+| **入口** | 前缀命中：`try_handle_remember` 在 `execute_react` 前执行，命中则直接返回。工具：ReAct 中 Agent 调用 `append_business_knowledge`，由 `execute_tool` 执行。 |
 | **接入点** | HTTP `POST /api/query`、`POST /api/query/stream`；WebSocket Gateway `chat.send`；CLI `cli_agent.py`。 |
 
 ---

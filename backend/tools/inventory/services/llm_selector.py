@@ -104,18 +104,20 @@ def llm_select_best(
     max_tokens: int | None = None,
 ) -> Optional[dict[str, Any]]:
     """
-    从候选中选 1 个最佳匹配。
-    返回 {code, matched_name, unit_price} 或 None（LLM 判定无匹配）。
+    从候选中选 1 个最佳匹配，或（无把握时）列出几个可能选项及理由。
+    返回：
+    - 有把握选中：{code, matched_name, unit_price}
+    - 无匹配：None
+    - 无把握：{"_suggestions": True, "options": [{code, matched_name, unit_price, reasoning}, ...]}
     """
     if not candidates:
         return None
-
     if max_tokens is None:
         try:
             from backend.tools.inventory.config import config
-            max_tokens = getattr(config, "LLM_MAX_TOKENS", 5000)
+            max_tokens = getattr(config, "LLM_MAX_TOKENS", 8192)
         except Exception:
-            max_tokens = 5000
+            max_tokens = 8192
 
     knowledge = _load_business_knowledge()
 
@@ -133,9 +135,13 @@ def llm_select_best(
 
 {knowledge}
 
-请选择最匹配的一项（输出其序号 1-{len(candidates)}），或判断全部不匹配（输出 0）。
-仅输出一个 JSON，不要其他文字：
-{{"index": <序号或0>, "reasoning": "<简短理由>"}}
+请二选一（仅输出一个 JSON）：
+1) **有把握**选出一个最匹配的：用 "confident": true，并给出 "index"（序号 1-{len(candidates)}）和 "reasoning"。
+2) **没有把握**（多个都可能或都不太像）：用 "confident": false，不要单选，改为 "options" 列出 2～3 个最可能的选项，每项含 "index" 和 "reasoning"（简短说明为何可能匹配）。
+若判断全部不匹配，则 "confident": true, "index": 0, "reasoning": "..."。
+
+有把握时输出：{{"confident": true, "index": <序号或0>, "reasoning": "<理由>"}}
+没有把握时输出：{{"confident": false, "options": [{{"index": 1, "reasoning": "..."}}, {{"index": 2, "reasoning": "..."}}]}}
 """
 
     try:
@@ -151,22 +157,21 @@ def llm_select_best(
         api_kwargs: dict[str, Any] = {
             "model": model,
             "messages": [
-                {"role": "system", "content": "你是万鼎价格库产品匹配专家。仅输出 JSON：{\"index\": 序号或0, \"reasoning\": \"理由\"}，不要其他内容。"},
+                {"role": "system", "content": "你是万鼎产品匹配专家。仅输出一个 JSON：有把握时 {\"confident\": true, \"index\": 序号或0, \"reasoning\": \"理由\"}；没有把握时 {\"confident\": false, \"options\": [{\"index\": 序号, \"reasoning\": \"理由\"}, ...]}。不要其他文字。"},
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0,
             "max_tokens": max_tokens,
             "timeout": timeout,
         }
-        # 部分模型 response_format 可能导致空返回，优先不用
         resp = client.chat.completions.create(**api_kwargs)
         raw_content = resp.choices[0].message.content if resp.choices else None
         content = (raw_content or "").strip()
         if not content:
-            logger.warning("LLM 返回空内容，raw=%s finish_reason=%s", raw_content, getattr(resp.choices[0], "finish_reason", None) if resp.choices else None)
+            fr = getattr(resp.choices[0], "finish_reason", None) if resp.choices else None
+            logger.warning("LLM 返回空内容，raw=%s finish_reason=%s%s", raw_content, fr, "（输出被截断，可增大 LLM_MAX_TOKENS 后重试）" if fr == "length" else "")
             raise ValueError("LLM 返回空内容")
 
-        # 解析 JSON（可能被 markdown 包裹或含多余文字）
         content = content.strip()
         for prefix in ("```json", "```"):
             if content.startswith(prefix):
@@ -179,33 +184,63 @@ def llm_select_best(
         try:
             obj = json.loads(content)
         except json.JSONDecodeError:
-            # 尝试从文本中提取 index
-            m = re.search(r'"index"\s*:\s*(\d+)', content)
-            if m:
-                idx = int(m.group(1))
-                obj = {"index": idx}
+            m = re.search(r'"confident"\s*:\s*false', content)
+            if m and '"options"' in content:
+                obj = {"confident": False, "options": []}
             else:
-                m = re.search(r'"index"\s*:\s*0\b', content)
+                m = re.search(r'"index"\s*:\s*(\d+)', content)
                 if m:
-                    obj = {"index": 0}
+                    obj = {"confident": True, "index": int(m.group(1)), "reasoning": ""}
+                else:
+                    m = re.search(r'"index"\s*:\s*0\b', content)
+                    obj = {"confident": True, "index": 0} if m else None
         if obj is None:
             raise ValueError(f"无法解析 JSON: {content[:100]}")
-        idx = int(obj.get("index", 0))
 
-        if idx <= 0:
-            return None
-        if idx > len(candidates):
-            return candidates[0]
+        confident = obj.get("confident", True)
+        if confident:
+            idx = int(obj.get("index", 0))
+            if idx <= 0:
+                return None
+            if idx > len(candidates):
+                return _candidate_to_result(candidates[0])
+            return _candidate_to_result(candidates[idx - 1])
 
-        c = candidates[idx - 1]
-        return {
-            "code": (c.get("code") or "").strip(),
-            "matched_name": (c.get("matched_name") or "")[:200],
-            "unit_price": float(c.get("unit_price", 0) or 0),
-        }
+        # 无把握：返回若干可能选项 + reasoning
+        options = obj.get("options") or []
+        if not options:
+            return _rule_based_fallback(keywords, candidates)
+        seen = set()
+        result_options = []
+        for opt in options[:5]:
+            if not isinstance(opt, dict):
+                continue
+            idx = int(opt.get("index", 0))
+            if idx <= 0 or idx > len(candidates) or idx in seen:
+                continue
+            seen.add(idx)
+            c = candidates[idx - 1]
+            result_options.append({
+                "code": (c.get("code") or "").strip(),
+                "matched_name": (c.get("matched_name") or "")[:200],
+                "unit_price": float(c.get("unit_price", 0) or 0),
+                "reasoning": (opt.get("reasoning") or "").strip()[:300],
+            })
+        if not result_options:
+            return _rule_based_fallback(keywords, candidates)
+        return {"_suggestions": True, "options": result_options}
     except Exception as e:
         logger.warning("LLM 选择失败，使用规则回退: %s", e)
         return _rule_based_fallback(keywords, candidates)
+
+
+def _candidate_to_result(c: dict[str, Any]) -> dict[str, Any]:
+    """单条候选转为 {code, matched_name, unit_price}。"""
+    return {
+        "code": (c.get("code") or "").strip(),
+        "matched_name": (c.get("matched_name") or "")[:200],
+        "unit_price": float(c.get("unit_price", 0) or 0),
+    }
 
 
 def _rule_based_fallback(keywords: str, candidates: List[dict[str, Any]]) -> Optional[dict[str, Any]]:

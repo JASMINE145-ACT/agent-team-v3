@@ -1,0 +1,272 @@
+"""
+Work Mode 专用工具：报价单子步骤，仅在工作流执行器中注册，不影响 Chat。
+子步骤：extract / match_and_inventory / fill / shortage_report；无货登记复用 register_oos。
+"""
+from __future__ import annotations
+
+import json
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
+
+# 计划步骤 op 与工具名对应
+WORK_OPS = ("extract", "match_and_inventory", "fill", "shortage_report", "register_oos")
+
+WORK_TOOLS_OPENAI_FORMAT = [
+    {
+        "type": "function",
+        "function": {
+            "name": "work_quotation_extract",
+            "description": "【Work】从报价单 Excel 提取询价行（产品名、规格、数量等）。返回 items 列表供下一步 match 使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "报价单路径"},
+                    "sheet_name": {"type": "string", "description": "工作表名，可选"},
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "work_quotation_match",
+            "description": "【Work】对已提取的询价项执行匹配与库存校验（历史→万鼎→库存），返回 to_fill、shortage、unmatched，供 fill 与 shortage_report 使用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "报价单路径（用于与 extract 对应）"},
+                    "customer_level": {"type": "string", "enum": ["A", "B", "C", "D"], "description": "客户档位，默认 B"},
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "work_quotation_fill",
+            "description": "【Work】将 to_fill、shortage、unmatched 合并后回填到报价单 Excel。fill_items 来自上一步 work_quotation_match 的合并结果。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "报价单路径"},
+                    "fill_items": {"type": "array", "description": "回填项列表，每项含 row, code, quote_name, unit_price, qty, specification"},
+                    "output_path": {"type": "string", "description": "输出路径，可选，默认原文件_stem_filled.xlsx"},
+                    "sheet_name": {"type": "string", "description": "工作表名，可选"},
+                },
+                "required": ["file_path", "fill_items"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "work_quotation_shortage_report",
+            "description": "【Work】根据 shortage 列表生成缺货报告（Markdown + summary）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "shortage_items": {"type": "array", "description": "库存不足项列表，来自 work_quotation_match 的 shortage"},
+                },
+                "required": ["shortage_items"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "register_oos",
+            "description": "【Work】无货登记：从报价单解析无货行并落库。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "报价单路径"},
+                    "prompt": {"type": "string", "description": "可选"},
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+]
+
+
+def _run_work_quotation_extract(file_path: str, sheet_name: Optional[str] = None) -> dict[str, Any]:
+    from backend.tools.quotation.quote_tools import extract_inquiry_items
+    out = extract_inquiry_items(file_path, sheet_name=sheet_name)
+    return out
+
+
+def _run_work_quotation_match(
+    file_path: str,
+    customer_level: str = "B",
+    price_library_path: Optional[str] = None,
+    sheet_name: Optional[str] = None,
+) -> dict[str, Any]:
+    from backend.tools.quotation.quote_tools import extract_inquiry_items
+    from backend.tools.inventory.services.match_and_inventory import match_price_and_get_inventory
+
+    ext = extract_inquiry_items(file_path, sheet_name=sheet_name)
+    if not ext.get("success"):
+        return {"success": False, "error": ext.get("error", "提取失败"), "to_fill": [], "shortage": [], "unmatched": [], "items": []}
+    items = ext.get("items", [])
+    if not items:
+        return {"success": True, "to_fill": [], "shortage": [], "unmatched": [], "items": [], "fill_items_merged": []}
+
+    to_fill: list[dict] = []
+    shortage: list[dict] = []
+    unmatched: list[dict] = []
+
+    def _match_one(it: dict) -> Optional[dict]:
+        try:
+            return match_price_and_get_inventory(
+                it.get("keywords", ""),
+                customer_level=customer_level,
+                price_library_path=price_library_path,
+            )
+        except Exception as e:
+            logger.debug("match_price_and_get_inventory 失败: %s", e)
+            return None
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        match_results = list(pool.map(_match_one, items))
+
+    for it, result in zip(items, match_results):
+        qty = it.get("qty", 0)
+        if not result:
+            unmatched.append({
+                "row": it.get("row"),
+                "product_name": it.get("product_name"),
+                "specification": it.get("specification"),
+                "qty": qty,
+            })
+            continue
+        code = result.get("code", "")
+        unit_price = result.get("unit_price", 0)
+        quote_name = (result.get("matched_name", "") or "")[:200]
+        available_qty = result.get("available_qty", 0.0)
+        if available_qty >= qty:
+            to_fill.append({
+                "row": it.get("row"),
+                "code": code,
+                "quote_name": quote_name,
+                "unit_price": unit_price,
+                "qty": qty,
+                "specification": it.get("specification"),
+            })
+        else:
+            shortfall = max(0, qty - available_qty)
+            shortage.append({
+                "row": it.get("row"),
+                "product_name": it.get("product_name"),
+                "specification": it.get("specification"),
+                "qty": qty,
+                "available_qty": available_qty,
+                "shortfall": shortfall,
+                "code": code,
+                "quote_name": quote_name,
+                "unit_price": unit_price,
+            })
+
+    fill_items_merged = list(to_fill)
+    for s in shortage:
+        fill_items_merged.append({
+            "row": s.get("row"),
+            "code": s.get("code", ""),
+            "quote_name": ((s.get("quote_name") or "") + "（库存不足）"),
+            "unit_price": s.get("unit_price"),
+            "qty": s.get("qty", 0),
+            "specification": s.get("specification", ""),
+        })
+    for u in unmatched:
+        fill_items_merged.append({
+            "row": u["row"],
+            "code": "无货",
+            "quote_name": "",
+            "unit_price": None,
+            "qty": u.get("qty", 0),
+            "specification": u.get("specification", ""),
+        })
+
+    return {
+        "success": True,
+        "to_fill": to_fill,
+        "shortage": shortage,
+        "unmatched": unmatched,
+        "items": items,
+        "fill_items_merged": fill_items_merged,
+    }
+
+
+def _run_work_quotation_fill(
+    file_path: str,
+    fill_items: list[dict],
+    output_path: Optional[str] = None,
+    sheet_name: Optional[str] = None,
+) -> dict[str, Any]:
+    from backend.tools.quotation.quote_tools import fill_quotation
+    if not output_path:
+        p = Path(file_path)
+        output_path = str(p.parent / (p.stem + "_filled" + p.suffix))
+    return fill_quotation(
+        file_path=file_path,
+        fill_items=fill_items,
+        sheet_name=sheet_name,
+        output_path=output_path,
+    )
+
+
+def _run_work_quotation_shortage_report(shortage_items: list[dict]) -> dict[str, Any]:
+    from backend.tools.quotation.shortage_report import generate_shortage_report
+    return generate_shortage_report(shortage_items)
+
+
+def execute_work_tool_sync(name: str, arguments: dict[str, Any]) -> str:
+    """同步执行 Work 工具，返回 JSON 字符串供 ReAct 观察。"""
+    args = arguments or {}
+    file_path = (args.get("file_path") or "").strip()
+    if name == "work_quotation_extract":
+        sheet_name = (args.get("sheet_name") or "").strip() or None
+        out = _run_work_quotation_extract(file_path, sheet_name=sheet_name)
+        return json.dumps(out, ensure_ascii=False)
+    if name == "work_quotation_match":
+        customer_level = (args.get("customer_level") or "B").strip().upper() or "B"
+        sheet_name = (args.get("sheet_name") or "").strip() or None
+        out = _run_work_quotation_match(file_path, customer_level=customer_level, sheet_name=sheet_name)
+        return json.dumps(out, ensure_ascii=False)
+    if name == "work_quotation_fill":
+        fill_items = args.get("fill_items") or []
+        output_path = (args.get("output_path") or "").strip() or None
+        sheet_name = (args.get("sheet_name") or "").strip() or None
+        out = _run_work_quotation_fill(file_path, fill_items, output_path=output_path, sheet_name=sheet_name)
+        return json.dumps(out, ensure_ascii=False)
+    if name == "work_quotation_shortage_report":
+        shortage_items = args.get("shortage_items") or []
+        out = _run_work_quotation_shortage_report(shortage_items)
+        return json.dumps(out, ensure_ascii=False)
+    if name == "register_oos":
+        from backend.agent.tools import _run_register_oos
+        out = _run_register_oos(file_path or "", {}, args.get("prompt"))
+        return out.get("result", json.dumps(out, ensure_ascii=False)) if out.get("success") else json.dumps(out, ensure_ascii=False)
+    return json.dumps({"error": f"未知 Work 工具: {name}"}, ensure_ascii=False)
+
+
+def build_work_plan(file_paths: list[str], do_register_oos: bool = True) -> dict[str, Any]:
+    """根据文件列表生成固定顺序的计划（每文件：extract → match → fill → shortage_report → register_oos）。"""
+    steps = []
+    for i, path in enumerate(file_paths):
+        steps.append({"file_index": i, "op": "extract"})
+        steps.append({"file_index": i, "op": "match_and_inventory"})
+        steps.append({"file_index": i, "op": "fill"})
+        steps.append({"file_index": i, "op": "shortage_report"})
+        if do_register_oos:
+            steps.append({"file_index": i, "op": "register_oos"})
+    return {
+        "mode": "quotation_batch",
+        "files": [{"path": p, "name": Path(p).name} for p in file_paths],
+        "steps": steps,
+    }

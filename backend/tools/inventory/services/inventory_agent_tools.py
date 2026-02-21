@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+import threading
 from typing import Any, Optional
 
 from backend.tools.inventory.config import config
@@ -13,40 +13,86 @@ logger = logging.getLogger(__name__)
 
 # 延迟初始化，避免启动时即依赖 src.api.client / src.cache
 _table_agent = None
+_table_agent_lock = threading.Lock()
 _sql_agent = None
+_sql_agent_lock = threading.Lock()
 _resolver: Optional[Any] = None
 _resolver_failed = False
+_resolver_lock = threading.Lock()
 
 
 def _get_table_agent():
     global _table_agent
     if _table_agent is None:
-        try:
-            from backend.tools.inventory.agents.table_agent import InventoryTableAgent
-            _table_agent = InventoryTableAgent()
-        except ModuleNotFoundError as e:
-            if "src" in str(e):
-                logger.warning("No module named 'src': %s", e)
-                raise  # 由 execute_inventory_tool 外层统一转为友好返回
-            raise
-        except Exception as e:
-            logger.warning("InventoryTableAgent 初始化失败（需配置 AOL_* 或 src.api.client）: %s", e)
-            raise
+        with _table_agent_lock:
+            if _table_agent is None:
+                try:
+                    from backend.tools.inventory.agents.table_agent import InventoryTableAgent
+                    _table_agent = InventoryTableAgent()
+                except ModuleNotFoundError as e:
+                    if "src" in str(e):
+                        logger.warning("No module named 'src': %s", e)
+                        raise  # 由 execute_inventory_tool 外层统一转为友好返回
+                    raise
+                except Exception as e:
+                    logger.warning("InventoryTableAgent 初始化失败（需配置 AOL_* 或 src.api.client）: %s", e)
+                    raise
     return _table_agent
 
 
 def _get_sql_agent():
     global _sql_agent
     if _sql_agent is None:
-        from backend.tools.inventory.agents.sql_agent import InventorySQLAgent
-        _sql_agent = InventorySQLAgent()
+        with _sql_agent_lock:
+            if _sql_agent is None:
+                from backend.tools.inventory.agents.sql_agent import InventorySQLAgent
+                _sql_agent = InventorySQLAgent()
     return _sql_agent
+
+
+def _execute_match_by_quotation_history(arguments: dict[str, Any]) -> dict[str, Any]:
+    """
+    历史匹配：先查映射表（整理产品）按「询价名称+规格」取 top3，再用每个 code 去万鼎价格表查价并填回。
+    返回：未匹配 / single / needs_selection，其中 unit_price 来自万鼎（customer_level 默认 B）。
+    """
+    try:
+        from backend.tools.inventory.services.mapping_table_matcher import match_mapping_top_candidates
+        from backend.tools.inventory.services.wanding_fuzzy_matcher import get_wanding_price_by_code
+
+        keywords = (arguments.get("keywords") or "").strip()
+        if not keywords:
+            return {"success": True, "result": "请提供 keywords（产品名+规格）。"}
+        customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
+
+        candidates = match_mapping_top_candidates(keywords, mapping_path=None, top_k=3)
+        if not candidates:
+            return {"success": True, "result": f"历史匹配未命中：{keywords}"}
+
+        norm = []
+        for c in candidates:
+            code = str(c.get("code", "")).strip()
+            matched_name = str(c.get("matched_name", "")).strip()
+            unit_price = 0.0
+            price_row = get_wanding_price_by_code(code, customer_level=customer_level)
+            if price_row is not None:
+                unit_price = float(price_row.get("unit_price", 0) or 0)
+            norm.append({"code": code, "matched_name": matched_name, "unit_price": unit_price})
+
+        if len(norm) == 1:
+            r = norm[0]
+            payload = {"single": True, "code": r["code"], "matched_name": r["matched_name"], "unit_price": r["unit_price"]}
+            return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
+        payload = {"needs_selection": True, "keywords": keywords, "candidates": norm}
+        return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
+    except Exception as e:
+        logger.exception("match_by_quotation_history 失败")
+        return {"success": False, "error": str(e), "result": f"历史匹配失败: {e}"}
 
 
 def _execute_match_wanding_price(arguments: dict[str, Any]) -> dict[str, Any]:
     """
-    执行 match_wanding_price：万鼎价格库匹配。
-    0 候选 → 未匹配；1 候选 → single；>1 候选 → needs_selection + candidates（由 ReAct 调用 select_wanding_match）。
+    字段匹配（万鼎价格库）：按产品名+规格在万鼎价格库中匹配，不查映射表。
+    返回：未匹配 / single / needs_selection；多候选时由 agent 调用 select_wanding_match。
     """
     try:
         from backend.tools.inventory.services.match_and_inventory import match_wanding_price_candidates
@@ -55,29 +101,22 @@ def _execute_match_wanding_price(arguments: dict[str, Any]) -> dict[str, Any]:
         if not keywords:
             return {"success": True, "result": "请提供 keywords（产品名+规格）。"}
         customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
-        candidates = match_wanding_price_candidates(keywords, customer_level=customer_level)
 
+        candidates = match_wanding_price_candidates(keywords, customer_level=customer_level)
         if not candidates:
             return {"success": True, "result": f"未匹配到产品：{keywords}"}
 
-        # 归一化：{code, matched_name, unit_price, score?}
         norm = [
-            {
-                "code": str(c.get("code", "")),
-                "matched_name": str(c.get("matched_name", "")),
-                "unit_price": float(c.get("unit_price", 0) or 0),
-            }
+            {"code": str(c.get("code", "")), "matched_name": str(c.get("matched_name", "")), "unit_price": float(c.get("unit_price", 0) or 0)}
             for c in candidates
         ]
-
-        if len(norm) == 1:
-            r = norm[0]
-            payload = {"single": True, "code": r["code"], "matched_name": r["matched_name"], "unit_price": r["unit_price"]}
-            return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
-
-        # 多候选：返回 needs_selection，限制候选数避免 observation 过长导致 LLM 无法正确触发 tool_call
         max_candidates_for_react = 10
         norm_truncated = norm[:max_candidates_for_react]
+
+        if len(norm_truncated) == 1:
+            r = norm_truncated[0]
+            payload = {"single": True, "code": r["code"], "matched_name": r["matched_name"], "unit_price": r["unit_price"]}
+            return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
         payload = {"needs_selection": True, "keywords": keywords, "candidates": norm_truncated}
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
     except Exception as e:
@@ -98,11 +137,17 @@ def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
         if not keywords:
             return {"success": True, "result": "请提供 keywords。"}
         if not isinstance(candidates, list) or not candidates:
-            return {"success": True, "result": "请提供 candidates（来自 match_wanding_price 的 needs_selection 结果）。"}
+            return {"success": True, "result": "请提供 candidates（来自历史匹配或字段匹配的 needs_selection 结果）。"}
 
         r = llm_select_best(keywords, candidates)
         if r is None:
             return {"success": True, "result": f"LLM 判定无匹配：{keywords}"}
+        if r.get("_suggestions") and r.get("options"):
+            lines = [f"LLM 无把握单选，以下为几个可能选项及理由（请人工确认）：\n"]
+            for i, opt in enumerate(r["options"], 1):
+                lines.append(f"{i}. code: {opt.get('code', '')} | {opt.get('matched_name', '')} | unit_price: {opt.get('unit_price', 0)}")
+                lines.append(f"   reasoning: {opt.get('reasoning', '')}\n")
+            return {"success": True, "result": "\n".join(lines)}
         lines = [
             f"code: {r.get('code', '')}",
             f"matched_name: {r.get('matched_name', '')}",
@@ -119,12 +164,20 @@ def _get_resolver():
     global _resolver, _resolver_failed
     if _resolver_failed:
         return None
-    if _resolver is None:
+    if _resolver is not None:
+        return _resolver
+    with _resolver_lock:
+        if _resolver is not None:
+            return _resolver
+        if _resolver_failed:
+            return None
         try:
             from backend.tools.inventory.services.resolver import ItemResolver
-            _resolver = ItemResolver()
-            if not _resolver.is_available():
-                _resolver = None
+            r = ItemResolver()
+            if not r.is_available():
+                _resolver_failed = True
+                return None
+            _resolver = r
         except Exception as e:
             logger.debug("Resolver 不可用（CONTAINS/向量 将不生效）: %s", e)
             _resolver_failed = True
@@ -139,7 +192,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "search_inventory",
-                "description": "按产品名称或规格关键词搜索库存，返回匹配产品的库存与可售数量。**更适配英文关键词**（如 Tee With Cover dn40、gang box 20/56）；用户输入为**中文**产品名/规格时，优先用 match_wanding_price 查价格或先万鼎匹配再 get_inventory_by_code 查库存。",
+                "description": "按产品名/规格关键词搜索库存，返回可用数量。适配英文关键词（如 Tee dn40）；中文询价优先历史匹配。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -153,7 +206,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "get_inventory_by_code",
-                "description": "有 Item Code 时用此工具：按 10 位物料编号（如 8030020580）直接查表取库存，不走关键词/Resolver。",
+                "description": "按 10 位物料编号（如 8030020580）直接查库存，不走关键词/Resolver。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -166,13 +219,28 @@ def get_inventory_tools_openai_format() -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "match_by_quotation_history",
+                "description": "历史匹配：在报价映射表中按询价名称+规格匹配 top3，用 code 查万鼎价格。返回未匹配 / single / needs_selection。用户未说「用万鼎查/万鼎数据库/字段查询」时优先调用；用户明确要万鼎或「还有什么其他型号」时勿用，直接用 match_wanding_price。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "keywords": {"type": "string", "description": "产品名+规格，如 三通内丝接头、25三通"},
+                        "customer_level": {"type": "string", "description": "万鼎查价档位 A/B/C/D，默认 B"},
+                    },
+                    "required": ["keywords"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "match_wanding_price",
-                "description": "万鼎价格库匹配：用 keywords（产品名+规格）查询报价，customer_level 指定客户档位（A/B/C/D，默认 B）。返回三种情况：1）未匹配；2）single 唯一结果（code、matched_name、unit_price）；3）needs_selection（多个候选），此时在下一轮 <think> 中必须再调用 select_wanding_match(keywords, candidates) 进行选择，candidates 从 observation 的 JSON 中解析。",
+                "description": "字段匹配（万鼎价格库）：按 keywords 在万鼎库中匹配，返回 unit_price（customer_level 默认 B，一次一档）。用户说「用万鼎查」「万鼎数据库」「直接万鼎」「字段查询」「还有什么其他型号」时直接调用本工具，不要先调历史匹配。历史匹配无命中时也可调用。返回未匹配 / single / needs_selection。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "keywords": {"type": "string", "description": "产品名+规格，如 25三通、进水软管 50cm"},
-                        "customer_level": {"type": "string", "description": "客户级别 A/B/C/D，对应不同利润价格档位，默认 B"},
+                        "customer_level": {"type": "string", "description": "客户级别 A/B/C/D，默认 B"},
                     },
                     "required": ["keywords"],
                 },
@@ -182,11 +250,11 @@ def get_inventory_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "select_wanding_match",
-                "description": "当 match_wanding_price 返回 needs_selection 时使用，或用户说「帮我选一个」「你选」「选哪个」且会话中已有候选列表时**必须**调用本工具：根据 keywords 和 candidates，用内嵌专业知识 LLM 从候选中选 1 个最佳匹配。**不可**在回复中自行推荐产品，选型结果必须由本工具返回。参数 keywords 与 match_wanding_price 相同，candidates 从上一轮 observation 或会话中的候选表解析（JSON 数组，每项含 code、matched_name、unit_price）。",
+                "description": "LLM 选型：从 needs_selection 候选中选最佳匹配，有把握返 1 个，无把握列选项及 reasoning。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "keywords": {"type": "string", "description": "与 match_wanding_price 相同的询价关键词"},
+                        "keywords": {"type": "string", "description": "与历史匹配/字段匹配相同的询价关键词"},
                         "candidates": {
                             "type": "array",
                             "items": {
@@ -198,7 +266,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                                 },
                                 "required": ["code", "matched_name", "unit_price"],
                             },
-                            "description": "match_wanding_price 返回的 candidates 数组",
+                            "description": "历史匹配或字段匹配返回的 candidates 数组",
                         },
                     },
                     "required": ["keywords", "candidates"],
@@ -210,7 +278,9 @@ def get_inventory_tools_openai_format() -> list[dict]:
 
 def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """实际执行逻辑（含 get_table_agent / get_resolver），供带超时调用。"""
-    # 万鼎工具不依赖 table/sql_agent，可单独执行
+    # 询价相关工具不依赖 table/sql_agent，可单独执行
+    if name == "match_by_quotation_history":
+        return _execute_match_by_quotation_history(arguments)
     if name == "match_wanding_price":
         return _execute_match_wanding_price(arguments)
     if name == "select_wanding_match":
@@ -223,7 +293,7 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any]) -> dict[s
         if "src" in str(e) and getattr(config, "INVENTORY_DEMO_MODE", False):
             if name == "search_inventory":
                 kw = (arguments.get("keywords") or "").strip()
-                return {"success": True, "result": f"[演示模式] 关键词「{kw}」未连接库存 API，建议用 match_wanding_price 做万鼎价格库匹配。"}
+                return {"success": True, "result": f"[演示模式] 关键词「{kw}」未连接库存 API，建议用 match_by_quotation_history 或 match_wanding_price 做询价匹配。"}
             if name == "get_inventory_by_code":
                 code = (arguments.get("code") or "").strip()
                 return {"success": True, "result": f"Item Code: {code}\nItem Name: (演示) 万鼎匹配产品\nQty: 0\nAvailable: 0\n[演示模式] 库存 API 未连接"}
@@ -276,18 +346,9 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any]) -> dict[s
 
 
 def execute_inventory_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """执行库存工具，带整体超时，避免 Resolver/AOL 无响应时卡死。"""
-    timeout_sec = getattr(config, "TOOL_EXEC_TIMEOUT", 35)
+    """同步执行库存工具。超时由调用方（execute_tool via asyncio.wait_for）控制。"""
     try:
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            future = ex.submit(_execute_inventory_tool_impl, name, arguments)
-            return future.result(timeout=timeout_sec)
-    except FuturesTimeoutError:
-        return {
-            "success": False,
-            "error": "timeout",
-            "result": f"工具执行超时（{timeout_sec} 秒）。请检查 AOL_* 配置与网络，或稍后重试。",
-        }
+        return _execute_inventory_tool_impl(name, arguments)
     except Exception as e:
         if "src" in str(e):
             return {

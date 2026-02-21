@@ -8,18 +8,22 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
 _table_agent = None
+_table_agent_lock = threading.Lock()
 
 
 def _get_table_agent():
     global _table_agent
     if _table_agent is None:
-        from backend.tools.inventory.agents.table_agent import InventoryTableAgent
-        _table_agent = InventoryTableAgent()
+        with _table_agent_lock:
+            if _table_agent is None:
+                from backend.tools.inventory.agents.table_agent import InventoryTableAgent
+                _table_agent = InventoryTableAgent()
     return _table_agent
 
 
@@ -71,12 +75,37 @@ def match_price_and_get_inventory(
     price_library_path: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """
-    万鼎匹配 + 按 code 查库存（flow 内部使用，工具层已拆为 match_wanding_price + get_inventory_by_code）。
+    先历史匹配（映射表），无结果再万鼎匹配，再按 code 查库存（run_quotation_fill_flow 使用）。
     返回 {code, matched_name, unit_price, available_qty}，未找到 code 时返回 None。
     """
-    r = match_wanding_price(keywords, customer_level=customer_level, price_library_path=price_library_path)
+    r: Optional[dict[str, Any]] = None
+    try:
+        from backend.tools.inventory.services.mapping_table_matcher import match_mapping_top_candidates
+        from backend.tools.inventory.services.llm_selector import llm_select_best
+        mapping_candidates = match_mapping_top_candidates(keywords, mapping_path=None, top_k=3)
+        if mapping_candidates:
+            if len(mapping_candidates) == 1:
+                c = mapping_candidates[0]
+                r = {"code": c.get("code", ""), "matched_name": c.get("matched_name", ""), "unit_price": float(c.get("unit_price", 0) or 0)}
+            else:
+                best = llm_select_best(keywords, mapping_candidates)
+                if best is not None and not best.get("_suggestions"):
+                    r = {"code": best.get("code", ""), "matched_name": best.get("matched_name", ""), "unit_price": best.get("unit_price", 0)}
+    except Exception as e:
+        logger.debug("历史匹配失败: %s", e)
+    if r is None:
+        r = match_wanding_price(keywords, customer_level=customer_level, price_library_path=price_library_path)
     if not r:
         return None
+    # 历史匹配得到的 r 可能 unit_price=0（映射表无价格），用 code 去万鼎表补全
+    if (r.get("unit_price") or 0) == 0 and r.get("code"):
+        try:
+            from backend.tools.inventory.services.wanding_fuzzy_matcher import get_wanding_price_by_code
+            price_row = get_wanding_price_by_code(r["code"], customer_level=customer_level, price_library_path=price_library_path)
+            if price_row is not None:
+                r["unit_price"] = float(price_row.get("unit_price", 0) or 0)
+        except Exception as e:
+            logger.debug("按 code 查万鼎价格失败: %s", e)
 
     code = r.get("code", "")
     available_qty = 0.0

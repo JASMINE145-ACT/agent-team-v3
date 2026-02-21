@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -30,6 +31,15 @@ SYNONYM_GROUPS = [
     {"承插", "承插式"},
     {"堵头", "管帽"},
 ]
+
+# 模块级预计算，避免每次调用时重建（SYNONYM_GROUPS 不变时永远有效）
+_SYNONYM_TO_GROUP: dict[str, frozenset] = {
+    syn: frozenset(group) for group in SYNONYM_GROUPS for syn in group
+}
+_SORTED_SYNONYMS: list[str] = sorted(_SYNONYM_TO_GROUP.keys(), key=len, reverse=True)
+
+# 单字 token（如「三」「通」）在打分中的权重，相对于多字 token 的 1.0
+_SINGLE_CHAR_WEIGHT = 0.5
 
 # 询价关键词中的英文/印尼语 → 中文品名，用于筛选时命中库内品名（筛选逻辑完善）
 QUERY_TERM_TO_CHINESE = [
@@ -65,11 +75,8 @@ def _normalize(s: str) -> str:
     return s.strip()
 
 
-def _get_synonym_words(word: str) -> set:
-    for group in SYNONYM_GROUPS:
-        if word in group:
-            return group
-    return {word}
+def _get_synonym_words(word: str) -> frozenset:
+    return _SYNONYM_TO_GROUP.get(word, frozenset({word}))
 
 
 def _expand_unit_tokens(token: str, material: Optional[str] = None) -> set:
@@ -120,14 +127,12 @@ def _split_tokens(text: str) -> List[str]:
 
 
 def _expand_keyword_with_synonyms(keyword: str) -> List[str]:
-    synonym_to_group = {syn: group for group in SYNONYM_GROUPS for syn in group}
-    sorted_synonyms = sorted(synonym_to_group.keys(), key=len, reverse=True)
     queries: set = {keyword}
-    for syn in sorted_synonyms:
+    for syn in _SORTED_SYNONYMS:
         new_queries: set = set()
         for q in queries:
             if syn in q:
-                for replacement in synonym_to_group[syn]:
+                for replacement in _SYNONYM_TO_GROUP[syn]:
                     new_queries.add(q.replace(syn, replacement))
         if new_queries:
             queries.update(new_queries)
@@ -143,8 +148,16 @@ def search_fuzzy(
     DataBase-style fuzzy search.
     Returns [(row_dict, score), ...] sorted by score desc.
     row_dict: {code, matched_name, unit_price}
+
+    优化点：
+    - 使用 load_wanding_df 预计算的 norm_text / spec_tokens 列，消除每行的 regex 开销
+    - q_eq 提出行循环，每次查询只计算一次
+    - set 交集（q_eq & product_specs）替代 any(eq in set for eq in set)
+    - 单字 token 权重 _SINGLE_CHAR_WEIGHT（0.5），避免单字命中过度拉高得分
     """
     results: dict = {}
+    has_precomputed = "norm_text" in df.columns and "spec_tokens" in df.columns
+
     for kw in _expand_keyword_with_synonyms(keyword.strip()):
         norm_kw = _normalize(kw)
         chinese_tokens = _split_tokens(norm_kw)
@@ -155,39 +168,55 @@ def search_fuzzy(
         }
         query_material = material_tokens[0] if material_tokens else None
 
+        # q_eq 提出行循环：只依赖 q_spec + query_material，与当前行无关
+        spec_equivs: dict[str, frozenset] = {
+            q_spec: _expand_token_with_synonyms_and_units(q_spec, material=query_material)
+            for q_spec in query_size_tokens
+        }
+
+        # 按单字/多字分类，单字在分母中按 _SINGLE_CHAR_WEIGHT 计入
+        multi_text = {t for t in query_text_tokens if len(t) > 1}
+        single_text = {t for t in query_text_tokens if len(t) == 1}
+        total_weight = (
+            len(query_size_tokens)
+            + len(multi_text)
+            + len(single_text) * _SINGLE_CHAR_WEIGHT
+        )
+
         for row in df.itertuples(index=False):
             row_id = getattr(row, "Material", getattr(row, "Describrition", str(row)))
             raw_text = str(getattr(row, field, ""))
-            normalized_text = _normalize(raw_text)
 
-            material_ok = not material_tokens or all(m.lower() in normalized_text for m in material_tokens)
-            if not material_ok:
+            # 使用预计算列，fallback 到实时计算（兼容未预计算的 df）
+            if has_precomputed:
+                normalized_text: str = row.norm_text
+                product_specs: frozenset = row.spec_tokens
+            else:
+                normalized_text = _normalize(raw_text)
+                product_specs = frozenset(
+                    t for t in _split_tokens(raw_text) if re.search(r"\d", t)
+                )
+
+            if material_tokens and not all(m.lower() in normalized_text for m in material_tokens):
                 continue
 
-            product_tokens = _split_tokens(raw_text)
-            product_specs = {t for t in product_tokens if re.search(r"\d", t)}
-
-            size_hits = 0
-            for q_spec in query_size_tokens:
-                q_eq = _expand_token_with_synonyms_and_units(q_spec, material=query_material)
-                if any(eq in product_specs for eq in q_eq):
-                    size_hits += 1
+            # set 交集替代 any(eq in product_specs for eq in q_eq)
+            size_hits = sum(1 for q_eq in spec_equivs.values() if q_eq & product_specs)
             if query_size_tokens and size_hits == 0:
                 continue
 
-            text_hits = 0
-            for token in query_text_tokens:
-                if token.lower() in normalized_text:
-                    text_hits += 1
-                elif token == "度" and "°" in normalized_text:
-                    # 询价「90度」与品名「90°」等价
-                    text_hits += 1
-            if query_text_tokens and text_hits == 0:
+            # 多字命中（权重 1.0）+ 单字命中（权重 _SINGLE_CHAR_WEIGHT）
+            def _text_match(t: str) -> bool:
+                return t.lower() in normalized_text or (t == "度" and "°" in normalized_text)
+
+            multi_hits = sum(1 for t in multi_text if _text_match(t))
+            single_hits = sum(1 for t in single_text if _text_match(t))
+            # 过滤用原始命中数（单字也算），得分用加权值
+            if query_text_tokens and (multi_hits + single_hits) == 0:
                 continue
 
-            hit_count = size_hits + text_hits
-            total = len(query_size_tokens) + len(query_text_tokens)
-            score = hit_count / total if total > 0 else 0.0
+            hit_weight = size_hits + multi_hits + single_hits * _SINGLE_CHAR_WEIGHT
+            score = hit_weight / total_weight if total_weight > 0 else 0.0
 
             if score > 0 and (row_id not in results or score > results[row_id][1]):
                 row_dict: dict[str, Any] = {
@@ -258,7 +287,14 @@ def load_wanding_df(
         if "国标管件" in wb.sheetnames:
             all_rows.extend(_load_one_sheet(wb["国标管件"], price_col))
         wb.close()
-        return pd.DataFrame(all_rows)
+        df = pd.DataFrame(all_rows)
+        if not df.empty:
+            # 预计算 normalized text 和规格 token 集，避免 search_fuzzy 每行重算
+            df["norm_text"] = df["Describrition"].apply(_normalize)
+            df["spec_tokens"] = df["Describrition"].apply(
+                lambda t: frozenset(tok for tok in _split_tokens(t) if re.search(r"\d", tok))
+            )
+        return df
     except Exception as e:
         logger.warning("加载万鼎价格库失败: %s", e)
         return pd.DataFrame()
@@ -266,6 +302,19 @@ def load_wanding_df(
 
 # 缓存 DataFrame，按 path:level 隔离
 _df_cache: dict[str, pd.DataFrame] = {}
+_df_cache_lock = threading.Lock()
+
+
+def _get_cached_df(path, customer_level: str) -> pd.DataFrame:
+    """线程安全地获取（或加载）指定 path+level 的 DataFrame。"""
+    level = (customer_level or "B").strip().upper()
+    cache_key = f"{path}:{level}"
+    if cache_key in _df_cache:
+        return _df_cache[cache_key]
+    with _df_cache_lock:
+        if cache_key not in _df_cache:
+            _df_cache[cache_key] = load_wanding_df(path, customer_level=level)
+    return _df_cache[cache_key]
 
 
 def match_fuzzy(
@@ -283,15 +332,7 @@ def match_fuzzy(
 
     from backend.tools.inventory.config import config
     path = price_library_path or config.PRICE_LIBRARY_PATH
-    level = (customer_level or "B").strip().upper()
-    cache_key = f"{path}:{level}"
-
-    global _df_cache
-    if cache_key not in _df_cache:
-        df = load_wanding_df(path, sheet_name="管材", customer_level=level)
-        _df_cache[cache_key] = df
-
-    df = _df_cache[cache_key]
+    df = _get_cached_df(path, customer_level)
     if df.empty:
         return None
 
@@ -325,14 +366,7 @@ def match_fuzzy_candidates(
 
     from backend.tools.inventory.config import config
     path = price_library_path or config.PRICE_LIBRARY_PATH
-    level = (customer_level or "B").strip().upper()
-    cache_key = f"{path}:{level}"
-
-    global _df_cache
-    if cache_key not in _df_cache:
-        _df_cache[cache_key] = load_wanding_df(path, sheet_name="管材", customer_level=level)
-
-    df = _df_cache[cache_key]
+    df = _get_cached_df(path, customer_level)
     if df.empty:
         return []
 
@@ -357,3 +391,33 @@ def match_fuzzy_candidates(
             "score": round(score, 4),
         })
     return out
+
+
+def get_wanding_price_by_code(
+    code: str,
+    customer_level: str = "B",
+    price_library_path: Optional[str | Path] = None,
+) -> Optional[dict[str, Any]]:
+    """
+    按产品编号（Material）在万鼎价格表中精确查找，返回该 code 的单价及名称。
+    用于历史匹配拿到 code 后，从万鼎表把价格补全。
+    返回 {code, matched_name, unit_price} 或 None（万鼎表无此 code）。
+    """
+    code = (code or "").strip()
+    if not code:
+        return None
+    from backend.tools.inventory.config import config
+    path = price_library_path or config.PRICE_LIBRARY_PATH
+    df = _get_cached_df(path, customer_level)
+    if df.empty or "Material" not in df.columns:
+        return None
+    # Material 列为产品编号
+    row = df[df["Material"].astype(str).str.strip() == code]
+    if row.empty:
+        return None
+    r = row.iloc[0]
+    return {
+        "code": code,
+        "matched_name": str(r.get("Describrition", "") or "")[:200],
+        "unit_price": float(r.get("unit_price", 0) or 0),
+    }

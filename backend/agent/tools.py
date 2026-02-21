@@ -27,7 +27,7 @@ EXTRA_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_oos_list",
-            "description": "【无货】获取无货产品列表（含被报无货次数、邮件发送状态）。用户问「无货列表」「无货产品有哪些」「他们被报无货几次」时调用。",
+            "description": "【无货】获取无货产品列表，含被报无货次数与邮件发送状态。",
             "parameters": {"type": "object", "properties": {"limit": {"type": "integer", "description": "最多返回条数，默认 100，展示前 50 条"}}, "required": []},
         },
     },
@@ -35,7 +35,7 @@ EXTRA_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_oos_stats",
-            "description": "【无货】获取无货产品统计（总记录数、无货产品数、被报无货≥2次产品数、已发邮件产品数、今日新增）。用户问「无货统计」「无货概况」时调用。",
+            "description": "【无货】获取无货统计：总记录数、无货产品数、被报无货≥2次产品数、已发邮件产品数、今日新增。",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -43,7 +43,7 @@ EXTRA_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_oos_by_file",
-            "description": "【无货】按文件统计：每个报价单文件对应的无货记录数及上传时间。用户问「按文件看无货」「每个文件多少无货」「无货按文件」时调用。",
+            "description": "【无货】按文件统计无货：每个报价单的记录数及上传时间。",
             "parameters": {"type": "object", "properties": {"limit": {"type": "integer", "description": "最多展示文件数，默认 50"}}, "required": []},
         },
     },
@@ -51,7 +51,7 @@ EXTRA_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_oos_by_time",
-            "description": "【无货】按时间统计：按日汇总新增无货记录数（最近 N 天）。用户问「按时间看无货」「无货按日/按天」「最近几天无货趋势」时调用。",
+            "description": "【无货】按时间统计无货：按日汇总最近 N 天新增记录数。",
             "parameters": {"type": "object", "properties": {"last_n_days": {"type": "integer", "description": "统计最近几天，默认 30"}}, "required": []},
         },
     },
@@ -89,7 +89,7 @@ EXTRA_TOOLS = [
         "type": "function",
         "function": {
             "name": "ask_clarification",
-            "description": "【澄清】用户意图不明确时使用：仅凭产品名/规格无法判断是查库存还是查价格时必须澄清（如「查询XX」「查XX」「帮我查一下」）。只有当用户已明确提到「库存」「可售」「还有多少货」或「价格」「报价」「万鼎」「档位」其中之一时，才可跳过澄清直接调库存/价格工具。",
+            "description": "【澄清】意图不明确时调用（如「查XX」「帮我查」，无法判断是库存还是价格）。已明确含「库存/可售/价格/报价/万鼎/档位」等词时可跳过。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -97,6 +97,20 @@ EXTRA_TOOLS = [
                     "reasoning": {"type": "string", "description": "为何需要澄清"},
                 },
                 "required": ["questions"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "append_business_knowledge",
+            "description": "【业务知识】将一条知识追加到业务知识库（wanding_business_knowledge.md），后续万鼎选型与匹配会参考。当用户要求「记录到知识库」「记在 knowledge」「润色后记录」「把这个记下来」等时调用；content 为润色后的完整一条知识（可多句），如规格纠正、选型规则等。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "要追加的一条业务知识，已润色为完整句子或条目"},
+                },
+                "required": ["content"],
             },
         },
     },
@@ -138,6 +152,7 @@ def _validate_file_path(path: str, tool_name: str) -> Optional[str]:
 _INVENTORY_TOOLS = {
     "search_inventory",
     "get_inventory_by_code",
+    "match_by_quotation_history",
     "match_wanding_price",
     "select_wanding_match",
 }
@@ -298,6 +313,13 @@ async def execute_tool(
         r = arguments.get("reasoning") or ""
         return json.dumps({"needs_clarification": True, "questions": q, "reasoning": r}, ensure_ascii=False)
 
+    # 业务知识追加（Agent 在用户说「记录到知识库」等时调用）
+    if name == "append_business_knowledge":
+        from backend.agent.remember import append_business_knowledge as do_append
+        content = (arguments.get("content") or "").strip()
+        msg = do_append(content)
+        return msg
+
     # 询价填充
     if name == "run_quotation_fill":
         file_path = (arguments.get("file_path") or "").strip() or (ctx.get("file_path") or "").strip()
@@ -368,11 +390,18 @@ async def execute_tool(
     # 库存工具
     if name in _INVENTORY_TOOLS:
         try:
-            from backend.tools.inventory.services.inventory_agent_tools import execute_inventory_tool
-            out = await asyncio.to_thread(execute_inventory_tool, name, arguments)
+            from backend.tools.inventory.services.inventory_agent_tools import execute_inventory_tool, config as inv_config
+            timeout_sec = getattr(inv_config, "TOOL_EXEC_TIMEOUT", 35)
+            out = await asyncio.wait_for(
+                asyncio.to_thread(execute_inventory_tool, name, arguments),
+                timeout=timeout_sec,
+            )
             if out.get("success"):
                 return out.get("result", "")
             return json.dumps(out, ensure_ascii=False)
+        except asyncio.TimeoutError:
+            timeout_sec = 35
+            return json.dumps({"success": False, "error": f"工具执行超时（{timeout_sec} 秒），请检查 AOL_* 配置与网络，或稍后重试。"}, ensure_ascii=False)
         except Exception as e:
             logger.exception("execute_inventory_tool 失败: %s", e)
             return json.dumps({"error": str(e)}, ensure_ascii=False)

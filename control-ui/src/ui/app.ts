@@ -313,6 +313,15 @@ export class OpenClawApp extends LitElement {
   // Non-reactive (don’t trigger renders just for timer bookkeeping).
   usageQueryDebounceTimer: number | null = null;
 
+  @state() workFilePaths: string[] = [];
+  @state() workPlan: { mode?: string; files?: { path: string; name: string }[]; steps?: { file_index: number; op: string }[] } | null = null;
+  @state() workPlanLoading = false;
+  @state() workRunning = false;
+  @state() workResult: { success?: boolean; answer?: string; trace?: unknown[]; plan?: unknown; error?: string } | null = null;
+  @state() workError: string | null = null;
+  @state() workCustomerLevel = "B";
+  @state() workDoRegisterOos = true;
+
   @state() cronLoading = false;
   @state() cronJobs: CronJob[] = [];
   @state() cronStatus: CronStatus | null = null;

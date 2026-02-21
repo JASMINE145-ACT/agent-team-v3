@@ -269,3 +269,56 @@ async def put_business_knowledge(body: Dict[str, Any] = Body(...)) -> Dict[str, 
     except Exception as e:
         logger.exception("business-knowledge PUT 失败")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------- Work Mode（报价批量，Plan + ReAct，与 Chat 独立）----------
+
+@router.post("/api/work/plan")
+async def work_plan(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """根据 file_paths 生成报价批量计划，不执行。Body: { "file_paths": string[], "do_register_oos": bool? }"""
+    file_paths = body.get("file_paths") or []
+    if not isinstance(file_paths, list):
+        file_paths = []
+    do_register_oos = body.get("do_register_oos", True)
+    try:
+        from backend.agent.work_tools import build_work_plan
+        plan = build_work_plan([str(p).strip() for p in file_paths if p], do_register_oos=do_register_oos)
+        return {"success": True, "plan": plan}
+    except Exception as e:
+        logger.exception("work/plan 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/work/run")
+async def work_run(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """
+    执行 Work 流程：Plan + ReAct，仅 Work 工具。
+    Body: { "file_paths": string[], "customer_level": "A"|"B"|"C"|"D"?, "do_register_oos": bool?, "plan": object? }
+    """
+    file_paths = body.get("file_paths") or []
+    if not isinstance(file_paths, list):
+        file_paths = []
+    file_paths = [str(p).strip() for p in file_paths if p]
+    customer_level = (body.get("customer_level") or "B").strip().upper() or "B"
+    if customer_level not in ("A", "B", "C", "D"):
+        customer_level = "B"
+    do_register_oos = body.get("do_register_oos", True)
+    plan = body.get("plan")
+    try:
+        from backend.agent.work_executor import run_work_flow
+        result = await run_work_flow(
+            file_paths=file_paths,
+            customer_level=customer_level,
+            do_register_oos=do_register_oos,
+            plan=plan,
+        )
+        return {
+            "success": result.get("success", True),
+            "answer": result.get("answer", ""),
+            "trace": result.get("trace", []),
+            "plan": result.get("plan", {}),
+            "error": result.get("error"),
+        }
+    except Exception as e:
+        logger.exception("work/run 失败")
+        raise HTTPException(status_code=500, detail=str(e))

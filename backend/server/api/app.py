@@ -31,7 +31,9 @@ _ui_dir = _root / "dist" / "control-ui"
 if _ui_dir.is_dir():
     @app.get("/")
     def _serve_index():
-        return FileResponse(_ui_dir / "index.html")
+        r = FileResponse(_ui_dir / "index.html")
+        r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return r
 
     app.mount("/assets", StaticFiles(directory=str(_ui_dir / "assets")), name="ui-assets")
 
@@ -47,7 +49,9 @@ if _ui_dir.is_dir():
                 return FileResponse(safe_path)
         except OSError:
             pass
-        return FileResponse(_ui_dir / "index.html")
+        r = FileResponse(_ui_dir / "index.html")
+        r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return r
 
     logger.info("UI 已挂载: %s", _ui_dir)
 else:
