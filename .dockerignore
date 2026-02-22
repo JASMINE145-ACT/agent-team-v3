@@ -1,0 +1,14 @@
+# 构建镜像时排除，减小镜像体积并避免把密钥打进镜像
+.env
+.env.*
+.git
+.gitignore
+__pycache__
+*.pyc
+.pytest_cache
+node_modules
+*.log
+logs
+data/sessions/*.json
+uploads/*
+*.db

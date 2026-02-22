@@ -41,7 +41,7 @@ _SORTED_SYNONYMS: list[str] = sorted(_SYNONYM_TO_GROUP.keys(), key=len, reverse=
 # 单字 token（如「三」「通」）在打分中的权重，相对于多字 token 的 1.0
 _SINGLE_CHAR_WEIGHT = 0.5
 
-# 询价关键词中的英文/印尼语 → 中文品名，用于筛选时命中库内品名（筛选逻辑完善）
+# 询价关键词中的英文/印尼语/口语 → 中文品名，用于筛选时命中库内品名（与 wanding_business_knowledge.md 保持一致，便于 LLM 选型有思路）
 QUERY_TERM_TO_CHINESE = [
     ("4 cabang", "管四通圆接线盒"),
     ("conduit", "电线管"), ("counduit", "电线管"), ("pipa", "管"),
@@ -49,6 +49,8 @@ QUERY_TERM_TO_CHINESE = [
     ("klem", "管夹"),
     ("cabang", "四通"), ("tdust", "四通"),
     ("热熔器", "焊接机"), ("热熔机", "焊接机"), ("熔接器", "焊接机"),
+    ("四通接线盒", "管四通圆接线盒"),
+    ("马鞍卡", "管夹"),
 ]
 
 
@@ -58,6 +60,86 @@ def _normalize_keyword_terms(keywords: str) -> str:
     for eng, ch in QUERY_TERM_TO_CHINESE:
         s = re.sub(r"\b" + re.escape(eng) + r"\b", ch, s, flags=re.I)
     return s.strip()
+
+
+# 业务知识中【字段匹配同义与规格】规则缓存，供字段匹配阶段使用（与 LLM 选型共用同一 knowledge 文件）
+_FIELD_MATCHING_RULES_CACHE: dict = {}  # {"path": str, "mtime": float|None, "rules": [(sources, targets), ...]}
+
+
+def _load_field_matching_rules_from_knowledge() -> List[tuple[List[str], List[str]]]:
+    """
+    从 wanding_business_knowledge.md 的【字段匹配同义与规格】段落解析规则，
+    用于字段匹配阶段同义扩展，提高命中率。返回 [(source_terms, target_terms), ...]。
+    """
+    global _FIELD_MATCHING_RULES_CACHE
+    try:
+        from backend.tools.inventory.config import config
+        path_str = getattr(config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
+        if not path_str:
+            return []
+        p = Path(path_str)
+        if not p.exists():
+            return []
+        mtime: Optional[float] = None
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            pass
+        if (
+            _FIELD_MATCHING_RULES_CACHE.get("path") == path_str
+            and _FIELD_MATCHING_RULES_CACHE.get("mtime") == mtime
+        ):
+            return _FIELD_MATCHING_RULES_CACHE.get("rules") or []
+        content = p.read_text(encoding="utf-8")
+        rules: List[tuple[List[str], List[str]]] = []
+        in_section = False
+        for line in content.splitlines():
+            line = line.strip()
+            if "【字段匹配" in line or "【字段匹配同义" in line:
+                in_section = True
+                continue
+            if in_section and line.startswith("【"):
+                break
+            if not in_section:
+                continue
+            # 解析 "- 源词 源词 → 检索词 检索词" 或 "  - ... → ..."
+            if line.startswith("-"):
+                line = line.lstrip("-").strip()
+            if "→" in line:
+                left, _, right = line.partition("→")
+            elif "->" in line:
+                left, _, right = line.partition("->")
+            else:
+                continue
+            sources = [t.strip() for t in left.split() if t.strip()]
+            targets = [t.strip() for t in right.split() if t.strip()]
+            if sources and targets:
+                rules.append((sources, targets))
+        _FIELD_MATCHING_RULES_CACHE = {"path": path_str, "mtime": mtime, "rules": rules}
+        return rules
+    except Exception as e:
+        logger.debug("加载字段匹配规则失败: %s", e)
+        return []
+
+
+def _apply_knowledge_expansion(keywords: str) -> str:
+    """
+    根据业务知识【字段匹配同义与规格】规则，在字段匹配前扩展询价词，
+    使口语/同义词能命中库内品名（如 直接→直通 排水、热熔器→焊接机）。
+    """
+    if not (keywords or "").strip():
+        return keywords
+    rules = _load_field_matching_rules_from_knowledge()
+    added: List[str] = []
+    kw_lower = (keywords or "").lower()
+    for sources, targets in rules:
+        for src in sources:
+            if src.lower() in kw_lower or re.search(re.escape(src), keywords, re.I):
+                added.extend(targets)
+                break
+    if not added:
+        return keywords.strip()
+    return (keywords.strip() + " " + " ".join(added)).strip()
 
 MM_TO_INCH = {
     "16": '1/2"', "20": '3/4"', "25": '1"', "32": '1-1/4"', "40": '1-1/2"',
@@ -325,8 +407,11 @@ def match_fuzzy(
     """
     DataBase-style 模糊匹配，返回最佳单结果。
     返回 {code, matched_name, unit_price} 或 None。
+    先按业务知识【字段匹配补充规则】扩展检索词，再做同义/外语替换（SYNONYM_GROUPS、QUERY_TERM_TO_CHINESE）。
     """
-    keywords = _normalize_keyword_terms((keywords or "").strip())
+    keywords = (keywords or "").strip()
+    keywords = _apply_knowledge_expansion(keywords)
+    keywords = _normalize_keyword_terms(keywords)
     if not keywords:
         return None
 
@@ -359,8 +444,11 @@ def match_fuzzy_candidates(
     返回候选列表，每项含 code, matched_name, unit_price, score。
     - max_score_tiers 为 None：按分数排序取前 max_candidates 条。
     - max_score_tiers 为 N（如 2）：取分数前 N 档，每档全部返回（如 top1 有 3 条、top2 有 2 条则共 5 条）。
+    先按业务知识【字段匹配补充规则】扩展检索词，再做同义/外语替换。
     """
-    keywords = _normalize_keyword_terms((keywords or "").strip())
+    keywords = (keywords or "").strip()
+    keywords = _apply_knowledge_expansion(keywords)
+    keywords = _normalize_keyword_terms(keywords)
     if not keywords:
         return []
 

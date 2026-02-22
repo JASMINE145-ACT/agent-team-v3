@@ -192,7 +192,7 @@ def persist_out_of_stock_records(
     可选 sheet_name（单条覆盖时使用）；未传则用顶层 sheet_name。
     表内 id、uploaded_at、product_key、count 由系统自动生成。
     """
-    from models.models import OutOfStockProduct
+    from backend.tools.oos.models.models import OutOfStockProduct
     from .data_service import DataService
 
     data_service = DataService()

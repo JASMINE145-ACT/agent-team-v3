@@ -27,7 +27,7 @@ from backend.agent.tools import get_all_tools, execute_tool
 logger = logging.getLogger(__name__)
 
 TOOL_RESULT_MAX_CHARS = 16000
-_CONTEXT_MAX_CHARS = 40_000  # messages 总内容压缩阈值（约 10K token）
+_CONTEXT_MAX_CHARS = 20_000  # messages 总内容压缩阈值，超限时压缩旧 tool 消息
 _MAX_STEPS_HINT = "（已达最大步数）请根据目前已获取的信息直接给出最终回答，不再调用任何工具。"
 
 
@@ -133,11 +133,7 @@ _SKILL_INVENTORY_PRICE = """\
 - **询价/查 code/查物料编号**：**必须优先调用 match_quotation**（一次得到历史+万鼎并集及匹配来源）；仅当用户明确「用万鼎查/不要历史」时改用 match_wanding_price。得 code 后可用 get_inventory_by_code 查库存。
 - **「全部价格」「各档价格」「A B C D 档」**：必须对**同一 keywords** 分别调用 **4 次** match_wanding_price：customer_level="A"、"B"、"C"、"D"，汇总成表格「客户级别 | 客户价」。**只调一次会只得到默认 B 档，不是全部价格。**
 - **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。
-- **展示匹配结果时**：
-  ① **匹配来源（必显）**：每次展示匹配结果，**必须在表格或候选列表上方第一行**写「**匹配来源：**xxx」（从 observation 的 match_source 取值：历史报价 / 字段匹配 / 共同；若为「历史报价、字段匹配」表示本批同时含两类结果）。不得省略。
-  ② **每行来源（当候选含 source 时）**：若 candidates 中每项有 source 字段，表格中增加一列「来源」或于每行后标注（历史报价/字段匹配/共同），便于用户看出哪些来自报价历史、哪些来自万鼎。
-  ③ **候选+已选**：若有 candidates 与 chosen，先列全部候选再标明「已选：第 N 条」；选错时用户可立即指出正确项。
-  ④ 调用 select_wanding_match 时请传入上一步 observation 的 match_source。"""
+- **展示**：结果表上方必写「匹配来源：」+ match_source；候选含 source 时表格加「来源」列；有 chosen 时标「已选：第 N 条」；select_wanding_match 须传入上步 match_source。"""
 
 _SKILL_OOS = """\
 **2. 无货**
@@ -146,7 +142,9 @@ _SKILL_OOS = """\
 - **get_oos_stats()**：无货统计（总记录数、无货产品数、被报无货≥2 次产品数、已发邮件产品数、今日新增）。用户问「无货统计」「无货概况」时用。
 - **get_oos_by_file(limit?)**：按文件统计，每个报价单对应的无货记录数及上传时间。用户问「按文件看无货」「每个文件多少无货」时用。
 - **get_oos_by_time(last_n_days?)**：按时间（按日）统计最近 N 天新增无货记录数。用户问「按时间看无货」「无货按日/按天」「最近几天无货趋势」时用。
-- **register_oos(file_path, prompt?)**：无货登记，从报价单解析无货行并落库。**仅当用户明确说「无货登记」且 context 中已有 file_path 时调用**；无 file_path 时提示先上传。"""
+- **无货登记有两种途径**（二选一）：
+  - **register_oos(file_path, prompt?)**：从已上传报价单解析无货行并落库。仅当用户明确说「无货登记」且 context 中已有 file_path 时调用。
+  - **register_oos_from_text(product_name, specification?, quantity?, unit?)**：用户**直接说**某产品无货时用，无需文件。例如「外螺纹堵头 50 无货」「报一下 XX 无货」「登记 XX 无货」→ 从用户句中解析出产品名、规格、数量后调用本工具落库；无 file_path 时必须用本工具，勿提示先上传。"""
 
 _SKILL_QUOTE = """\
 **3. 报价单（提取/填表/普适 Excel）**

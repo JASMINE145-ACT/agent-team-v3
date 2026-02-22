@@ -119,6 +119,7 @@ export type AppViewState = {
   bkError: string | null;
   bkSaving: boolean;
   bkLastSuccess: number | null;
+  bkDependentFiles: { mapping_table: string; price_library: string } | null;
   whatsappLoginMessage: string | null;
   whatsappLoginQrDataUrl: string | null;
   whatsappLoginConnected: boolean | null;
@@ -136,6 +137,7 @@ export type AppViewState = {
   oosList: import("./types.js").OosRecord[];
   oosByFile: import("./types.js").OosByFileRow[];
   oosByTime: import("./types.js").OosByTimeRow[];
+  oosShowAddForm: boolean;
   agentsLoading: boolean;
   agentsList: AgentsListResult | null;
   agentsError: string | null;

@@ -259,7 +259,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "match_quotation",
-                "description": "询价匹配（推荐）：同时查报价历史与万鼎字段匹配，结果取并集，每条候选带匹配来源（历史报价/字段匹配/共同）。用于用户问「XX的code」「查XX物料编号」「询价XX」时优先调用本工具，可一次得到历史+万鼎结果；仅当用户明确说「用万鼎查」「不要历史」「直接万鼎」时才改用 match_wanding_price。",
+                "description": "询价匹配：同时查报价历史与万鼎字段匹配，结果取并集，每条带 source（历史报价/字段匹配/共同）。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -274,7 +274,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "match_by_quotation_history",
-                "description": "仅历史匹配：只在报价映射表中匹配，不查万鼎。一般用 match_quotation 即可（历史+万鼎并行）；需单独历史结果时用本工具。",
+                "description": "仅历史匹配：只在报价映射表匹配，不查万鼎。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -289,7 +289,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "match_wanding_price",
-                "description": "字段匹配（万鼎价格库）：按 keywords 在万鼎库中匹配，返回 unit_price（customer_level 默认 B，一次一档）。用户说「用万鼎查」「万鼎数据库」「直接万鼎」「字段查询」「还有什么其他型号」时直接调用本工具，不要先调历史匹配。历史匹配无命中时也可调用。返回未匹配 / single / needs_selection。",
+                "description": "万鼎字段匹配：按 keywords 在万鼎库匹配，返回 unit_price（customer_level 默认 B，一次一档）。返回 single/needs_selection/未匹配。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -304,7 +304,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "select_wanding_match",
-                "description": "LLM 选型：从 needs_selection 候选中选最佳匹配，有把握返 1 个，无把握列选项及 reasoning。调用时请传入上一步 observation 中的 match_source（历史报价/字段匹配），以便结果中标明匹配来源。",
+                "description": "LLM 选型：从 needs_selection 候选中选 1 个；须传入 match_source（上步 observation）。",
                 "parameters": {
                     "type": "object",
                     "properties": {

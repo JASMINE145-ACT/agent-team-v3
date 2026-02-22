@@ -185,7 +185,15 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadOverview(host);
   }
   if (host.tab === "channels") {
-    await loadBusinessKnowledge(host as unknown as { basePath: string; bkContent: string; bkLoading: boolean; bkError: string | null; bkSaving: boolean; bkLastSuccess: number | null });
+    await loadBusinessKnowledge(host as unknown as {
+      basePath: string;
+      bkContent: string;
+      bkLoading: boolean;
+      bkError: string | null;
+      bkSaving: boolean;
+      bkLastSuccess: number | null;
+      bkDependentFiles: { mapping_table: string; price_library: string } | null;
+    });
   }
   if (host.tab === "instances") {
     await loadOos(host as unknown as OpenClawApp);

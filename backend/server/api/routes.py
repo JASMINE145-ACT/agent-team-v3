@@ -224,6 +224,53 @@ async def oos_by_time(days: int = 30) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/api/oos/delete")
+async def oos_delete(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """无货看板：按 product_key 软删除该产品的所有无货记录。Body: { "product_key": "..." }"""
+    product_key = (body.get("product_key") or "").strip()
+    if not product_key:
+        raise HTTPException(status_code=400, detail="请提供 product_key")
+    try:
+        ds = _get_oos_data_service()
+        n = ds.delete_by_product_key(product_key)
+        return {"success": True, "deleted": n}
+    except Exception as e:
+        logger.exception("oos/delete 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/oos/add")
+async def oos_add(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """无货看板：手动新增一条无货记录。Body: { "product_name": "...", "specification?": "", "quantity?": 0, "unit?": "" }"""
+    product_name = (body.get("product_name") or "").strip()
+    if not product_name:
+        raise HTTPException(status_code=400, detail="请提供 product_name")
+    try:
+        qty = body.get("quantity")
+        if qty is None:
+            qty = 0
+        try:
+            qty = float(qty)
+        except (TypeError, ValueError):
+            qty = 0.0
+        record = {
+            "product_name": product_name,
+            "specification": (body.get("specification") or "").strip(),
+            "unit": (body.get("unit") or "").strip(),
+            "quantity": qty,
+        }
+        from backend.tools.oos.services.quotation_agent_tool import persist_out_of_stock_records
+        out = persist_out_of_stock_records("看板手动添加", [record], "")
+        if out.get("success"):
+            return {"success": True, "message": out.get("result", "已添加")}
+        raise HTTPException(status_code=400, detail=out.get("error", "添加失败"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("oos/add 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ---------- 业务知识（万鼎 wanding_business_knowledge.md，Control UI 可编辑）----------
 
 def _get_business_knowledge_path() -> Path:
@@ -268,6 +315,25 @@ async def put_business_knowledge(body: Dict[str, Any] = Body(...)) -> Dict[str, 
         raise
     except Exception as e:
         logger.exception("business-knowledge PUT 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/business-knowledge/dependent-files")
+async def get_business_knowledge_dependent_files() -> Dict[str, Any]:
+    """返回选型与历史报价依赖的 Excel 路径，供业务知识页「相关数据文件」指引使用。"""
+    try:
+        from backend.tools.inventory.config import config
+        mapping = getattr(config, "MAPPING_TABLE_PATH", "") or ""
+        price_lib = getattr(config, "PRICE_LIBRARY_PATH", "") or ""
+        return {
+            "success": True,
+            "data": {
+                "mapping_table": mapping,
+                "price_library": price_lib,
+            },
+        }
+    except Exception as e:
+        logger.exception("business-knowledge/dependent-files 失败")
         raise HTTPException(status_code=500, detail=str(e))
 
 

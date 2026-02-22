@@ -82,3 +82,58 @@ export async function loadOos(state: OosState, options?: { limit?: number; days?
     state.oosLoading = false;
   }
 }
+
+export async function deleteOosItem(state: OosState, productKey: string): Promise<boolean> {
+  if (!productKey?.trim()) return false;
+  try {
+    const res = await fetch(apiUrl(state.basePath, "/api/oos/delete"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product_key: productKey.trim() }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok && json.success) {
+      await loadOos(state);
+      return true;
+    }
+    state.oosError = json.detail ?? `删除失败: ${res.status}`;
+    return false;
+  } catch (err) {
+    state.oosError = err instanceof Error ? err.message : String(err);
+    return false;
+  }
+}
+
+export type OosAddRecord = {
+  product_name: string;
+  specification?: string;
+  quantity?: number;
+  unit?: string;
+};
+
+export async function addOosItem(state: OosState, record: OosAddRecord): Promise<boolean> {
+  const product_name = (record.product_name || "").trim();
+  if (!product_name) return false;
+  try {
+    const res = await fetch(apiUrl(state.basePath, "/api/oos/add"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        product_name,
+        specification: (record.specification ?? "").trim(),
+        quantity: record.quantity ?? 0,
+        unit: (record.unit ?? "").trim(),
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.ok && json.success) {
+      await loadOos(state);
+      return true;
+    }
+    state.oosError = json.detail ?? `添加失败: ${res.status}`;
+    return false;
+  } catch (err) {
+    state.oosError = err instanceof Error ? err.message : String(err);
+    return false;
+  }
+}

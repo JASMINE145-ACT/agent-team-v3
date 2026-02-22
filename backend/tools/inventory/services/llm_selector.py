@@ -138,11 +138,13 @@ def llm_select_best(
 请二选一（仅输出一个 JSON）：
 1) **有把握**选出一个最匹配的：用 "confident": true，并给出 "index"（序号 1-{len(candidates)}）和 "reasoning"。
 2) **没有把握**（多个都可能或都不太像）：用 "confident": false，不要单选，改为 "options" 列出 2～3 个最可能的选项，每项含 "index" 和 "reasoning"（简短说明为何可能匹配）。
-若判断全部不匹配，则 "confident": true, "index": 0, "reasoning": "..."。
-**重要**：若多个候选规格接近、易混淆，或询价描述不够明确，请优先用 "confident": false 列出选项供人工确认，避免错选。
+3) **全部不匹配、应报无货**：若候选里没有一个真正符合询价（规格/品类/用途明显不对），必须用 "confident": true, "index": 0, "reasoning": "<简短说明为何无匹配>"。**报无货是重要环节**：很多产品确实无货或库里没有对应型号，不要勉强选一个；如实报无货才能被登记与跟进。
+
+**重要**：若多个候选规格接近、易混淆，或询价描述不够明确，请优先用 "confident": false 列出选项供人工确认，避免错选。若确实没有任何候选合适，务必 index: 0 报无货。
 
 有把握时输出：{{"confident": true, "index": <序号或0>, "reasoning": "<理由>"}}
-没有把握时输出：{{"confident": false, "options": [{{"index": 1, "reasoning": "..."}}, {{"index": 2, "reasoning": "..."}}]}}
+没有把握时输出：{{"confident": false, "options": [{{"index": 1, "reasoning": "..."}}, ...]}}
+无匹配/报无货时输出：{{"confident": true, "index": 0, "reasoning": "<为何无匹配>"}}
 """
 
     try:
@@ -158,7 +160,7 @@ def llm_select_best(
         api_kwargs: dict[str, Any] = {
             "model": model,
             "messages": [
-                {"role": "system", "content": "你是万鼎产品匹配专家。仅输出一个 JSON：有把握时 {\"confident\": true, \"index\": 序号或0, \"reasoning\": \"理由\"}；没有把握时 {\"confident\": false, \"options\": [{\"index\": 序号, \"reasoning\": \"理由\"}, ...]}。不要其他文字。"},
+                {"role": "system", "content": "你是万鼎产品匹配专家。仅输出一个 JSON：有把握时 {\"confident\": true, \"index\": 序号或0, \"reasoning\": \"理由\"}；没有把握时 {\"confident\": false, \"options\": [{\"index\": 序号, \"reasoning\": \"理由\"}, ...]}。当候选里没有一个真正匹配时，必须 index: 0 报无货；报无货是重要环节，不要勉强选一个。不要其他文字。"},
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0,

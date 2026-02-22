@@ -41,8 +41,8 @@ class Session:
 class SessionStore:
     MAX_TURNS = 8
     ANSWER_TRIM = 4000
-    INJECT_TURNS = 5
-    INJECT_ANSWER_TRIM = 2200
+    INJECT_TURNS = 3
+    INJECT_ANSWER_TRIM = 1000
 
     def __init__(self, persist_dir: Optional[Path] = None):
         self._mem = {}

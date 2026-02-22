@@ -1,5 +1,6 @@
 import { html, nothing } from "lit";
 import type { OosStats, OosRecord, OosByFileRow, OosByTimeRow } from "../types.ts";
+import type { OosAddRecord } from "../controllers/oos.ts";
 
 export type OosDashboardProps = {
   loading: boolean;
@@ -9,6 +10,11 @@ export type OosDashboardProps = {
   byFile: OosByFileRow[];
   byTime: OosByTimeRow[];
   onRefresh: () => void;
+  onDelete?: (productKey: string) => void;
+  showAddForm?: boolean;
+  onOpenAddForm?: () => void;
+  onCloseAddForm?: () => void;
+  onAdd?: (record: OosAddRecord) => Promise<boolean>;
 };
 
 export function renderOosDashboard(props: OosDashboardProps) {
@@ -28,11 +34,45 @@ export function renderOosDashboard(props: OosDashboardProps) {
         ${props.stats ? renderStatsCards(props.stats) : props.loading ? nothing : html`<div class="muted">暂无统计</div>`}
       </div>
       <div style="margin-top: 24px;">
-        <div class="card-title" style="font-size: 1rem;">无货产品列表</div>
+        <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <div class="card-title" style="font-size: 1rem;">无货产品列表</div>
+          ${props.onOpenAddForm && !props.showAddForm
+            ? html`<button class="btn btn--primary" ?disabled=${props.loading} @click=${props.onOpenAddForm}>手动新增</button>`
+            : nothing}
+        </div>
+        ${props.showAddForm && props.onAdd && props.onCloseAddForm
+          ? html`
+              <div class="callout" style="margin-bottom: 12px; padding: 12px;">
+                <div style="font-weight: 600; margin-bottom: 8px;">新增无货记录</div>
+                <form @submit=${async (e: Event) => {
+                  e.preventDefault();
+                  const form = (e.target as HTMLFormElement);
+                  const name = (form.querySelector('[name="oos_add_name"]') as HTMLInputElement)?.value?.trim() ?? "";
+                  if (!name) return;
+                  const ok = await props.onAdd!({
+                    product_name: name,
+                    specification: (form.querySelector('[name="oos_add_spec"]') as HTMLInputElement)?.value?.trim() ?? "",
+                    quantity: parseFloat((form.querySelector('[name="oos_add_qty"]') as HTMLInputElement)?.value ?? "0") || 0,
+                    unit: (form.querySelector('[name="oos_add_unit"]') as HTMLInputElement)?.value?.trim() ?? "",
+                  });
+                  if (ok) props.onCloseAddForm!();
+                }}>
+                  <div class="row" style="gap: 8px; flex-wrap: wrap; align-items: center;">
+                    <input name="oos_add_name" type="text" placeholder="产品名称（必填）" required style="min-width: 140px;" />
+                    <input name="oos_add_spec" type="text" placeholder="规格" style="min-width: 80px;" />
+                    <input name="oos_add_qty" type="number" placeholder="数量" min="0" step="1" value="0" style="width: 80px;" />
+                    <input name="oos_add_unit" type="text" placeholder="单位" style="width: 60px;" />
+                    <button type="submit" class="btn btn--primary">确定</button>
+                    <button type="button" class="btn" @click=${props.onCloseAddForm}>取消</button>
+                  </div>
+                </form>
+              </div>
+            `
+          : nothing}
         <div class="list" style="margin-top: 8px;">
           ${props.list.length === 0
             ? html`<div class="muted">暂无无货产品记录。</div>`
-            : props.list.slice(0, 50).map((r) => renderProductRow(r))}
+            : props.list.slice(0, 50).map((r) => renderProductRow(r, props.onDelete))}
         </div>
         ${props.list.length > 50 ? html`<div class="muted" style="margin-top: 8px;">共 ${props.list.length} 个无货产品，仅展示前 50 个</div>` : nothing}
       </div>
@@ -76,7 +116,7 @@ function renderStatsCards(s: OosStats) {
   );
 }
 
-function renderProductRow(r: OosRecord) {
+function renderProductRow(r: OosRecord, onDelete?: (productKey: string) => void) {
   const name = r.product_name ?? "";
   const spec = r.specification ?? "";
   const unit = r.unit ?? "";
@@ -84,12 +124,16 @@ function renderProductRow(r: OosRecord) {
   const count = r.count ?? 1;
   const emailSent = (r.email_sent_count ?? 0) > 0 || r.email_status === "sent";
   const emailLabel = emailSent ? "已发送" : "未发";
+  const productKey = r.product_key ?? "";
   return html`
-    <div class="list-item">
+    <div class="list-item" style="display: flex; justify-content: space-between; align-items: center;">
       <div class="list-main">
         <div class="list-title">${name} ${spec}</div>
         <div class="list-sub">数量: ${String(qty)} ${unit} · 被报无货 ${count} 次 · 邮件: ${emailLabel}</div>
       </div>
+      ${onDelete && productKey
+        ? html`<button class="btn" style="flex-shrink: 0;" title="删除该无货产品" @click=${() => onDelete(productKey)}>删除</button>`
+        : nothing}
     </div>
   `;
 }

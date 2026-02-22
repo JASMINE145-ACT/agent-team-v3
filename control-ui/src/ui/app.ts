@@ -210,6 +210,7 @@ export class OpenClawApp extends LitElement {
   @state() bkError: string | null = null;
   @state() bkSaving = false;
   @state() bkLastSuccess: number | null = null;
+  @state() bkDependentFiles: { mapping_table: string; price_library: string } | null = null;
   @state() whatsappLoginMessage: string | null = null;
   @state() whatsappLoginQrDataUrl: string | null = null;
   @state() whatsappLoginConnected: boolean | null = null;
@@ -228,6 +229,7 @@ export class OpenClawApp extends LitElement {
   @state() oosList: import("./types.js").OosRecord[] = [];
   @state() oosByFile: import("./types.js").OosByFileRow[] = [];
   @state() oosByTime: import("./types.js").OosByTimeRow[] = [];
+  @state() oosShowAddForm = false;
 
   @state() agentsLoading = false;
   @state() agentsList: AgentsListResult | null = null;

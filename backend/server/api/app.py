@@ -1,6 +1,7 @@
 """
 FastAPI 主应用 — version3 单 Agent
 """
+import asyncio
 import logging
 from pathlib import Path
 
@@ -79,6 +80,29 @@ cd ..</pre>
     logger.warning("UI 目录不存在，未挂载静态: %s — 根路径返回构建说明页", _ui_dir)
 
 
+def _warmup_sync() -> None:
+    """同步预热：加载工具列表、Resolver（slim 表 + 向量缓存）、TableAgent。在后台线程中执行。"""
+    try:
+        from backend.agent.tools import get_all_tools
+        get_all_tools()
+    except Exception as e:
+        logger.debug("预热工具列表失败: %s", e)
+    try:
+        from backend.tools.inventory.services.inventory_agent_tools import _get_resolver, _get_table_agent
+        _get_resolver()   # 加载 slim 表 + .npy 向量（主要耗时）
+        _get_table_agent()  # 初始化 ACCURATE API 客户端
+    except Exception as e:
+        logger.debug("预热库存组件失败: %s", e)
+
+
+async def _warmup() -> None:
+    try:
+        await asyncio.to_thread(_warmup_sync)
+        logger.info("库存组件预热完成（Resolver + TableAgent 已就绪）")
+    except Exception as e:
+        logger.warning("库存组件预热失败（不影响启动）: %s", e)
+
+
 @app.on_event("startup")
 async def startup_event():
     Config.validate()
@@ -92,6 +116,7 @@ async def startup_event():
             except Exception as e:
                 logger.warning("创建目录失败 %s: %s", p, e)
     logger.info("Agent-JK v3 单 Agent 后端启动完成 — %s:%s", Config.API_HOST, Config.API_PORT)
+    asyncio.create_task(_warmup())  # 后台预热，不阻塞启动响应
 
 
 if __name__ == "__main__":

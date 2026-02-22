@@ -334,6 +334,32 @@ class DataService:
         finally:
             session.close()
 
+    def delete_by_product_key(self, product_key: str) -> int:
+        """
+        按 product_key 软删除该产品的所有无货记录（看板「删除」用）
+
+        Args:
+            product_key: 产品键（与 _generate_product_key 一致）
+
+        Returns:
+            被软删除的记录数
+        """
+        if not (product_key or "").strip():
+            return 0
+        session = self.SessionLocal()
+        try:
+            count = session.query(OutOfStockRecordDB).filter(
+                OutOfStockRecordDB.product_key == product_key.strip()
+            ).update({"is_deleted": 1}, synchronize_session=False)
+            session.commit()
+            return count
+        except Exception as e:
+            logger.error("delete_by_product_key failed: %s", e)
+            session.rollback()
+            return 0
+        finally:
+            session.close()
+
     def restore_record(self, record_id: int) -> bool:
         """
         恢复已删除的记录

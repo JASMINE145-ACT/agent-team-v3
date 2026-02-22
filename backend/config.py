@@ -27,7 +27,8 @@ class Config:
     AOL_SIGNATURE_SECRET = os.getenv("AOL_SIGNATURE_SECRET")
     AOL_DATABASE_ID = os.getenv("AOL_DATABASE_ID")
     API_HOST = os.getenv("API_HOST", "0.0.0.0")
-    API_PORT = int(os.getenv("API_PORT", "8000"))
+    # 云端平台常注入 PORT，本地默认 8000
+    API_PORT = int(os.getenv("API_PORT") or os.getenv("PORT", "8000"))
     DEBUG = os.getenv("DEBUG", "false").lower() == "true"
     UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(base_dir / "uploads")))
     MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))

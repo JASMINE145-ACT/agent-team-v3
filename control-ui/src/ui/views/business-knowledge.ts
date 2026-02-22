@@ -1,8 +1,14 @@
 /**
  * 业务知识页：可编辑 wanding_business_knowledge.md，供万鼎选型与匹配使用。
  * 布局与交互参考 oos-dashboard（无货看板）：单卡、标题、副标题、刷新/保存按钮。
+ * 含「相关数据文件」指引：历史报价/选型依赖的 Excel 路径，可复制后打开编辑。
  */
 import { html, nothing } from "lit";
+
+export type DependentFiles = {
+  mapping_table: string;
+  price_library: string;
+};
 
 export type BusinessKnowledgeProps = {
   loading: boolean;
@@ -10,14 +16,29 @@ export type BusinessKnowledgeProps = {
   error: string | null;
   content: string;
   lastSuccessAt: number | null;
+  dependentFiles: DependentFiles | null;
   onReload: () => void;
   onSave: (content: string) => void;
   onContentChange: (content: string) => void;
 };
 
+function copyPath(path: string): void {
+  if (!path) return;
+  navigator.clipboard?.writeText(path).catch(() => {});
+}
+
 export function renderBusinessKnowledge(props: BusinessKnowledgeProps) {
-  const { loading, saving, error, content, lastSuccessAt, onReload, onSave, onContentChange } =
-    props;
+  const {
+    loading,
+    saving,
+    error,
+    content,
+    lastSuccessAt,
+    dependentFiles,
+    onReload,
+    onSave,
+    onContentChange,
+  } = props;
 
   const lastSuccessStr =
     lastSuccessAt != null
@@ -48,6 +69,48 @@ export function renderBusinessKnowledge(props: BusinessKnowledgeProps) {
         </div>
       </div>
       ${error ? html`<div class="callout danger" style="margin-top: 12px;">${error}</div>` : nothing}
+      ${dependentFiles && (dependentFiles.mapping_table || dependentFiles.price_library)
+        ? html`
+            <div class="callout" style="margin-top: 12px; padding: 12px;">
+              <div style="font-weight: 600; margin-bottom: 8px;">相关数据文件</div>
+              <p class="muted" style="margin: 0 0 10px 0; font-size: 0.9rem;">
+                选型与历史报价依赖以下 Excel，有更新时可复制路径后在资源管理器中打开或用 Excel 编辑。
+              </p>
+              ${dependentFiles.mapping_table
+                ? html`
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
+                      <span style="min-width: 100px;">询价映射表（历史报价）：</span>
+                      <code style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 0.85rem;">${dependentFiles.mapping_table}</code>
+                      <button
+                        class="btn"
+                        style="flex-shrink: 0;"
+                        @click=${() => copyPath(dependentFiles.mapping_table)}
+                        title="复制路径"
+                      >
+                        复制路径
+                      </button>
+                    </div>
+                  `
+                : nothing}
+              ${dependentFiles.price_library
+                ? html`
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                      <span style="min-width: 100px;">万鼎价格库：</span>
+                      <code style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 0.85rem;">${dependentFiles.price_library}</code>
+                      <button
+                        class="btn"
+                        style="flex-shrink: 0;"
+                        @click=${() => copyPath(dependentFiles.price_library)}
+                        title="复制路径"
+                      >
+                        复制路径
+                      </button>
+                    </div>
+                  `
+                : nothing}
+            </div>
+          `
+        : nothing}
       <div style="margin-top: 16px;">
         <textarea
           class="code-block"

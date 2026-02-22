@@ -3,6 +3,11 @@
  * 模式参考 controllers/oos.ts（无货看板）。
  */
 
+export type DependentFiles = {
+  mapping_table: string;
+  price_library: string;
+};
+
 export type BusinessKnowledgeState = {
   basePath: string;
   bkContent: string;
@@ -10,6 +15,7 @@ export type BusinessKnowledgeState = {
   bkError: string | null;
   bkSaving: boolean;
   bkLastSuccess: number | null;
+  bkDependentFiles: DependentFiles | null;
 };
 
 function apiUrl(basePath: string, path: string): string {
@@ -17,9 +23,29 @@ function apiUrl(basePath: string, path: string): string {
   return prefix ? `${prefix}${path}` : path;
 }
 
+export async function loadBusinessKnowledgeDependentFiles(
+  state: BusinessKnowledgeState,
+): Promise<void> {
+  try {
+    const res = await fetch(apiUrl(state.basePath, "/api/business-knowledge/dependent-files"));
+    const json = await res.json().catch(() => ({}));
+    if (json.success && json.data) {
+      state.bkDependentFiles = {
+        mapping_table: json.data.mapping_table ?? "",
+        price_library: json.data.price_library ?? "",
+      };
+    } else {
+      state.bkDependentFiles = null;
+    }
+  } catch {
+    state.bkDependentFiles = null;
+  }
+}
+
 export async function loadBusinessKnowledge(state: BusinessKnowledgeState): Promise<void> {
   state.bkLoading = true;
   state.bkError = null;
+  loadBusinessKnowledgeDependentFiles(state);
   try {
     const res = await fetch(apiUrl(state.basePath, "/api/business-knowledge"));
     const json = await res.json().catch(() => ({}));

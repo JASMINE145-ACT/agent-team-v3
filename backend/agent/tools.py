@@ -59,7 +59,7 @@ EXTRA_TOOLS = [
         "type": "function",
         "function": {
             "name": "register_oos",
-            "description": "【无货】无货登记：从已上传的报价单中解析无货行并落库。仅当用户明确说「无货登记」且 context 中已有 file_path 时调用；无 file_path 时勿用，应提示先上传。",
+            "description": "【无货】无货登记（从报价单）：从已上传的报价单中解析无货行并落库。仅当用户明确说「无货登记」且 context 中已有 file_path 时调用；无 file_path 时勿用。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -67,6 +67,23 @@ EXTRA_TOOLS = [
                     "prompt": {"type": "string", "description": "可选，解析/落库说明"},
                 },
                 "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "register_oos_from_text",
+            "description": "【无货】无货登记（直接登记）：用户用文字说出某产品无货时调用，无需上传文件。例如用户说「外螺纹堵头 50 无货」「报一下 XX 无货」「登记 XX 无货」时，从用户句中解析出 product_name、规格、数量后调用本工具直接落库。与 register_oos 二选一：有 file_path 用 register_oos；无文件、用户直接说产品名+无货则用本工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_name": {"type": "string", "description": "产品名称（必填），如 外螺纹堵头、三角阀"},
+                    "specification": {"type": "string", "description": "规格，如 50、50cm、DN25；可选"},
+                    "quantity": {"type": "number", "description": "数量，默认 0"},
+                    "unit": {"type": "string", "description": "单位，如 个、根；可选"},
+                },
+                "required": ["product_name"],
             },
         },
     },
@@ -387,6 +404,40 @@ async def execute_tool(
         fp = (arguments.get("file_path") or "").strip() or (ctx.get("file_path") or "").strip()
         out = await asyncio.to_thread(_run_register_oos, fp, ctx, arguments.get("prompt"))
         return out.get("result", "") if out.get("success") else json.dumps(out, ensure_ascii=False)
+
+    if name == "register_oos_from_text":
+        product_name = (arguments.get("product_name") or "").strip()
+        if not product_name:
+            return json.dumps({"success": False, "result": "请提供产品名称（product_name）。"}, ensure_ascii=False)
+        specification = (arguments.get("specification") or "").strip()
+        quantity = arguments.get("quantity")
+        if quantity is None:
+            quantity = 0
+        try:
+            quantity = int(quantity) if isinstance(quantity, (int, float)) else 0
+        except (TypeError, ValueError):
+            quantity = 0
+        unit = (arguments.get("unit") or "").strip()
+        record = {
+            "product_name": product_name,
+            "specification": specification,
+            "unit": unit,
+            "quantity": quantity,
+        }
+        try:
+            from backend.tools.oos.services.quotation_agent_tool import persist_out_of_stock_records
+            out = await asyncio.to_thread(
+                persist_out_of_stock_records,
+                "用户直接登记",
+                [record],
+                sheet_name="",
+            )
+            if out.get("success"):
+                return out.get("result", "已登记「{}」为无货。".format(product_name + (" " + specification if specification else "")))
+            return json.dumps(out, ensure_ascii=False)
+        except Exception as e:
+            logger.exception("register_oos_from_text 失败: %s", e)
+            return json.dumps({"success": False, "result": str(e)}, ensure_ascii=False)
 
     # 库存工具
     if name in _INVENTORY_TOOLS:

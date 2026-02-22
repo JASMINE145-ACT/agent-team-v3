@@ -44,7 +44,7 @@ import {
 } from "./controllers/exec-approvals.ts";
 import { loadLogs } from "./controllers/logs.ts";
 import { loadNodes } from "./controllers/nodes.ts";
-import { loadOos } from "./controllers/oos.ts";
+import { loadOos, deleteOosItem, addOosItem } from "./controllers/oos.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { deleteSessionAndRefresh, loadSessions, patchSession } from "./controllers/sessions.ts";
 import {
@@ -242,6 +242,7 @@ export function renderApp(state: AppViewState) {
                 error: state.bkError,
                 content: state.bkContent,
                 lastSuccessAt: state.bkLastSuccess,
+                dependentFiles: state.bkDependentFiles,
                 onReload: () => loadBusinessKnowledge(state),
                 onSave: (content) => saveBusinessKnowledge(state, content),
                 onContentChange: (content) => (state.bkContent = content),
@@ -259,6 +260,15 @@ export function renderApp(state: AppViewState) {
                 byFile: state.oosByFile,
                 byTime: state.oosByTime,
                 onRefresh: () => loadOos(state),
+                onDelete: (productKey) => deleteOosItem(state, productKey),
+                showAddForm: state.oosShowAddForm,
+                onOpenAddForm: () => (state.oosShowAddForm = true),
+                onCloseAddForm: () => (state.oosShowAddForm = false),
+                onAdd: async (record) => {
+                  const ok = await addOosItem(state, record);
+                  if (ok) state.oosShowAddForm = false;
+                  return ok;
+                },
               })
             : nothing
         }
