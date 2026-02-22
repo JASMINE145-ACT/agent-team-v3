@@ -198,10 +198,14 @@ export type AppViewState = {
   usageLogFilterHasTools: boolean;
   usageLogFilterQuery: string;
   workFilePaths: string[];
-  workPlan: { mode?: string; files?: { path: string; name: string }[]; steps?: { file_index: number; op: string }[] } | null;
-  workPlanLoading: boolean;
   workRunning: boolean;
-  workResult: { success?: boolean; answer?: string; trace?: unknown[]; plan?: unknown; error?: string } | null;
+  /** 0=识别表 1=查价格与库存 2=填表，执行中循环 */
+  workProgressStage: number;
+  workRunStatus: import("./controllers/work.js").WorkRunStatus;
+  workRunId: string | null;
+  workPendingChoices: import("./controllers/work.js").WorkPendingChoice[];
+  workSelections: Record<string, string>;
+  workResult: { success?: boolean; answer?: string; trace?: unknown[]; error?: string } | null;
   workError: string | null;
   workCustomerLevel: string;
   workDoRegisterOos: boolean;

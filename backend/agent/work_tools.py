@@ -12,9 +12,6 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# 计划步骤 op 与工具名对应
-WORK_OPS = ("extract", "match_and_inventory", "fill", "shortage_report", "register_oos")
-
 WORK_TOOLS_OPENAI_FORMAT = [
     {
         "type": "function",
@@ -107,8 +104,8 @@ def _run_work_quotation_match(
     price_library_path: Optional[str] = None,
     sheet_name: Optional[str] = None,
 ) -> dict[str, Any]:
-    from backend.tools.quotation.quote_tools import extract_inquiry_items
     from backend.tools.inventory.services.match_and_inventory import match_price_and_get_inventory
+    from backend.tools.quotation.quote_tools import extract_inquiry_items
 
     ext = extract_inquiry_items(file_path, sheet_name=sheet_name)
     if not ext.get("success"):
@@ -120,6 +117,7 @@ def _run_work_quotation_match(
     to_fill: list[dict] = []
     shortage: list[dict] = []
     unmatched: list[dict] = []
+    pending_choices: list[dict] = []
 
     def _match_one(it: dict) -> Optional[dict]:
         try:
@@ -127,6 +125,7 @@ def _run_work_quotation_match(
                 it.get("keywords", ""),
                 customer_level=customer_level,
                 price_library_path=price_library_path,
+                allow_suggestions_for_work=True,
             )
         except Exception as e:
             logger.debug("match_price_and_get_inventory 失败: %s", e)
@@ -137,12 +136,29 @@ def _run_work_quotation_match(
 
     for it, result in zip(items, match_results):
         qty = it.get("qty", 0)
+        row = it.get("row")
+        product_name = it.get("product_name", "")
+        specification = it.get("specification", "")
+        keywords = it.get("keywords", "")
+
         if not result:
             unmatched.append({
-                "row": it.get("row"),
-                "product_name": it.get("product_name"),
-                "specification": it.get("specification"),
+                "row": row,
+                "product_name": product_name,
+                "specification": specification,
                 "qty": qty,
+            })
+            continue
+        if result.get("_needs_human_choice"):
+            choice_id = f"{file_path}|{row}"
+            pending_choices.append({
+                "id": choice_id,
+                "row": row,
+                "keywords": keywords,
+                "product_name": product_name,
+                "specification": specification,
+                "qty": qty,
+                "options": result.get("options", []),
             })
             continue
         code = result.get("code", "")
@@ -151,19 +167,19 @@ def _run_work_quotation_match(
         available_qty = result.get("available_qty", 0.0)
         if available_qty >= qty:
             to_fill.append({
-                "row": it.get("row"),
+                "row": row,
                 "code": code,
                 "quote_name": quote_name,
                 "unit_price": unit_price,
                 "qty": qty,
-                "specification": it.get("specification"),
+                "specification": specification,
             })
         else:
             shortfall = max(0, qty - available_qty)
             shortage.append({
-                "row": it.get("row"),
-                "product_name": it.get("product_name"),
-                "specification": it.get("specification"),
+                "row": row,
+                "product_name": product_name,
+                "specification": specification,
                 "qty": qty,
                 "available_qty": available_qty,
                 "shortfall": shortfall,
@@ -192,7 +208,7 @@ def _run_work_quotation_match(
             "specification": u.get("specification", ""),
         })
 
-    return {
+    out: dict[str, Any] = {
         "success": True,
         "to_fill": to_fill,
         "shortage": shortage,
@@ -200,6 +216,85 @@ def _run_work_quotation_match(
         "items": items,
         "fill_items_merged": fill_items_merged,
     }
+    if pending_choices:
+        out["needs_human_choice"] = True
+        out["pending_choices"] = pending_choices
+    return out
+
+
+def merge_work_pending_choices(match_result: dict[str, Any], selections: list[dict]) -> dict[str, Any]:
+    """
+    将人工选择合并进 work_quotation_match 结果。
+    match_result 含 needs_human_choice 与 pending_choices；selections 为 [{ item_id, selected_code }]。
+    返回同结构但无 needs_human_choice，pending 项已并入 to_fill/shortage/fill_items_merged。
+    """
+    import copy
+    pending = match_result.get("pending_choices", [])
+    if not pending or not selections:
+        out = copy.deepcopy(match_result)
+        out.pop("needs_human_choice", None)
+        out["pending_choices"] = []
+        return out
+    sel_map = {str(s.get("item_id", "")).strip(): str(s.get("selected_code", "")).strip() for s in selections if s.get("item_id") is not None}
+    to_fill = list(match_result.get("to_fill", []))
+    shortage = list(match_result.get("shortage", []))
+    fill_items_merged = list(match_result.get("fill_items_merged", []))
+    available_qty_fn = None
+    try:
+        from backend.tools.inventory.agents.table_agent import InventoryTableAgent
+        _table = InventoryTableAgent()
+        def _avail(c: str):
+            it = _table.get_item_by_code(c)
+            return float(getattr(it, "qty_available", 0) or 0) if it else 0.0
+        available_qty_fn = _avail
+    except Exception:
+        pass
+    for pc in pending:
+        cid = pc.get("id", "")
+        code = sel_map.get(cid) or sel_map.get(cid.strip())
+        if not code:
+            continue
+        options = pc.get("options", [])
+        opt = next((o for o in options if (str(o.get("code") or "").strip() == code)), None)
+        if not opt:
+            continue
+        row = pc.get("row")
+        qty = int(pc.get("qty", 0) or 0)
+        quote_name = (opt.get("matched_name") or "")[:200]
+        unit_price = float(opt.get("unit_price", 0) or 0)
+        specification = pc.get("specification", "")
+        available_qty = available_qty_fn(code) if available_qty_fn else 0.0
+        if available_qty >= qty:
+            to_fill.append({"row": row, "code": code, "quote_name": quote_name, "unit_price": unit_price, "qty": qty, "specification": specification})
+            fill_items_merged.append({"row": row, "code": code, "quote_name": quote_name, "unit_price": unit_price, "qty": qty, "specification": specification})
+        else:
+            shortfall = max(0, qty - available_qty)
+            shortage.append({
+                "row": row,
+                "product_name": pc.get("product_name", ""),
+                "specification": specification,
+                "qty": qty,
+                "available_qty": available_qty,
+                "shortfall": shortfall,
+                "code": code,
+                "quote_name": quote_name,
+                "unit_price": unit_price,
+            })
+            fill_items_merged.append({
+                "row": row,
+                "code": code,
+                "quote_name": quote_name + "（库存不足）",
+                "unit_price": unit_price,
+                "qty": qty,
+                "specification": specification,
+            })
+    out = copy.deepcopy(match_result)
+    out["to_fill"] = to_fill
+    out["shortage"] = shortage
+    out["fill_items_merged"] = fill_items_merged
+    out.pop("needs_human_choice", None)
+    out["pending_choices"] = []
+    return out
 
 
 def _run_work_quotation_fill(
@@ -253,20 +348,3 @@ def execute_work_tool_sync(name: str, arguments: dict[str, Any]) -> str:
         out = _run_register_oos(file_path or "", {}, args.get("prompt"))
         return out.get("result", json.dumps(out, ensure_ascii=False)) if out.get("success") else json.dumps(out, ensure_ascii=False)
     return json.dumps({"error": f"未知 Work 工具: {name}"}, ensure_ascii=False)
-
-
-def build_work_plan(file_paths: list[str], do_register_oos: bool = True) -> dict[str, Any]:
-    """根据文件列表生成固定顺序的计划（每文件：extract → match → fill → shortage_report → register_oos）。"""
-    steps = []
-    for i, path in enumerate(file_paths):
-        steps.append({"file_index": i, "op": "extract"})
-        steps.append({"file_index": i, "op": "match_and_inventory"})
-        steps.append({"file_index": i, "op": "fill"})
-        steps.append({"file_index": i, "op": "shortage_report"})
-        if do_register_oos:
-            steps.append({"file_index": i, "op": "register_oos"})
-    return {
-        "mode": "quotation_batch",
-        "files": [{"path": p, "name": Path(p).name} for p in file_paths],
-        "steps": steps,
-    }

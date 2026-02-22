@@ -122,17 +122,22 @@ def _call_llm_streaming_sync(
 
 _SKILL_INVENTORY_PRICE = """\
 **1. 库存与询价/价格**
-- **目标**：查库存、查报价、查各档位价格；询价时先历史匹配再万鼎字段匹配，多候选时用 LLM 选型。
+- **目标**：查库存、查报价、查各档位价格；询价/查 code 时优先 match_quotation（历史+万鼎并行取并集，结果带匹配来源），多候选时用 LLM 选型。
 - **search_inventory(keywords)**：按产品名/规格搜库存，更适配英文关键词。
 - **get_inventory_by_code(code)**：已知 10 位物料编号时直接查库存。
-- **match_by_quotation_history(keywords)**：历史匹配，在报价历史映射表（整理产品）中按「询价名称+规格」匹配，取 top3。返回未匹配 / single / needs_selection。
-- **match_wanding_price(keywords, customer_level?)**：字段查询（万鼎价格库），按产品名+规格在万鼎库中匹配，返回 unit_price 为该 customer_level 的单价。customer_level 默认 B；一次调用只返回一档。返回未匹配 / single / needs_selection。
-- **select_wanding_match(keywords, candidates)**：LLM 选型。当 needs_selection 且用户要「选一个/某一款」时调用；从候选中选 1 个。
+- **match_quotation(keywords, customer_level?)**：**询价/查 code 时优先用本工具**。同时查报价历史与万鼎字段匹配，结果取并集，每条候选带 **source**（历史报价/字段匹配/共同）。返回格式含 candidates、match_source，单条时含 chosen。这样「直接50mm」等既能命中历史也能命中万鼎时，会显示 共同 或 历史报价。
+- **match_by_quotation_history(keywords)**：仅历史匹配（单独用较少，一般用 match_quotation）。
+- **match_wanding_price(keywords, customer_level?)**：仅字段匹配（万鼎）。用户明确说「**用万鼎查**」「**不要历史**」「**直接万鼎**」时**只调用本工具**，不调 match_quotation。
+- **select_wanding_match(keywords, candidates)**：LLM 选型。needs_selection 且用户要「选一个」时调用；传入 match_source（来自上一步 observation）。
 - **何时用**：用户已明确「库存/可售」或「价格/报价/万鼎/档位」时选用；只说「查XX」未指明 → 用 ask_clarification 澄清。
-- **默认询价顺序**：先 match_by_quotation_history，无结果再 match_wanding_price；得 code 后可用 get_inventory_by_code 查库存。
-- **仅字段查询（只用万鼎）**：当用户明确说「**用万鼎查**」「**万鼎数据库**」「**直接万鼎**」「**字段查询**」「**不要历史**」「还有什么其他型号」等时，**只调用 match_wanding_price**，不要先调 match_by_quotation_history，直接返回万鼎库中所有匹配型号/价格。
+- **询价/查 code/查物料编号**：**必须优先调用 match_quotation**（一次得到历史+万鼎并集及匹配来源）；仅当用户明确「用万鼎查/不要历史」时改用 match_wanding_price。得 code 后可用 get_inventory_by_code 查库存。
 - **「全部价格」「各档价格」「A B C D 档」**：必须对**同一 keywords** 分别调用 **4 次** match_wanding_price：customer_level="A"、"B"、"C"、"D"，汇总成表格「客户级别 | 客户价」。**只调一次会只得到默认 B 档，不是全部价格。**
-- **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。"""
+- **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。
+- **展示匹配结果时**：
+  ① **匹配来源（必显）**：每次展示匹配结果，**必须在表格或候选列表上方第一行**写「**匹配来源：**xxx」（从 observation 的 match_source 取值：历史报价 / 字段匹配 / 共同；若为「历史报价、字段匹配」表示本批同时含两类结果）。不得省略。
+  ② **每行来源（当候选含 source 时）**：若 candidates 中每项有 source 字段，表格中增加一列「来源」或于每行后标注（历史报价/字段匹配/共同），便于用户看出哪些来自报价历史、哪些来自万鼎。
+  ③ **候选+已选**：若有 candidates 与 chosen，先列全部候选再标明「已选：第 N 条」；选错时用户可立即指出正确项。
+  ④ 调用 select_wanding_match 时请传入上一步 observation 的 match_source。"""
 
 _SKILL_OOS = """\
 **2. 无货**
@@ -186,7 +191,7 @@ _PROMPT_OUTPUT_FORMAT = """\
 2. 若调用工具：紧接 tool_call；工具结果返回后，若目标已完成则直接输出最终回答（无需再调工具）；否则继续下一轮工具调用。
 3. 若不调用工具（如打招呼、能力外）：在 <think> 后直接给出最终回答。
 
-**多轮指代**：用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）。用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_by_quotation_history 或 match_wanding_price，勿用用户本句的简称或错字。"""
+**多轮指代**：用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）。用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_quotation 或 match_wanding_price，勿用用户本句的简称或错字。"""
 
 
 def _build_system_prompt() -> str:

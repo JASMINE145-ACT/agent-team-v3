@@ -139,6 +139,7 @@ def llm_select_best(
 1) **有把握**选出一个最匹配的：用 "confident": true，并给出 "index"（序号 1-{len(candidates)}）和 "reasoning"。
 2) **没有把握**（多个都可能或都不太像）：用 "confident": false，不要单选，改为 "options" 列出 2～3 个最可能的选项，每项含 "index" 和 "reasoning"（简短说明为何可能匹配）。
 若判断全部不匹配，则 "confident": true, "index": 0, "reasoning": "..."。
+**重要**：若多个候选规格接近、易混淆，或询价描述不够明确，请优先用 "confident": false 列出选项供人工确认，避免错选。
 
 有把握时输出：{{"confident": true, "index": <序号或0>, "reasoning": "<理由>"}}
 没有把握时输出：{{"confident": false, "options": [{{"index": 1, "reasoning": "..."}}, {{"index": 2, "reasoning": "..."}}]}}

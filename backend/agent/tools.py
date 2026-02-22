@@ -152,6 +152,7 @@ def _validate_file_path(path: str, tool_name: str) -> Optional[str]:
 _INVENTORY_TOOLS = {
     "search_inventory",
     "get_inventory_by_code",
+    "match_quotation",
     "match_by_quotation_history",
     "match_wanding_price",
     "select_wanding_match",

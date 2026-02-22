@@ -314,10 +314,15 @@ export class OpenClawApp extends LitElement {
   usageQueryDebounceTimer: number | null = null;
 
   @state() workFilePaths: string[] = [];
-  @state() workPlan: { mode?: string; files?: { path: string; name: string }[]; steps?: { file_index: number; op: string }[] } | null = null;
-  @state() workPlanLoading = false;
   @state() workRunning = false;
-  @state() workResult: { success?: boolean; answer?: string; trace?: unknown[]; plan?: unknown; error?: string } | null = null;
+  /** 执行中时循环展示的阶段 0=识别表 1=查价格与库存 2=填表 */
+  @state() workProgressStage = 0;
+  private _workProgressInterval: ReturnType<typeof setInterval> | null = null;
+  @state() workRunStatus: "idle" | "running" | "awaiting_choices" | "done" = "idle";
+  @state() workRunId: string | null = null;
+  @state() workPendingChoices: import("./controllers/work.js").WorkPendingChoice[] = [];
+  @state() workSelections: Record<string, string> = {};
+  @state() workResult: { success?: boolean; answer?: string; trace?: unknown[]; error?: string } | null = null;
   @state() workError: string | null = null;
   @state() workCustomerLevel = "B";
   @state() workDoRegisterOos = true;
@@ -404,6 +409,20 @@ export class OpenClawApp extends LitElement {
   }
 
   protected updated(changed: Map<PropertyKey, unknown>) {
+    if (changed.has("workRunning")) {
+      if (this.workRunning) {
+        this.workProgressStage = 0;
+        this._workProgressInterval = window.setInterval(() => {
+          this.workProgressStage = (this.workProgressStage + 1) % 3;
+        }, 2600);
+      } else {
+        if (this._workProgressInterval != null) {
+          clearInterval(this._workProgressInterval);
+          this._workProgressInterval = null;
+        }
+        this.workProgressStage = 0;
+      }
+    }
     handleUpdated(this as unknown as Parameters<typeof handleUpdated>[0], changed);
   }
 

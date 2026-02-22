@@ -45,9 +45,9 @@ def _system_prompt() -> str:
 **2. 调用工具**  
 - **有 code**（如 10 位物料编号 8030020580）：一律用 get_inventory_by_code(code)，直接按 code 查表，不走关键词/Resolver。
 - **按名称/规格查**：用 search_inventory(keywords)，keywords 填用户要查的产品或规格（如 pvc dn20、Tee With Cover dn40）。
-- **仅查价格/客户价（用户未提库存）**：默认先 match_by_quotation_history(keywords)，若无命中再 match_wanding_price。若用户明确说「用万鼎查」「万鼎数据库」「直接万鼎」「字段查询」「还有什么其他型号」→ **只调 match_wanding_price**，不调历史匹配。任一返回 needs_selection 且用户要「选一个」时再调用 select_wanding_match；若用户要「全部价格/所有候选」则**不调** select_wanding_match，直接整表回复。**不要**调用 get_inventory_by_code，回答里**不要**包含库存/可售。
-- **用户要「全部价格」「各档价格」「所有客户价」「A B C D 档」**：**价格由 match_wanding_price 返回**，但一次只返回一档（默认 B）。要全部档位必须对同一 keywords **分别调用 4 次**：match_wanding_price(keywords, customer_level="A")、customer_level="B"、customer_level="C"、customer_level="D"，汇总成表格「客户级别 | 客户价」。只调一次会只得到默认 B 档。
-- **询价填充**（需物料编号+单价+库存）：① 先 match_by_quotation_history(keywords)，无命中再 match_wanding_price(keywords)；② 若返回 needs_selection，必须调用 select_wanding_match(keywords, candidates)；③ 得到 code 后用 get_inventory_by_code(code) 查库存。
+- **仅查价格/客户价/查 code/询价**（用户未提库存）：**优先调用 match_quotation(keywords)**，一次同时查报价历史与万鼎字段匹配，结果取并集且每条带匹配来源（历史报价/字段匹配/共同）。若用户明确说「用万鼎查」「不要历史」「直接万鼎」→ 只调 match_wanding_price。任一返回 needs_selection 且用户要「选一个」时再调用 select_wanding_match；要「全部价格/所有候选」则不调 select_wanding_match，直接整表回复。回答里**不要**包含库存/可售（除非用户问了库存）。
+- **用户要「全部价格」「各档价格」「A B C D 档」**：对同一 keywords 分别调用 4 次 match_wanding_price(customer_level="A/B/C/D")，汇总成表格。
+- **询价填充**（需物料编号+单价+库存）：走 run_quotation_fill 或对每行 match_quotation；needs_selection 时调用 select_wanding_match；得到 code 后用 get_inventory_by_code 查库存。
 
 **3. 观察 (observation)**  
 工具会返回 1 条或多条候选（库存与可售数量）。你不要在侧做筛选或提取 codes，只根据 observation 内容理解候选即可。

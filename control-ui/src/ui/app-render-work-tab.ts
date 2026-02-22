@@ -1,6 +1,6 @@
 import { nothing } from "lit";
 import type { AppViewState } from "./app-view-state.ts";
-import { loadWorkPlan, runWork } from "./controllers/work.ts";
+import { runWork, resumeWork } from "./controllers/work.ts";
 import { renderWork } from "./views/work.ts";
 
 export function renderWorkTab(state: AppViewState) {
@@ -11,9 +11,12 @@ export function renderWorkTab(state: AppViewState) {
   return renderWork({
     basePath: state.basePath,
     workFilePaths: state.workFilePaths,
-    workPlan: state.workPlan,
-    workPlanLoading: state.workPlanLoading,
     workRunning: state.workRunning,
+    workProgressStage: state.workProgressStage,
+    workRunStatus: state.workRunStatus,
+    workRunId: state.workRunId,
+    workPendingChoices: state.workPendingChoices,
+    workSelections: state.workSelections,
     workResult: state.workResult,
     workError: state.workError,
     workCustomerLevel: state.workCustomerLevel,
@@ -32,7 +35,10 @@ export function renderWorkTab(state: AppViewState) {
     onDoRegisterOosChange: (v) => {
       state.workDoRegisterOos = v;
     },
-    onGeneratePlan: () => void loadWorkPlan(state),
     onRun: () => void runWork(state),
+    onSelectionChange: (itemId, selectedCode) => {
+      state.workSelections = { ...state.workSelections, [itemId]: selectedCode };
+    },
+    onResume: () => void resumeWork(state),
   });
 }

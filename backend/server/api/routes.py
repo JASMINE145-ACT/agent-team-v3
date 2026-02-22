@@ -271,29 +271,13 @@ async def put_business_knowledge(body: Dict[str, Any] = Body(...)) -> Dict[str, 
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------- Work Mode（报价批量，Plan + ReAct，与 Chat 独立）----------
-
-@router.post("/api/work/plan")
-async def work_plan(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """根据 file_paths 生成报价批量计划，不执行。Body: { "file_paths": string[], "do_register_oos": bool? }"""
-    file_paths = body.get("file_paths") or []
-    if not isinstance(file_paths, list):
-        file_paths = []
-    do_register_oos = body.get("do_register_oos", True)
-    try:
-        from backend.agent.work_tools import build_work_plan
-        plan = build_work_plan([str(p).strip() for p in file_paths if p], do_register_oos=do_register_oos)
-        return {"success": True, "plan": plan}
-    except Exception as e:
-        logger.exception("work/plan 失败")
-        raise HTTPException(status_code=500, detail=str(e))
-
+# ---------- Work Mode（报价批量，固定流程 + ReAct，与 Chat 独立）----------
 
 @router.post("/api/work/run")
 async def work_run(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """
-    执行 Work 流程：Plan + ReAct，仅 Work 工具。
-    Body: { "file_paths": string[], "customer_level": "A"|"B"|"C"|"D"?, "do_register_oos": bool?, "plan": object? }
+    执行 Work 流程：固定三步（识别表数据→查价格与库存/无货缺货→填表）+ ReAct，仅 Work 工具。
+    Body: { "file_paths": string[], "customer_level": "A"|"B"|"C"|"D"?, "do_register_oos": bool? }
     """
     file_paths = body.get("file_paths") or []
     if not isinstance(file_paths, list):
@@ -303,22 +287,53 @@ async def work_run(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     if customer_level not in ("A", "B", "C", "D"):
         customer_level = "B"
     do_register_oos = body.get("do_register_oos", True)
-    plan = body.get("plan")
     try:
         from backend.agent.work_executor import run_work_flow
         result = await run_work_flow(
             file_paths=file_paths,
             customer_level=customer_level,
             do_register_oos=do_register_oos,
-            plan=plan,
         )
-        return {
+        out = {
+            "status": result.get("status", "done"),
             "success": result.get("success", True),
             "answer": result.get("answer", ""),
             "trace": result.get("trace", []),
-            "plan": result.get("plan", {}),
             "error": result.get("error"),
         }
+        if result.get("status") == "awaiting_choices":
+            out["run_id"] = result.get("run_id")
+            out["pending_choices"] = result.get("pending_choices", [])
+        return out
     except Exception as e:
         logger.exception("work/run 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/work/resume")
+async def work_resume(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """
+    人工选择后继续 Work 流程。
+    Body: { "run_id": string, "selections": [{ "item_id": string, "selected_code": string }] }
+    """
+    run_id = body.get("run_id")
+    selections = body.get("selections")
+    if not run_id or not isinstance(selections, list):
+        raise HTTPException(status_code=400, detail="需要 run_id 与 selections")
+    try:
+        from backend.agent.work_executor import run_work_flow_resume
+        result = await run_work_flow_resume(run_id=run_id, selections=selections)
+        out = {
+            "status": result.get("status", "done"),
+            "success": result.get("success", True),
+            "answer": result.get("answer", ""),
+            "trace": result.get("trace", []),
+            "error": result.get("error"),
+        }
+        if result.get("status") == "awaiting_choices":
+            out["run_id"] = result.get("run_id")
+            out["pending_choices"] = result.get("pending_choices", [])
+        return out
+    except Exception as e:
+        logger.exception("work/resume 失败")
         raise HTTPException(status_code=500, detail=str(e))

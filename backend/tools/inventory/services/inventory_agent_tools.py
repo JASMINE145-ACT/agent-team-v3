@@ -80,13 +80,48 @@ def _execute_match_by_quotation_history(arguments: dict[str, Any]) -> dict[str, 
 
         if len(norm) == 1:
             r = norm[0]
-            payload = {"single": True, "code": r["code"], "matched_name": r["matched_name"], "unit_price": r["unit_price"]}
+            payload = {"single": True, "candidates": norm, "chosen": r, "chosen_index": 1, "match_source": "历史报价"}
             return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
-        payload = {"needs_selection": True, "keywords": keywords, "candidates": norm}
+        payload = {"needs_selection": True, "keywords": keywords, "candidates": norm, "match_source": "历史报价"}
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
     except Exception as e:
         logger.exception("match_by_quotation_history 失败")
         return {"success": False, "error": str(e), "result": f"历史匹配失败: {e}"}
+
+
+def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
+    """
+    询价匹配（历史+万鼎并行取并集）：同时查报价历史与字段匹配，返回带匹配来源的候选。
+    每条候选含 source：历史报价 / 字段匹配 / 共同。用于「查code/询价/物料编号」时一次得到两类结果。
+    """
+    try:
+        from backend.tools.inventory.services.match_and_inventory import match_quotation_union
+
+        keywords = (arguments.get("keywords") or "").strip()
+        if not keywords:
+            return {"success": True, "result": "请提供 keywords（产品名+规格）。"}
+        customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
+
+        candidates = match_quotation_union(keywords, customer_level=customer_level)
+        if not candidates:
+            return {"success": True, "result": json.dumps({"unmatched": True, "keywords": keywords}, ensure_ascii=False)}
+
+        norm = [
+            {"code": str(c.get("code", "")), "matched_name": str(c.get("matched_name", "")), "unit_price": float(c.get("unit_price", 0) or 0), "source": c.get("source", "未知")}
+            for c in candidates
+        ]
+        max_show = 15
+        norm = norm[:max_show]
+        if len(norm) == 1:
+            r = norm[0]
+            payload = {"single": True, "candidates": norm, "chosen": r, "chosen_index": 1, "match_source": r.get("source", "共同")}
+            return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
+        sources_present = list({c.get("source") for c in norm if c.get("source")})
+        payload = {"needs_selection": True, "keywords": keywords, "candidates": norm, "match_source": "、".join(sources_present) if sources_present else "共同"}
+        return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
+    except Exception as e:
+        logger.exception("match_quotation 失败")
+        return {"success": False, "error": str(e), "result": f"询价匹配失败: {e}"}
 
 
 def _execute_match_wanding_price(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -115,9 +150,9 @@ def _execute_match_wanding_price(arguments: dict[str, Any]) -> dict[str, Any]:
 
         if len(norm_truncated) == 1:
             r = norm_truncated[0]
-            payload = {"single": True, "code": r["code"], "matched_name": r["matched_name"], "unit_price": r["unit_price"]}
+            payload = {"single": True, "candidates": norm_truncated, "chosen": r, "chosen_index": 1, "match_source": "字段匹配"}
             return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
-        payload = {"needs_selection": True, "keywords": keywords, "candidates": norm_truncated}
+        payload = {"needs_selection": True, "keywords": keywords, "candidates": norm_truncated, "match_source": "字段匹配"}
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
     except Exception as e:
         logger.exception("match_wanding_price 失败")
@@ -140,6 +175,7 @@ def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
             return {"success": True, "result": "请提供 candidates（来自历史匹配或字段匹配的 needs_selection 结果）。"}
 
         r = llm_select_best(keywords, candidates)
+        match_source = (arguments.get("match_source") or "").strip() or "未知"
         if r is None:
             return {"success": True, "result": f"LLM 判定无匹配：{keywords}"}
         if r.get("_suggestions") and r.get("options"):
@@ -148,12 +184,15 @@ def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
                 lines.append(f"{i}. code: {opt.get('code', '')} | {opt.get('matched_name', '')} | unit_price: {opt.get('unit_price', 0)}")
                 lines.append(f"   reasoning: {opt.get('reasoning', '')}\n")
             return {"success": True, "result": "\n".join(lines)}
-        lines = [
-            f"code: {r.get('code', '')}",
-            f"matched_name: {r.get('matched_name', '')}",
-            f"unit_price: {r.get('unit_price', 0)}",
-        ]
-        return {"success": True, "result": "\n".join(lines)}
+        chosen_code = (r.get("code") or "").strip()
+        chosen_index = 0
+        for i, c in enumerate(candidates):
+            if (c.get("code") or "").strip() == chosen_code:
+                chosen_index = i + 1
+                break
+        chosen = {"code": r.get("code", ""), "matched_name": r.get("matched_name", ""), "unit_price": r.get("unit_price", 0)}
+        payload = {"single": True, "candidates": candidates, "chosen": chosen, "chosen_index": chosen_index, "match_source": match_source}
+        return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
     except Exception as e:
         logger.exception("select_wanding_match 失败")
         return {"success": False, "error": str(e), "result": f"选择失败: {e}"}
@@ -219,12 +258,27 @@ def get_inventory_tools_openai_format() -> list[dict]:
         {
             "type": "function",
             "function": {
-                "name": "match_by_quotation_history",
-                "description": "历史匹配：在报价映射表中按询价名称+规格匹配 top3，用 code 查万鼎价格。返回未匹配 / single / needs_selection。用户未说「用万鼎查/万鼎数据库/字段查询」时优先调用；用户明确要万鼎或「还有什么其他型号」时勿用，直接用 match_wanding_price。",
+                "name": "match_quotation",
+                "description": "询价匹配（推荐）：同时查报价历史与万鼎字段匹配，结果取并集，每条候选带匹配来源（历史报价/字段匹配/共同）。用于用户问「XX的code」「查XX物料编号」「询价XX」时优先调用本工具，可一次得到历史+万鼎结果；仅当用户明确说「用万鼎查」「不要历史」「直接万鼎」时才改用 match_wanding_price。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "keywords": {"type": "string", "description": "产品名+规格，如 三通内丝接头、25三通"},
+                        "keywords": {"type": "string", "description": "产品名+规格，如 直接50mm、直径25PPR"},
+                        "customer_level": {"type": "string", "description": "万鼎查价档位 A/B/C/D，默认 B"},
+                    },
+                    "required": ["keywords"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "match_by_quotation_history",
+                "description": "仅历史匹配：只在报价映射表中匹配，不查万鼎。一般用 match_quotation 即可（历史+万鼎并行）；需单独历史结果时用本工具。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "keywords": {"type": "string", "description": "产品名+规格"},
                         "customer_level": {"type": "string", "description": "万鼎查价档位 A/B/C/D，默认 B"},
                     },
                     "required": ["keywords"],
@@ -250,7 +304,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "select_wanding_match",
-                "description": "LLM 选型：从 needs_selection 候选中选最佳匹配，有把握返 1 个，无把握列选项及 reasoning。",
+                "description": "LLM 选型：从 needs_selection 候选中选最佳匹配，有把握返 1 个，无把握列选项及 reasoning。调用时请传入上一步 observation 中的 match_source（历史报价/字段匹配），以便结果中标明匹配来源。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -268,6 +322,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                             },
                             "description": "历史匹配或字段匹配返回的 candidates 数组",
                         },
+                        "match_source": {"type": "string", "description": "上一步 observation 中的 match_source：历史报价 或 字段匹配，用于结果中标明来源"},
                     },
                     "required": ["keywords", "candidates"],
                 },
@@ -279,6 +334,8 @@ def get_inventory_tools_openai_format() -> list[dict]:
 def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """实际执行逻辑（含 get_table_agent / get_resolver），供带超时调用。"""
     # 询价相关工具不依赖 table/sql_agent，可单独执行
+    if name == "match_quotation":
+        return _execute_match_quotation(arguments)
     if name == "match_by_quotation_history":
         return _execute_match_by_quotation_history(arguments)
     if name == "match_wanding_price":
