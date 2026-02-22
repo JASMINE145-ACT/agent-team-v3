@@ -38,10 +38,11 @@ htmlcov/
 *.log
 logs/
 
-# Node（若后续加入 control-ui）
+# Node
 node_modules/
-dist/
 *.tsbuildinfo
+# 构建产物：保留 dist/control-ui 提交到仓库，克隆后无需本地构建即可打开前端
+# dist/
 
 # 其他
 .DS_Store
