@@ -82,6 +82,15 @@ cd ..</pre>
 @app.on_event("startup")
 async def startup_event():
     Config.validate()
+    # 保证会话与上传目录存在，避免新部署报「缺少 session」或上传失败
+    for d in (getattr(Config, "SESSION_STORE_DIR", None), getattr(Config, "UPLOAD_DIR", None)):
+        if d is not None:
+            p = Path(d)
+            try:
+                p.mkdir(parents=True, exist_ok=True)
+                logger.debug("目录就绪: %s", p)
+            except Exception as e:
+                logger.warning("创建目录失败 %s: %s", p, e)
     logger.info("Agent-JK v3 单 Agent 后端启动完成 — %s:%s", Config.API_HOST, Config.API_PORT)
 
 
