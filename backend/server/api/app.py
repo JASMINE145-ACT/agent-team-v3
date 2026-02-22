@@ -55,7 +55,28 @@ if _ui_dir.is_dir():
 
     logger.info("UI 已挂载: %s", _ui_dir)
 else:
-    logger.warning("UI 目录不存在，未挂载静态: %s", _ui_dir)
+    _UI_MISSING_HTML = """
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>请先构建前端</title></head>
+<body style="font-family:sans-serif;max-width:560px;margin:2em auto;padding:1em;">
+  <h2>前端未构建</h2>
+  <p>当前未检测到 <code>dist/control-ui</code> 目录，请先构建前端后再访问页面。</p>
+  <p>在项目根目录执行：</p>
+  <pre style="background:#f5f5f5;padding:1em;border-radius:6px;">cd control-ui
+npm install
+npm run build
+cd ..</pre>
+  <p>然后刷新本页或重新打开 <a href="/">/</a> 。</p>
+  <p>详见项目根目录 <code>README.md</code>。</p>
+</body></html>
+"""
+
+    @app.get("/")
+    def _fallback_index():
+        from starlette.responses import HTMLResponse
+        return HTMLResponse(_UI_MISSING_HTML)
+
+    logger.warning("UI 目录不存在，未挂载静态: %s — 根路径返回构建说明页", _ui_dir)
 
 
 @app.on_event("startup")
