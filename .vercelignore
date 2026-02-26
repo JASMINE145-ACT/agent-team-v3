@@ -1,4 +1,4 @@
-# 减小 Vercel 部署包体积（安装/构建时会重新拉取依赖）
+# 减小 Vercel 部署包体积（目标 <249MB）
 .venv
 venv
 env
@@ -7,10 +7,12 @@ __pycache__
 node_modules
 *.pyc
 .git
+*.npy
 
-# 不参与运行的文档与测试（部署不需要）
+# 不参与运行的文档、测试、脚本
 doc/
 tests/
+scripts/
 *.md
 !README.md
 

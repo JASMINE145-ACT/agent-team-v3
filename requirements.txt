@@ -13,8 +13,10 @@ openai>=1.50.0
 python-dotenv>=1.0.0
 
 # 报价单 / 无货 / 询价填充（来自 quotation_tracker、quote_tools）
+# Vercel 包体积限制 249MB：用 pandas 2.x + numpy 1.x 减小体积
 openpyxl>=3.1.0
-pandas>=2.0.0
+pandas>=2.0.0,<3
+numpy>=1.26.0,<2
 sqlalchemy>=2.0.0
 chardet>=5.0.0
 

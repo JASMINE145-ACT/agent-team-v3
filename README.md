@@ -198,6 +198,6 @@ docker run -p 8000:8000 -e ZHIPU_API_KEY=xxx -e AOL_ACCESS_TOKEN=xxx ... agent-t
 | **业务文件** | `data/` 下价格库、映射表等需在仓库中提交，或通过构建时下载/挂载提供，并用 `PRICE_LIBRARY_PATH`、`MAPPING_TABLE_PATH` 指向。 |
 | **会话与上传** | Serverless 无持久盘，`SESSION_STORE_DIR`、`UPLOAD_DIR` 在实例内为临时；重启/冷启动后丢失。若需持久化，需后续改为外存（如 Vercel Blob、S3）。 |
 | **WebSocket** | 控制台使用 `/ws`；Vercel 对 WebSocket 有支持但存在时长等限制，若遇断连可重连或改用 HTTP 轮询。 |
-| **冷启动与体积** | 首次请求会加载 Resolver/价格库等，冷启动可能较慢；部署包需在 500MB 以内（见 Vercel 限制）。 |
+| **冷启动与体积** | 首次请求会加载 Resolver/价格库等，冷启动可能较慢。**函数包须 &lt;249MB**：已用 `pandas&lt;3` + `numpy&lt;2` 缩小依赖；若仍超限可考虑前后端拆成两个 Vercel 项目（前端静态 + 后端 API）。 |
 
 本地可用 `vercel dev` 调试（需先 `pip install -r requirements.txt` 且 `cd control-ui && npm ci && npm run build`）。
