@@ -517,7 +517,21 @@ def get_quote_tools_openai_format() -> list[dict]:
                                     "cell": {"type": "string", "description": "单格引用，如 A1"},
                                     "value": {"description": "写入的值（字符串或数字）"},
                                     "range": {"type": "string", "description": "区域引用，如 A1:B2"},
-                                    "values": {"type": "array", "items": {"type": "array"}, "description": "二维数组，按行写入"},
+                                    "values": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "array",
+                                            "items": {
+                                                "oneOf": [
+                                                    {"type": "string"},
+                                                    {"type": "number"},
+                                                    {"type": "boolean"},
+                                                    {"type": "null"}
+                                                ]
+                                            }
+                                        },
+                                        "description": "二维数组，按行写入，每个单元格为字符串/数字/布尔或 null",
+                                    },
                                 },
                             },
                             "description": "编辑操作列表：单格用 cell+value，区域用 range+values",
