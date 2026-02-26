@@ -34,7 +34,9 @@ class Config:
     # 云端平台常注入 PORT，本地默认 8000
     API_PORT = int(os.getenv("API_PORT") or os.getenv("PORT", "8000"))
     DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-    UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(base_dir / "uploads")))
+    # Vercel/Serverless 仅 /tmp 可写，/var/task 只读；本地用项目目录
+    _is_vercel = os.getenv("VERCEL") in ("1", "true")
+    UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/tmp/uploads" if _is_vercel else str(base_dir / "uploads")))
     MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))
     _v3_data_dir = base_dir / "data"
     _v3_standard = _v3_data_dir / "万鼎价格库_管材与国标管件_标准格式.xlsx"
@@ -43,7 +45,7 @@ class Config:
         os.getenv("PRICE_LIBRARY_PATH")
         or (str(_v3_standard) if _v3_standard.exists() else str(_v3_old) if _v3_old.exists() else str(_v3_standard))
     )
-    SESSION_STORE_DIR = Path(os.getenv("SESSION_STORE_DIR", str(base_dir / "data" / "sessions")))
+    SESSION_STORE_DIR = Path(os.getenv("SESSION_STORE_DIR", "/tmp/sessions" if _is_vercel else str(base_dir / "data" / "sessions")))
 
     @classmethod
     def validate(cls):
