@@ -23,6 +23,10 @@ class Config:
     )
     LLM_MODEL = os.getenv("LLM_MODEL", "glm-4-flash")
     LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "5000"))
+    # 上下文压缩：用轻量模型对历史 tool 结果做摘要，默认 gpt-4o-mini；未设则用主模型同 endpoint
+    SUMMARY_LLM_MODEL = os.getenv("SUMMARY_LLM_MODEL", "gpt-4o-mini")
+    SUMMARY_LLM_BASE_URL = (os.getenv("SUMMARY_LLM_BASE_URL") or "").strip() or None  # None 则用 OPENAI_BASE_URL
+    SUMMARY_LLM_API_KEY = os.getenv("SUMMARY_LLM_API_KEY") or None  # None 则用 OPENAI_API_KEY
     AOL_ACCESS_TOKEN = os.getenv("AOL_ACCESS_TOKEN")
     AOL_SIGNATURE_SECRET = os.getenv("AOL_SIGNATURE_SECRET")
     AOL_DATABASE_ID = os.getenv("AOL_DATABASE_ID")

@@ -8,14 +8,11 @@ from typing import Any, Callable, Optional
 from openai import OpenAI
 
 from backend.agent.session import get_session_store
-from backend.agent.agent import SingleAgent
 from backend.agent.remember import try_handle_remember
 from backend.config import Config
 from backend.server.gateway.run_store import register as run_register, unregister as run_unregister, cancel as run_cancel
 
 logger = logging.getLogger(__name__)
-
-_single_agent: SingleAgent | None = None
 
 
 def _generate_title_via_llm(user_query: str, assistant_answer: str) -> Optional[str]:
@@ -54,17 +51,6 @@ async def _generate_and_set_session_title(session_id: str, user_query: str, assi
     if title:
         store.set_label(session_id, title)
         logger.info("会话标题已更新: %s -> %s", session_id[:8], title)
-
-
-def _get_agent() -> SingleAgent:
-    global _single_agent
-    if _single_agent is None:
-        _single_agent = SingleAgent(
-            api_key=Config.OPENAI_API_KEY,
-            base_url=Config.OPENAI_BASE_URL,
-            model=Config.LLM_MODEL,
-        )
-    return _single_agent
 
 
 def handle_chat_history(params: dict) -> dict:
@@ -164,10 +150,9 @@ async def handle_chat_send(
     def on_event(event_type: str, payload: dict):
         pass
 
-    # 先返回 res，再异步跑 execute_react 并推 event
     await send_res({"ok": True, "runId": run_id})
 
-    agent = _get_agent()
+    agent = ws.app.state.agent
     state = "final"
     try:
         result = await agent.execute_react(

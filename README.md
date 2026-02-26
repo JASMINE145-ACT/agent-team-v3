@@ -182,3 +182,21 @@ docker run -p 8000:8000 -e ZHIPU_API_KEY=xxx -e AOL_ACCESS_TOKEN=xxx ... agent-t
 - **只想零成本演示**：用 **Render** 免费档，连 GitHub 仓库 → 选 Python / 或 Docker → 填环境变量 → 部署。接受「冷启动」和「会话/上传不持久」即可。
 - **希望常驻、少冷启动**：用 **Railway** 或 **Fly.io**，或国内云试用机；会话/无货库要持久可挂卷（Railway/Fly 支持 Volume）。
 - 具体步骤以各平台当前文档为准（如 [Render 文档](https://render.com/docs)、[Railway 文档](https://docs.railway.app)）。
+
+### 8. 部署到 Vercel（Serverless）
+
+项目已包含 Vercel 所需配置（`index.py` 入口、`vercel.json` 构建/安装命令）。
+
+**步骤简述**：在 [Vercel](https://vercel.com) 新建项目 → 导入本仓库 → **Root Directory** 设为 `Agent Team version3` → 在项目 Settings → Environment Variables 中配置与「1. 环境变量」相同的变量（如 `ZHIPU_API_KEY`、`AOL_ACCESS_TOKEN` 等）→ 部署。
+
+**当前仍缺 / 需注意**：
+
+| 项目 | 说明 |
+|------|------|
+| **环境变量** | 在 Vercel 项目 Settings → Environment Variables 中配置 `.env.example` 中的必填项，不要提交 `.env`。 |
+| **业务文件** | `data/` 下价格库、映射表等需在仓库中提交，或通过构建时下载/挂载提供，并用 `PRICE_LIBRARY_PATH`、`MAPPING_TABLE_PATH` 指向。 |
+| **会话与上传** | Serverless 无持久盘，`SESSION_STORE_DIR`、`UPLOAD_DIR` 在实例内为临时；重启/冷启动后丢失。若需持久化，需后续改为外存（如 Vercel Blob、S3）。 |
+| **WebSocket** | 控制台使用 `/ws`；Vercel 对 WebSocket 有支持但存在时长等限制，若遇断连可重连或改用 HTTP 轮询。 |
+| **冷启动与体积** | 首次请求会加载 Resolver/价格库等，冷启动可能较慢；部署包需在 500MB 以内（见 Vercel 限制）。 |
+
+本地可用 `vercel dev` 调试（需先 `pip install -r requirements.txt` 且 `cd control-ui && npm ci && npm run build`）。

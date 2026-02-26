@@ -80,11 +80,14 @@ cd ..</pre>
     logger.warning("UI 目录不存在，未挂载静态: %s — 根路径返回构建说明页", _ui_dir)
 
 
-def _warmup_sync() -> None:
+def _warmup_sync(agent=None) -> None:
     """同步预热：加载工具列表、Resolver（slim 表 + 向量缓存）、TableAgent。在后台线程中执行。"""
     try:
-        from backend.agent.tools import get_all_tools
-        get_all_tools()
+        if agent is not None:
+            agent._registry.get_definitions()
+        else:
+            from backend.agent.tools import get_all_tools
+            get_all_tools()
     except Exception as e:
         logger.debug("预热工具列表失败: %s", e)
     try:
@@ -95,9 +98,9 @@ def _warmup_sync() -> None:
         logger.debug("预热库存组件失败: %s", e)
 
 
-async def _warmup() -> None:
+async def _warmup(agent=None) -> None:
     try:
-        await asyncio.to_thread(_warmup_sync)
+        await asyncio.to_thread(_warmup_sync, agent)
         logger.info("库存组件预热完成（Resolver + TableAgent 已就绪）")
     except Exception as e:
         logger.warning("库存组件预热失败（不影响启动）: %s", e)
@@ -106,7 +109,15 @@ async def _warmup() -> None:
 @app.on_event("startup")
 async def startup_event():
     Config.validate()
-    # 保证会话与上传目录存在，避免新部署报「缺少 session」或上传失败
+    from backend.core.agent import CoreAgent
+    from backend.plugins.jagent.extension import JAgentExtension
+    agent = CoreAgent(
+        api_key=Config.OPENAI_API_KEY,
+        base_url=Config.OPENAI_BASE_URL,
+        model=Config.LLM_MODEL,
+        extensions=[JAgentExtension()],
+    )
+    app.state.agent = agent
     for d in (getattr(Config, "SESSION_STORE_DIR", None), getattr(Config, "UPLOAD_DIR", None)):
         if d is not None:
             p = Path(d)
@@ -116,7 +127,7 @@ async def startup_event():
             except Exception as e:
                 logger.warning("创建目录失败 %s: %s", p, e)
     logger.info("Agent-JK v3 单 Agent 后端启动完成 — %s:%s", Config.API_HOST, Config.API_PORT)
-    asyncio.create_task(_warmup())  # 后台预热，不阻塞启动响应
+    asyncio.create_task(_warmup(agent))
 
 
 if __name__ == "__main__":

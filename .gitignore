@@ -9,14 +9,19 @@ venv/
 .venv
 ENV/
 
-# 环境变量与密钥
+# 环境变量与密钥（切勿提交）
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
 *.pem
+*.key
+.secrets
+vercel/.env*
 
-# 数据与上传
-data/sessions/*.json
+# 数据与上传（运行时生成）
+data/sessions/
 uploads/
 *.db
 *.sqlite

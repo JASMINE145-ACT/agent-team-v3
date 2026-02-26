@@ -1,0 +1,4 @@
+{
+  "buildCommand": "cd control-ui && npm ci && npm run build",
+  "installCommand": "pip install -r requirements.txt && cd control-ui && npm ci"
+}

@@ -7,27 +7,37 @@ import logging
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from typing import Any, Dict
 
 from backend.config import Config
-from backend.agent import SingleAgent
 from backend.agent.remember import try_handle_remember
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-single_agent = SingleAgent(
-    api_key=Config.OPENAI_API_KEY,
-    base_url=Config.OPENAI_BASE_URL,
-    model=Config.LLM_MODEL,
-)
-
 
 @router.get("/health")
 async def health_check():
     return {"status": "ok", "service": "agent-jk-backend-v3", "mode": "single_agent"}
+
+
+def _sanitize_upload_filename(name: str, max_len: int = 80) -> str:
+    """只保留文件名（去掉路径成分），去掉 .. 与非法字符，防止路径穿越。"""
+    if not name or not name.strip():
+        return "upload"
+    # 只取 basename，去掉 \ 和 /
+    base = Path(name.replace("\\", "/")).name.strip()
+    if not base:
+        return "upload"
+    # 去掉 . 开头的隐藏文件名中的 ..
+    if base in (".", ".."):
+        return "upload"
+    # 只保留安全字符：字母数字、中文、下划线、点、短横线
+    safe = "".join(c for c in base if c.isalnum() or c in "._- " or "\u4e00" <= c <= "\u9fff")
+    safe = (safe or "upload").strip()[:max_len]
+    return safe or "upload"
 
 
 @router.post("/api/quotation/upload")
@@ -38,13 +48,22 @@ async def quotation_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
         content = await file.read()
         if len(content) > Config.MAX_UPLOAD_MB * 1024 * 1024:
             raise HTTPException(status_code=413, detail=f"文件超过 {Config.MAX_UPLOAD_MB}MB 限制")
-        suffix = Path(file.filename or "upload.xlsx").suffix or ".xlsx"
+        raw_name = file.filename or "upload.xlsx"
+        suffix = Path(raw_name.replace("\\", "/")).suffix or ".xlsx"
         if suffix.lower() not in (".xlsx", ".xls", ".xlsm", ".pdf"):
             raise HTTPException(status_code=400, detail="仅支持 .xlsx / .xls / .xlsm / .pdf")
-        safe_name = f"{uuid.uuid4().hex[:12]}_{(file.filename or 'upload')[:80]}"
-        out_path = Config.UPLOAD_DIR / safe_name
+        safe_basename = _sanitize_upload_filename(raw_name, max_len=60)
+        if not safe_basename.endswith(suffix):
+            safe_basename = (safe_basename.rsplit(".", 1)[0] if "." in safe_basename else safe_basename) + suffix
+        safe_name = f"{uuid.uuid4().hex[:12]}_{safe_basename}"
+        out_path = (Config.UPLOAD_DIR / safe_name).resolve()
+        upload_root = Config.UPLOAD_DIR.resolve()
+        try:
+            out_path.relative_to(upload_root)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="非法文件名")
         out_path.write_bytes(content)
-        return {"file_path": str(out_path.resolve()), "file_name": file.filename or "upload.xlsx"}
+        return {"file_path": str(out_path), "file_name": raw_name}
     except HTTPException:
         raise
     except Exception as e:
@@ -55,6 +74,7 @@ async def quotation_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
 @router.post("/api/query")
 @router.post("/api/master/query")
 async def query(
+    request: Request,
     body: Dict[str, Any] = Body(..., description="query: 用户输入; session_id?: 会话ID; context?: { file_path?, ... }"),
 ) -> Dict[str, Any]:
     """
@@ -64,15 +84,15 @@ async def query(
     query_text = (body.get("query") or body.get("message") or "").strip()
     if not query_text:
         return {"status": "error", "answer": "", "message": "请提供 query 或 message。"}
-    # 业务知识「记住」命令：你要记住 / 请记住 等 → 追加到 MD，直接返回
     remember_reply = try_handle_remember(query_text)
     if remember_reply is not None:
         session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
         return {"status": "success", "answer": remember_reply, "thinking": None, "trace": [], "session_id": session_id}
     session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
     context = body.get("context") or {}
+    agent = request.app.state.agent
     try:
-        result = await single_agent.execute_react(query_text, context=context, session_id=session_id)
+        result = await agent.execute_react(query_text, context=context, session_id=session_id)
     except Exception as e:
         logger.exception("query 执行失败")
         return {"status": "error", "answer": "", "message": str(e)}
@@ -94,6 +114,7 @@ async def query(
 
 @router.post("/api/query/stream")
 async def query_stream(
+    request: Request,
     body: Dict[str, Any] = Body(...),
 ) -> StreamingResponse:
     """
@@ -108,7 +129,6 @@ async def query_stream(
             yield f'data: {json.dumps({"type": "error", "message": "请提供 query"}, ensure_ascii=False)}\n\n'
         return StreamingResponse(_empty(), media_type="text/event-stream")
 
-    # 业务知识「记住」命令 → 直接返回一条 done，不跑 ReAct
     remember_reply = try_handle_remember(query_text)
     if remember_reply is not None:
         async def _remember_stream():
@@ -117,6 +137,7 @@ async def query_stream(
 
     session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
     context = body.get("context") or {}
+    agent = request.app.state.agent
 
     async def _gen():
         queue: asyncio.Queue = asyncio.Queue()
@@ -129,13 +150,11 @@ async def query_stream(
             _push({"type": "token", "content": token})
 
         def on_event(event_type: str, payload: dict):
-            # lifecycle 事件直接透传到 SSE 流
-            # loop_start / loop_end / loop_error 由客户端作为「起止信号」
             _push({"type": event_type, **payload})
 
         async def _run():
             try:
-                await single_agent.execute_react(
+                await agent.execute_react(
                     query_text,
                     context=context,
                     session_id=session_id,

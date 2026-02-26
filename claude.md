@@ -12,27 +12,37 @@
 
 ## 目录结构
 
-（已按 `doc/项目结构规整方案.md` 规整：单 Agent 心智，工具归入 backend/tools，网络层归入 backend/server。）
+（已按 `doc/项目结构规整方案.md` 规整；框架化改造后见 `doc/改造.md`。）
 
 ```
 Agent Team version3/
 ├── doc/
 │   ├── 项目结构规整方案.md       # 规整方案与 import 替换规则
+│   ├── 改造.md                   # 框架化改造计划（core + plugins + Registry）
 │   ├── ReAct范式对比.md           # version3 与 OpenCode 的 ReAct 范式对比
 │   └── …（其他文档）
 ├── backend/
 │   ├── config.py                 # 后端全局配置（.env 含根目录、backend/tools/oos）
-│   ├── agent/                    # 唯一 Agent（ReAct 主循环 + 工具分发 + 会话）
-│   │   ├── agent.py
-│   │   ├── tools.py
-│   │   └── session.py
-│   ├── tools/                    # Agent 的工具实现
-│   │   ├── inventory/            # 库存与万鼎（原 inventory_agent + src→lib）
-│   │   ├── quotation/            # 报价单 + 询价填充（原 agents/quote + quote_sheet）
-│   │   └── oos/                  # 无货登记/列表/统计（原 quotation_tracker）
+│   ├── core/                     # 纯框架，零业务依赖（改造后）
+│   │   ├── registry.py           # ToolRegistry 查表分发
+│   │   ├── extension.py          # AgentExtension ABC + ExtensionContext
+│   │   ├── agent.py              # CoreAgent（ReAct 引擎，接受 extensions）
+│   │   └── tool_utils.py         # tool_error / validate_file_path
+│   ├── plugins/
+│   │   └── jagent/               # JAgent 业务插件
+│   │       ├── skills.py         # 技能描述常量（从 agent 平移）
+│   │       └── extension.py      # JAgentExtension（注册工具 + 技能 prompt）
+│   ├── agent/                    # 兼容层（薄封装）
+│   │   ├── agent.py              # SingleAgent = CoreAgent 子类，extensions=[JAgentExtension()]
+│   │   ├── tools.py              # 工具实现与 EXTRA_TOOLS（供 Extension 引用）；execute_tool 仍供 legacy 桥接
+│   │   └── session.py            # 会话存储，未动
+│   ├── tools/                    # 工具实现层（未动）
+│   │   ├── inventory/             # 库存与万鼎
+│   │   ├── quotation/            # 报价单 + 询价填充
+│   │   └── oos/                  # 无货登记/列表/统计
 │   └── server/                   # 网络层
-│       ├── api/                  # FastAPI HTTP（原 api/）
-│       └── gateway/              # WebSocket Gateway（原 ws_gateway/）
+│       ├── api/                  # FastAPI；startup 创建 CoreAgent 放入 app.state.agent
+│       └── gateway/              # WebSocket；chat 从 ws.app.state.agent 取 agent
 ├── control-ui/                   # 前端（Vite + Lit），构建产出 dist/control-ui/
 ├── run_backend.py                # 入口：uvicorn backend.server.api.app:app
 ├── cli_agent.py                  # 入口：backend.agent.SingleAgent
@@ -41,7 +51,13 @@ Agent Team version3/
 └── claude.md
 ```
 
+**框架化改造（概要）**：ReAct 引擎与业务解耦，`CoreAgent` 不 import 业务模块；工具由 `ToolRegistry` 查表分发，替代原 `execute_tool` 内 if/elif 链；业务通过 `AgentExtension` 注册（技能 prompt 在 `plugins/jagent/skills.py`，注册在 `plugins/jagent/extension.py`）。启动时 `app.py` 创建 `CoreAgent(extensions=[JAgentExtension()])` 并写入 `app.state.agent`，`routes.py` 与 `gateway/handlers/chat.py` 从 `request.app.state.agent` / `ws.app.state.agent` 取 agent。功能行为保持不变；详见 `doc/改造.md`。
+
 **独立运行**：从项目根目录执行 `python run_backend.py` 或 `python cli_agent.py` 即可；无根目录 `config.py`/`models/`，配置与模型均用 `backend.tools.oos` 等包内模块。
+
+**云端部署准备**：见 `doc/云端部署准备清单.md`（环境变量、业务文件、前端 dist、持久化、Docker）；详细步骤与平台推荐见根目录 `README.md` 中「部署到云端」。
+
+**上下文工程借鉴**：对照 Agent-Skills-for-Context-Engineering 的「可借鉴点」与待思考问题见 `doc/上下文工程借鉴-供思考.md`（context-compression/optimization、context-degradation、tool-design、memory-systems、evaluation）。
 
 ## 技能与工具（prompt 内描述）
 
@@ -51,14 +67,12 @@ Agent Team version3/
 4. **询价填充**：run_quotation_fill。目标：整单流水线（提取→万鼎匹配→库存→回填）。
 5. **澄清**：ask_clarification。目标：无法判断意图时向用户提问。
 
-详见 `backend/agent/agent.py`：5 个技能常量 + `_ALL_SKILLS` + `_PROMPT_OUTPUT_FORMAT`（110-173 行），`_build_system_prompt()` 组装（176-185 行）；按需注入时可改为 `_build_system_prompt(active_skills=None)` 并在 `execute_react` 里按 context 传参。**OpenClaw 配置**：`doc/openclaw/AGENTS.md`、`doc/openclaw/TOOLS.md` 与上述逻辑对齐，供 OpenClaw 工作区使用或复制到 `~/.openclaw/workspace`；用法见 `doc/openclaw/README.md`。
+技能描述现位于 `backend/plugins/jagent/skills.py`（ALL_SKILL_PROMPT、OUTPUT_FORMAT）；`backend/agent/agent.py` 为薄封装，实际逻辑在 `backend/core/agent.py` + JAgentExtension。**OpenClaw 配置**：`doc/openclaw/AGENTS.md`、`doc/openclaw/TOOLS.md` 与上述逻辑对齐，供 OpenClaw 工作区使用或复制到 `~/.openclaw/workspace`；用法见 `doc/openclaw/README.md`。
 
-**工具入参校验**（`backend/agent/tools.py`）：  
-- 校验辅助：`_VALID_CUSTOMER_LEVELS`（合法枚举 `{"A","B","C","D"}`）、`_QUOTE_TOOLS_WITH_FILE`（需校验 file_path 的报价单工具集）、`_tool_error(msg)`（统一错误 observation：`{"success": false, "error": "..."}` 便于模型理解）、`_validate_file_path(path, tool_name)`（空路径/文件不存在 → 返回错误字符串，否则 None）。  
-- `run_quotation_fill`：文件不存在时立即返回错误、不进入 flow_orchestrator；`customer_level` 不在 `{A,B,C,D}` 时返回清晰错误并列出合法值。  
-- 带 `file_path` 的 4 个报价单工具在执行前先经 `_validate_file_path`，失败则直接返回错误 observation。  
-- 效果：避免「文件不存在时整段并发匹配流程跑完才报错」；模型收到错误后可自行补 `file_path` 或提示用户上传。
-- **Token 优化**：`session.py` 中 INJECT_TURNS=3、INJECT_ANSWER_TRIM=600；`agent.py` 中 _CONTEXT_MAX_CHARS=20_000，_SKILL_INVENTORY_PRICE 展示规则已精简；`inventory_agent_tools.py` 工具 description 仅保留「做什么」，决策以 system prompt 为准。
+**工具入参校验**：`backend/core/tool_utils.py` 提供 `tool_error(msg)`、`validate_file_path(path, tool_name)`；报价单工具与 run_quotation_fill 的 file_path/customer_level 校验在 `backend/plugins/jagent/extension.py` 各 handler 内（_QUOTE_WITH_FILE、_VALID_CUSTOMER_LEVELS）。`backend/agent/tools.py` 仅保留 EXTRA_TOOLS 定义、_run_oos_* / _run_register_oos 及 get_all_tools（供预热回退）；工具分发已全部在 Registry + JAgentExtension 内完成，无 execute_tool 分发链。  
+- **Token 优化**：`session.py` 中 INJECT_TURNS=2、INJECT_ANSWER_TRIM=500（注入最近 2 轮、每轮答 500 字，可再按需下调）；core/agent 中 TOOL_RESULT_MAX_CHARS=8_000（单次工具结果上限）、_CONTEXT_MAX_CHARS=8_000（多轮总上下文超则压缩历史 tool 结果）；`inventory_agent_tools.py` 工具 description 仅保留「做什么」，决策以 system prompt 为准。若几句对话就接近 3 万 token，可优先再降 TOOL_RESULT_MAX_CHARS / _CONTEXT_MAX_CHARS 或 INJECT_*。
+- **上下文压缩**：多轮总 context 超 _CONTEXT_MAX_CHARS 时，历史 tool 结果不再整段替换为「已压缩，原长 N 字符」，改为用 **gpt-4o-mini**（或 SUMMARY_LLM_MODEL）生成短摘要（约 400 字）；实现见 `backend/core/context_compression.py`（LLM + 规则 fallback），`_trim_context` 在 core/agent 中调用；配置见 Config.SUMMARY_LLM_MODEL / SUMMARY_LLM_BASE_URL / SUMMARY_LLM_API_KEY（不设则用主 LLM 同 endpoint）。
+- **会话上下文绑定**：为避免用户短回复（如「价格」「库存」）被误绑到更早轮次（如上一次查询的其它产品），`session.py` 的 `build_injection` 末尾增加说明「当前用户下一条消息是对上述最近一轮的回复，请以最近一轮的『问』为主题理解」；`core/agent.py` 在注入会话前，若当前用户消息长度 ≤15 字符且存在上一轮，会追加「【当前意图】用户本句是对上一轮「问：…」的回复，请按该主题理解」，减少澄清后短回复与更早轮次混淆。
 
 **ReAct 范式对比**：详见独立文档 `doc/ReAct范式对比.md`（version3 vs OpenCode）。下文为摘要。
 ## ReAct 范式：与 OpenCode 对比（摘要）

@@ -41,8 +41,9 @@ class Session:
 class SessionStore:
     MAX_TURNS = 8
     ANSWER_TRIM = 4000
-    INJECT_TURNS = 3
-    INJECT_ANSWER_TRIM = 1000
+    # 注入到下一轮 user 消息的「最近几轮」及每轮答的长度，减小可降 token
+    INJECT_TURNS = 2
+    INJECT_ANSWER_TRIM = 500
 
     def __init__(self, persist_dir: Optional[Path] = None):
         self._mem = {}
@@ -124,6 +125,7 @@ class SessionStore:
             lines.append(f"\n轮次 {i} [{ts_str}] agent={turn.agent or '?'}\n  问: {turn.query}\n  答: {ans}")
         if session.file_path:
             lines.append(f"\n[已上传文件]: {Path(session.file_path).name} → {session.file_path}")
+        lines.append("\n【说明】当前用户下一条消息是对上述「最近一轮」的回复，理解用户意图时请以最近一轮的「问」为主题，勿与更早轮次混淆。")
         return "\n".join(lines)
 
     def list_sessions(self) -> list:
