@@ -79,9 +79,10 @@ python run_backend.py
 ## 业务文件与会话（部署必看）
 
 - **会话目录**：`data/sessions/` 用于存放会话记录。**首次启动时会自动创建**，无需手动建目录。若提示「缺少 session」，请确认从项目根目录启动（保证 `data/sessions` 在项目下），并重启后端。
-- **业务文件**（询价/万鼎/报价单功能依赖）：
+- **业务文件**（询价/万鼎/报价单功能依赖，**仅保留以下两个 Excel**）：
   - `data/万鼎价格库_管材与国标管件_标准格式.xlsx` 或同目录下替代价格库（可通过 `.env` 的 `PRICE_LIBRARY_PATH` 指定）。
   - `data/整理产品(2).xlsx`（询价名称→产品编号映射表，可通过 `MAPPING_TABLE_PATH` 指定）。
+  - `backend/tools/inventory/item-list-slim.xlsx`（库存解析用产品 slim 表，可通过 `INVENTORY_ITEM_LIST_SLIM_PATH` 指定）。
   - `backend/tools/data/wanding_business_knowledge.md`（万鼎选型业务知识）。仓库内已包含该文件；若缺失，首次使用选型功能时会自动用内置内容生成。
 - **上传目录**：`uploads/` 会在首次启动时自动创建，用于聊天内上传的 Excel/PDF。
 
