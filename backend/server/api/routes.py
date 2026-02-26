@@ -20,7 +20,12 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "agent-jk-backend-v3", "mode": "single_agent"}
+    return {
+        "status": "ok",
+        "service": "agent-jk-backend-v3",
+        "mode": "single_agent",
+        "llm_model": getattr(Config, "LLM_MODEL", None),
+    }
 
 
 def _sanitize_upload_filename(name: str, max_len: int = 80) -> str:
