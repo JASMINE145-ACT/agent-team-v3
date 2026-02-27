@@ -18,6 +18,8 @@ openpyxl>=3.1.0
 pandas>=2.0.0,<3
 numpy>=1.26.0,<2
 sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+asyncpg>=0.29.0
 chardet>=5.0.0
 
 # 库存 / Accurate API 请求（必选）
