@@ -18,6 +18,8 @@ export type OosDashboardProps = {
   list: OosRecord[];
   byFile: OosByFileRow[];
   byTime: OosByTimeRow[];
+  /** 无货库：postgres | sqlite，sqlite 时显示「当前使用本地数据库」 */
+  db?: "postgres" | "sqlite" | null;
   onRefresh: () => void;
   onDelete?: (productKey: string) => void;
   showAddForm?: boolean;
@@ -38,6 +40,9 @@ export function renderOosDashboard(props: OosDashboardProps) {
           ${props.loading ? "加载中…" : "刷新"}
         </button>
       </div>
+      ${props.db === "sqlite"
+        ? html`<div class="callout" style="margin-top: 12px; background: var(--bg-muted, #f5f5f5); color: var(--text-muted, #666);">当前使用本地数据库</div>`
+        : nothing}
       ${props.error ? html`<div class="callout danger" style="margin-top: 12px;">${props.error}</div>` : nothing}
       <div class="row" style="margin-top: 16px; gap: 12px; flex-wrap: wrap;">
         ${props.stats ? renderStatsCards(props.stats) : props.loading ? nothing : html`<div class="muted">暂无统计</div>`}
@@ -181,6 +186,8 @@ export type ShortageBlockProps = {
   list: ShortageRecord[];
   byFile: ShortageByFileRow[];
   byTime: ShortageByTimeRow[];
+  /** 缺货库：postgres | sqlite，sqlite 时显示「当前使用本地数据库」 */
+  db?: "postgres" | "sqlite" | null;
   onRefresh: () => void;
   onDelete?: (productKey: string) => void;
   showAddForm?: boolean;
@@ -201,6 +208,9 @@ export function renderShortageBlock(props: ShortageBlockProps) {
           ${props.loading ? "加载中…" : "刷新"}
         </button>
       </div>
+      ${props.db === "sqlite"
+        ? html`<div class="callout" style="margin-top: 12px; background: var(--bg-muted, #f5f5f5); color: var(--text-muted, #666);">当前使用本地数据库</div>`
+        : nothing}
       ${props.error ? html`<div class="callout danger" style="margin-top: 12px;">${props.error}</div>` : nothing}
       <div class="row" style="margin-top: 16px; gap: 12px; flex-wrap: wrap;">
         ${props.stats ? renderShortageStatsCards(props.stats) : props.loading ? nothing : html`<div class="muted">暂无统计</div>`}

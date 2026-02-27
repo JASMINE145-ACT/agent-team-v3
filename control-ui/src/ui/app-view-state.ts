@@ -138,6 +138,8 @@ export type AppViewState = {
   oosByFile: import("./types.js").OosByFileRow[];
   oosByTime: import("./types.js").OosByTimeRow[];
   oosShowAddForm: boolean;
+  /** 无货/缺货库：postgres | sqlite（从 /api/oos/stats 的 db 字段） */
+  oosDb: "postgres" | "sqlite" | null;
   shortageLoading: boolean;
   shortageError: string | null;
   shortageStats: import("./types.js").ShortageStats | null;
@@ -145,6 +147,8 @@ export type AppViewState = {
   shortageByFile: import("./types.js").ShortageByFileRow[];
   shortageByTime: import("./types.js").ShortageByTimeRow[];
   shortageShowAddForm: boolean;
+  /** 缺货库：postgres | sqlite（从 /api/shortage/stats 的 db 字段） */
+  shortageDb: "postgres" | "sqlite" | null;
   overviewOosStats: import("./types.js").OosStats | null;
   overviewOosError: string | null;
   overviewShortageStats: import("./types.js").ShortageStats | null;

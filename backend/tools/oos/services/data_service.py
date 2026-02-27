@@ -82,29 +82,44 @@ class UploadSession(Base):
 
 class DataService:
     """数据服务"""
-    
+
+    def _create_sqlite_engine(self):
+        from sqlalchemy.pool import StaticPool
+        return create_engine(
+            f"sqlite:///{DB_PATH}",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False}
+        )
+
     def __init__(self):
-        # 创建数据库连接
+        # 仅在启动/首次使用时执行一次；不可达时回退 SQLite，避免每次请求都重试 Postgres。
         if DB_URL:
-            self.engine = create_engine(
-                DB_URL,
-                poolclass=QueuePool,
-                pool_size=10,
-                max_overflow=20,
-                pool_pre_ping=True
-            )
+            try:
+                self.engine = create_engine(
+                    DB_URL,
+                    poolclass=QueuePool,
+                    pool_size=10,
+                    max_overflow=20,
+                    pool_pre_ping=True,
+                    connect_args={"sslmode": "require"},
+                )
+                Base.metadata.create_all(self.engine)
+                self.using_postgres = True
+            except OperationalError as e:
+                logger.error(
+                    "Postgres unreachable, falling back to SQLite: %s",
+                    e,
+                    exc_info=False,
+                )
+                self.engine = self._create_sqlite_engine()
+                Base.metadata.create_all(self.engine)
+                self.using_postgres = False
         else:
-            # SQLite
-            from sqlalchemy.pool import StaticPool
-            self.engine = create_engine(
-                f"sqlite:///{DB_PATH}",
-                poolclass=StaticPool,
-                connect_args={"check_same_thread": False}
-            )
-        
-        # 创建表
-        Base.metadata.create_all(self.engine)
-        # 迁移：为已有表补充新列（SQLite 的 create_all 不会更新已存在的表）
+            self.engine = self._create_sqlite_engine()
+            Base.metadata.create_all(self.engine)
+            self.using_postgres = False
+
+        # 迁移：为已有表补充新列（仅 SQLite；Postgres 由 create_all 处理）
         self._migrate_add_columns_if_needed()
 
         # 创建 Session
@@ -112,7 +127,7 @@ class DataService:
 
     def _migrate_add_columns_if_needed(self) -> None:
         """为已有 out_of_stock_records 表补充新列，兼容旧数据库"""
-        if DB_URL:
+        if self.engine.dialect.name != "sqlite":
             return  # PostgreSQL 等由 create_all 或独立迁移处理
         with self.engine.connect() as conn:
             try:

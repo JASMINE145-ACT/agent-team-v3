@@ -230,6 +230,7 @@ export class OpenClawApp extends LitElement {
   @state() oosByFile: import("./types.js").OosByFileRow[] = [];
   @state() oosByTime: import("./types.js").OosByTimeRow[] = [];
   @state() oosShowAddForm = false;
+  @state() oosDb: "postgres" | "sqlite" | null = null;
 
   @state() shortageLoading = false;
   @state() shortageError: string | null = null;
@@ -238,6 +239,7 @@ export class OpenClawApp extends LitElement {
   @state() shortageByFile: import("./types.js").ShortageByFileRow[] = [];
   @state() shortageByTime: import("./types.js").ShortageByTimeRow[] = [];
   @state() shortageShowAddForm = false;
+  @state() shortageDb: "postgres" | "sqlite" | null = null;
 
   /** Overview 页用：快速展示无货/缺货统计 */
   @state() overviewOosStats: import("./types.js").OosStats | null = null;

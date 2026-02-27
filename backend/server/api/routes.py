@@ -20,12 +20,21 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check():
-    return {
+    out = {
         "status": "ok",
         "service": "agent-jk-backend-v3",
         "mode": "single_agent",
         "llm_model": getattr(Config, "LLM_MODEL", None),
     }
+    try:
+        ds = _get_oos_data_service()
+        out["oos_db"] = "postgres" if getattr(ds, "using_postgres", False) else "sqlite"
+        out["oos_using_postgres"] = getattr(ds, "using_postgres", False)
+    except Exception as e:
+        logger.debug("health: oos DataService 未就绪: %s", e)
+        out["oos_db"] = None
+        out["oos_using_postgres"] = False
+    return out
 
 
 def _sanitize_upload_filename(name: str, max_len: int = 80) -> str:
@@ -185,10 +194,16 @@ async def query_stream(
 
 # ---------- 无货看板 API（供 control-ui 使用） ----------
 
+_oos_data_service = None
+
 
 def _get_oos_data_service():
-    from backend.tools.oos.services.data_service import DataService
-    return DataService()
+    """单例：仅首次调用时创建 DataService，避免每次请求都尝试 Postgres。"""
+    global _oos_data_service
+    if _oos_data_service is None:
+        from backend.tools.oos.services.data_service import DataService
+        _oos_data_service = DataService()
+    return _oos_data_service
 
 
 @router.get("/api/oos/stats")
@@ -197,7 +212,8 @@ async def oos_stats() -> Dict[str, Any]:
     try:
         ds = _get_oos_data_service()
         stats = ds.get_statistics()
-        return {"success": True, "data": stats}
+        db_mode = "postgres" if getattr(ds, "using_postgres", False) else "sqlite"
+        return {"success": True, "data": stats, "db": db_mode}
     except Exception as e:
         logger.exception("oos/stats 失败")
         raise HTTPException(status_code=500, detail=str(e))
@@ -369,7 +385,8 @@ async def shortage_stats() -> Dict[str, Any]:
     try:
         ds = _get_oos_data_service()
         stats = ds.get_shortage_statistics()
-        return {"success": True, "data": stats}
+        db_mode = "postgres" if getattr(ds, "using_postgres", False) else "sqlite"
+        return {"success": True, "data": stats, "db": db_mode}
     except Exception as e:
         logger.exception("shortage/stats 失败")
         raise HTTPException(status_code=500, detail=str(e))

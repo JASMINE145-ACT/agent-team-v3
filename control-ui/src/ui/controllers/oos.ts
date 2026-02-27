@@ -84,6 +84,7 @@ export async function loadOos(state: OosState, options?: { limit?: number; days?
 
     if (statsJson.success && statsJson.data) {
       state.oosStats = statsJson.data as OosStats;
+      (state as { oosDb?: "postgres" | "sqlite" | null }).oosDb = statsJson.db ?? null;
     } else {
       state.oosStats = null;
       if (!statsRes.ok) {
@@ -214,6 +215,7 @@ export async function loadShortage(state: ShortageState, options?: { limit?: num
     const byTimeJson = await byTimeRes.json().catch(() => ({}));
     if (statsJson.success && statsJson.data) {
       state.shortageStats = statsJson.data as ShortageStats;
+      (state as { shortageDb?: "postgres" | "sqlite" | null }).shortageDb = statsJson.db ?? null;
     } else {
       state.shortageStats = null;
       if (!state.shortageError && !statsRes.ok) {
