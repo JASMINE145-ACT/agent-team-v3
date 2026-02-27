@@ -29,6 +29,8 @@ export type ChatEventPayload = {
   errorMessage?: string;
 };
 
+export type ChatEventResult = ChatEventPayload["state"] | "foreign_final" | null;
+
 export async function loadChatHistory(state: ChatState) {
   if (!state.client || !state.connected) {
     return;
@@ -213,7 +215,7 @@ export async function abortChatRun(state: ChatState): Promise<boolean> {
   }
 }
 
-export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
+export function handleChatEvent(state: ChatState, payload?: ChatEventPayload): ChatEventResult {
   if (!payload) {
     return null;
   }
@@ -225,7 +227,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   // See https://github.com/openclaw/openclaw/issues/1909
   if (payload.runId && state.chatRunId && payload.runId !== state.chatRunId) {
     if (payload.state === "final") {
-      return "final";
+      return "foreign_final";
     }
     return null;
   }

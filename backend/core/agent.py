@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import types as _types
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -154,12 +155,24 @@ class CoreAgent:
         on_tool_start: Optional[Callable] = None,
         on_tool_calls_ready: Optional[Callable] = None,
         on_event: Optional[Callable] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         def _fire(event_type, payload):
             if on_event:
                 try:
                     on_event(event_type, {"session_id": session_id or "", **payload})
                 except Exception:
+                    pass
+
+        def _raise_if_cancelled() -> None:
+            if should_cancel:
+                try:
+                    if should_cancel():
+                        raise asyncio.CancelledError()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # Cancellation callback must never break the agent loop.
                     pass
 
         _fire("loop_start", {"query": user_input[:200]})
@@ -209,6 +222,7 @@ class CoreAgent:
             max_tokens = 5000
 
         for step in range(max_steps):
+            _raise_if_cancelled()
             is_last = step == max_steps - 1
             if is_last:
                 messages.append({"role": "user", "content": _MAX_STEPS_HINT})
@@ -220,10 +234,20 @@ class CoreAgent:
 
             step_usage = None
             if on_token is not None:
-                content, tool_calls, step_usage = await asyncio.to_thread(
-                    _call_llm_streaming_sync, self.client, kwargs, on_token
+                llm_task = asyncio.create_task(
+                    asyncio.to_thread(_call_llm_streaming_sync, self.client, kwargs, on_token)
                 )
+                try:
+                    while not llm_task.done():
+                        _raise_if_cancelled()
+                        await asyncio.sleep(0.05)
+                    content, tool_calls, step_usage = await llm_task
+                except asyncio.CancelledError:
+                    if not llm_task.done():
+                        llm_task.cancel()
+                    raise
             else:
+                _raise_if_cancelled()
                 resp = self.client.chat.completions.create(**kwargs)
                 msg = resp.choices[0].message if resp.choices else None
                 if not msg:
@@ -265,7 +289,9 @@ class CoreAgent:
                     pass
 
             for i, tc in enumerate(tool_calls):
+                _raise_if_cancelled()
                 name = getattr(tc.function, "name", "") or ""
+                tool_call_id = tool_calls_for_msg[i]["id"]
                 if on_tool_start:
                     try:
                         on_tool_start(name, i + 1, n)
@@ -276,8 +302,35 @@ class CoreAgent:
                 except json.JSONDecodeError:
                     args = {}
 
+                if on_event:
+                    try:
+                        on_event(
+                            "agent",
+                            {
+                                "stream": "tool",
+                                "ts": int(time.time() * 1000),
+                                "data": {
+                                    "phase": "start",
+                                    "name": name,
+                                    "toolCallId": tool_call_id,
+                                    "args": args,
+                                },
+                            },
+                        )
+                    except Exception:
+                        pass
+
                 trace.append({"step": step + 1, "type": "tool_call", "name": name, "arguments": args})
-                obs = await self._registry.execute(name, args, ctx)
+                tool_task = asyncio.create_task(self._registry.execute(name, args, ctx))
+                try:
+                    while not tool_task.done():
+                        _raise_if_cancelled()
+                        await asyncio.sleep(0.05)
+                    obs = await tool_task
+                except asyncio.CancelledError:
+                    if not tool_task.done():
+                        tool_task.cancel()
+                    raise
                 if len(obs) > TOOL_RESULT_MAX_CHARS:
                     obs = obs[:TOOL_RESULT_MAX_CHARS] + "\n…（已截断）"
 
@@ -287,8 +340,27 @@ class CoreAgent:
                     except Exception:
                         pass
 
+                if on_event:
+                    try:
+                        on_event(
+                            "agent",
+                            {
+                                "stream": "tool",
+                                "ts": int(time.time() * 1000),
+                                "data": {
+                                    "phase": "result",
+                                    "name": name,
+                                    "toolCallId": tool_call_id,
+                                    "result": obs,
+                                },
+                            },
+                        )
+                    except Exception:
+                        pass
+
                 trace.append({"step": step + 1, "type": "observation", "content": obs})
-                messages.append({"role": "tool", "tool_call_id": tool_calls_for_msg[i]["id"], "content": obs})
+                messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": obs})
+                _raise_if_cancelled()
 
             id_to_name = build_tool_call_id_to_name(messages)
             summarizer = make_summarizer(

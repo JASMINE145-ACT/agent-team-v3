@@ -21,12 +21,15 @@ def main():
 
     if sys.platform == "win32":
         # 新开一个 cmd 窗口跑后端，便于看日志（路径含空格时用引号）
-        cmd_str = f'start "Jagent Backend" cmd /k "cd /d \"{root}\" && python run_backend.py"'
+        # 本地启动时取消 DATABASE_URL，强制用 SQLite，避免依赖 psycopg2/云端
+        cmd_str = f'start "Jagent Backend" cmd /k "cd /d \"{root}\" && set DATABASE_URL= && python run_backend.py"'
         subprocess.Popen(cmd_str, cwd=root, shell=True)
     else:
+        env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
         subprocess.Popen(
             [sys.executable, "run_backend.py"],
             cwd=root,
+            env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,

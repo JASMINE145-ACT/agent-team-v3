@@ -5,6 +5,9 @@ import type { SessionLogEntry } from "../views/usage.ts";
 export type UsageState = {
   client: GatewayBrowserClient | null;
   connected: boolean;
+  usageRequestSeq: number;
+  usageTimeSeriesRequestSeq: number;
+  usageSessionLogsRequestSeq: number;
   usageLoading: boolean;
   usageResult: SessionsUsageResult | null;
   usageCostSummary: CostUsageSummary | null;
@@ -31,9 +34,7 @@ export async function loadUsage(
   if (!state.client || !state.connected) {
     return;
   }
-  if (state.usageLoading) {
-    return;
-  }
+  const requestSeq = ++state.usageRequestSeq;
   state.usageLoading = true;
   state.usageError = null;
   try {
@@ -51,6 +52,10 @@ export async function loadUsage(
       state.client.request("usage.cost", { startDate, endDate }),
     ]);
 
+    if (requestSeq !== state.usageRequestSeq) {
+      return;
+    }
+
     if (sessionsRes) {
       state.usageResult = sessionsRes as SessionsUsageResult;
     }
@@ -58,9 +63,14 @@ export async function loadUsage(
       state.usageCostSummary = costRes as CostUsageSummary;
     }
   } catch (err) {
+    if (requestSeq !== state.usageRequestSeq) {
+      return;
+    }
     state.usageError = String(err);
   } finally {
-    state.usageLoading = false;
+    if (requestSeq === state.usageRequestSeq) {
+      state.usageLoading = false;
+    }
   }
 }
 
@@ -68,21 +78,27 @@ export async function loadSessionTimeSeries(state: UsageState, sessionKey: strin
   if (!state.client || !state.connected) {
     return;
   }
-  if (state.usageTimeSeriesLoading) {
-    return;
-  }
+  const requestSeq = ++state.usageTimeSeriesRequestSeq;
   state.usageTimeSeriesLoading = true;
   state.usageTimeSeries = null;
   try {
     const res = await state.client.request("sessions.usage.timeseries", { key: sessionKey });
+    if (requestSeq !== state.usageTimeSeriesRequestSeq) {
+      return;
+    }
     if (res) {
       state.usageTimeSeries = res as SessionUsageTimeSeries;
     }
   } catch {
+    if (requestSeq !== state.usageTimeSeriesRequestSeq) {
+      return;
+    }
     // Silently fail - time series is optional
     state.usageTimeSeries = null;
   } finally {
-    state.usageTimeSeriesLoading = false;
+    if (requestSeq === state.usageTimeSeriesRequestSeq) {
+      state.usageTimeSeriesLoading = false;
+    }
   }
 }
 
@@ -90,9 +106,7 @@ export async function loadSessionLogs(state: UsageState, sessionKey: string) {
   if (!state.client || !state.connected) {
     return;
   }
-  if (state.usageSessionLogsLoading) {
-    return;
-  }
+  const requestSeq = ++state.usageSessionLogsRequestSeq;
   state.usageSessionLogsLoading = true;
   state.usageSessionLogs = null;
   try {
@@ -100,13 +114,21 @@ export async function loadSessionLogs(state: UsageState, sessionKey: string) {
       key: sessionKey,
       limit: 1000,
     });
+    if (requestSeq !== state.usageSessionLogsRequestSeq) {
+      return;
+    }
     if (res && Array.isArray((res as { logs: SessionLogEntry[] }).logs)) {
       state.usageSessionLogs = (res as { logs: SessionLogEntry[] }).logs;
     }
   } catch {
+    if (requestSeq !== state.usageSessionLogsRequestSeq) {
+      return;
+    }
     // Silently fail - logs are optional
     state.usageSessionLogs = null;
   } finally {
-    state.usageSessionLogsLoading = false;
+    if (requestSeq === state.usageSessionLogsRequestSeq) {
+      state.usageSessionLogsLoading = false;
+    }
   }
 }

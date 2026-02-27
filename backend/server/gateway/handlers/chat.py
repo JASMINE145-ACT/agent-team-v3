@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 import uuid
 from typing import Any, Callable, Optional
 
@@ -127,6 +128,7 @@ async def handle_chat_send(
     cancel_ev = run_register(run_id)
     accumulated: list[str] = [""]
     loop = asyncio.get_event_loop()
+    event_seq = 0
 
     def on_token(token: str):
         if cancel_ev.is_set():
@@ -148,7 +150,30 @@ async def handle_chat_send(
         loop.call_soon_threadsafe(lambda: asyncio.ensure_future(send_event(payload)))
 
     def on_event(event_type: str, payload: dict):
-        pass
+        nonlocal event_seq
+        event_seq += 1
+        evt_payload = payload if isinstance(payload, dict) else {}
+        if event_type == "agent":
+            stream = evt_payload.get("stream")
+            data = evt_payload.get("data")
+            if not isinstance(stream, str):
+                return
+            if not isinstance(data, dict):
+                data = {}
+            outbound = {
+                "type": "event",
+                "event": "agent",
+                "payload": {
+                    "runId": run_id,
+                    "sessionKey": session_key,
+                    "seq": event_seq,
+                    "ts": int(time.time() * 1000),
+                    "stream": stream,
+                    "data": data,
+                },
+            }
+            loop.call_soon_threadsafe(lambda: asyncio.ensure_future(send_event(outbound)))
+            return
 
     await send_res({"ok": True, "runId": run_id})
 
@@ -161,6 +186,7 @@ async def handle_chat_send(
             session_id=session_key,
             on_token=on_token,
             on_event=on_event,
+            should_cancel=cancel_ev.is_set,
         )
         if cancel_ev.is_set():
             state = "aborted"

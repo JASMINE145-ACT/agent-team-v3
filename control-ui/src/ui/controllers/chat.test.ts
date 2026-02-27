@@ -53,7 +53,7 @@ describe("handleChatEvent", () => {
     expect(state.chatStream).toBe("Hello");
   });
 
-  it("returns 'final' for final from another run (e.g. sub-agent announce) without clearing state", () => {
+  it("returns 'foreign_final' for final from another run (e.g. sub-agent announce) without clearing state", () => {
     const state = createState({
       sessionKey: "main",
       chatRunId: "run-user",
@@ -69,7 +69,7 @@ describe("handleChatEvent", () => {
         content: [{ type: "text", text: "Sub-agent findings" }],
       },
     };
-    expect(handleChatEvent(state, payload)).toBe("final");
+    expect(handleChatEvent(state, payload)).toBe("foreign_final");
     expect(state.chatRunId).toBe("run-user");
     expect(state.chatStream).toBe("Working...");
     expect(state.chatStreamStartedAt).toBe(123);

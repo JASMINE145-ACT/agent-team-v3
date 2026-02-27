@@ -13,6 +13,7 @@ import time
 
 from backend.tools.oos.config import DB_PATH, DB_URL, EMAIL_COOLDOWN_HOURS
 from backend.tools.oos.models import OutOfStockProduct, OutOfStockRecord
+from backend.tools.oos.services.oos_repository import insert_oos_record
 
 logger = logging.getLogger(__name__)
 
@@ -644,21 +645,46 @@ class DataService:
                 stmt = select(func.max(ShortageRecordDB.count)).where(ShortageRecordDB.product_key == product_key)
                 max_count = session.execute(stmt).scalar() or 0
                 new_count = max_count + 1
+                quantity = float(item.get("quantity") or 0)
+                available_qty = float(item.get("available_qty") or 0)
+                shortfall = float(item.get("shortfall") or 0)
+                code = (item.get("code") or "").strip()
+                quote_name = (item.get("quote_name") or "")[:500]
+                unit_price = float(item.get("unit_price")) if item.get("unit_price") is not None else None
                 record = ShortageRecordDB(
                     product_name=product_name,
                     specification=specification,
-                    quantity=float(item.get("quantity") or 0),
-                    available_qty=float(item.get("available_qty") or 0),
-                    shortfall=float(item.get("shortfall") or 0),
-                    code=(item.get("code") or "").strip(),
-                    quote_name=(item.get("quote_name") or "")[:500],
-                    unit_price=float(item.get("unit_price")) if item.get("unit_price") is not None else None,
+                    quantity=quantity,
+                    available_qty=available_qty,
+                    shortfall=shortfall,
+                    code=code,
+                    quote_name=quote_name,
+                    unit_price=unit_price,
                     file_name=name,
                     product_key=product_key,
                     count=new_count,
                 )
                 session.add(record)
                 inserted += 1
+
+                # 同步缺货记录到 Supabase（best effort，不影响本地 DB）
+                try:
+                    note_parts = [name]
+                    if quote_name:
+                        note_parts.append(f"quote={quote_name}")
+                    note_parts.append(f"need={quantity}, avail={available_qty}, shortfall={shortfall}")
+                    insert_oos_record(
+                        issue_type="shortage",
+                        product_name=product_name,
+                        product_code=code or product_key,
+                        customer_name=None,
+                        need_qty=quantity,
+                        avail_qty=available_qty,
+                        shortfall_qty=shortfall,
+                        note=" | ".join(note_parts),
+                    )
+                except Exception as e:
+                    logger.warning("同步缺货记录到 Supabase 失败（忽略）: %s", e)
             session.commit()
             return inserted
         except Exception as e:

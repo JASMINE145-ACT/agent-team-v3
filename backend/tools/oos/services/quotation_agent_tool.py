@@ -193,6 +193,7 @@ def persist_out_of_stock_records(
     表内 id、uploaded_at、product_key、count 由系统自动生成。
     """
     from backend.tools.oos.models.models import OutOfStockProduct
+    from backend.tools.oos.services.oos_repository import insert_oos_record
     from .data_service import DataService
 
     data_service = DataService()
@@ -220,6 +221,23 @@ def persist_out_of_stock_records(
             count = data_service.insert_record(product, row_sheet, file_name)
             inserted += 1
             product_key = data_service._generate_product_key(product_name, product.specification)
+            # 同步一份到 Supabase Postgres（最小侵入：best effort，不影响本地 DB）
+            try:
+                note_parts = [file_name]
+                if row_sheet:
+                    note_parts.append(f"sheet={row_sheet}")
+                insert_oos_record(
+                    issue_type="oos",
+                    product_name=product_name,
+                    product_code=product_key,
+                    customer_name=None,
+                    need_qty=qty,
+                    avail_qty=0.0,
+                    shortfall_qty=qty,
+                    note=" | ".join(note_parts),
+                )
+            except Exception as e:
+                logger.warning("同步无货记录到 Supabase 失败（忽略，不影响本地写入）: %s", e)
             if data_service.should_trigger_email(product_key, count):
                 from .email_service import send_out_of_stock_alert
                 if send_out_of_stock_alert(
