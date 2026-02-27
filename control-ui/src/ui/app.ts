@@ -231,6 +231,20 @@ export class OpenClawApp extends LitElement {
   @state() oosByTime: import("./types.js").OosByTimeRow[] = [];
   @state() oosShowAddForm = false;
 
+  @state() shortageLoading = false;
+  @state() shortageError: string | null = null;
+  @state() shortageStats: import("./types.js").ShortageStats | null = null;
+  @state() shortageList: import("./types.js").ShortageRecord[] = [];
+  @state() shortageByFile: import("./types.js").ShortageByFileRow[] = [];
+  @state() shortageByTime: import("./types.js").ShortageByTimeRow[] = [];
+  @state() shortageShowAddForm = false;
+
+  /** Overview 页用：快速展示无货/缺货统计 */
+  @state() overviewOosStats: import("./types.js").OosStats | null = null;
+  @state() overviewOosError: string | null = null;
+  @state() overviewShortageStats: import("./types.js").ShortageStats | null = null;
+  @state() overviewShortageError: string | null = null;
+
   @state() agentsLoading = false;
   @state() agentsList: AgentsListResult | null = null;
   @state() agentsError: string | null = null;

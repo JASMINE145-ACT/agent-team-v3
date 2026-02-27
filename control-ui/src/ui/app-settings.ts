@@ -19,7 +19,12 @@ import { loadDevices } from "./controllers/devices.ts";
 import { loadExecApprovals } from "./controllers/exec-approvals.ts";
 import { loadLogs } from "./controllers/logs.ts";
 import { loadNodes } from "./controllers/nodes.ts";
-import { loadOos } from "./controllers/oos.ts";
+import {
+  loadOos,
+  loadShortage,
+  loadOosStatsForOverview,
+  loadShortageStatsForOverview,
+} from "./controllers/oos.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadSkills } from "./controllers/skills.ts";
@@ -183,6 +188,11 @@ export function setTheme(host: SettingsHost, next: ThemeMode, context?: ThemeTra
 export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "overview") {
     await loadOverview(host);
+    // 同时拉取无货/缺货统计供 Overview 使用（轻量接口，仅统计）
+    await Promise.all([
+      loadOosStatsForOverview(host as unknown as OpenClawApp),
+      loadShortageStatsForOverview(host as unknown as OpenClawApp),
+    ]);
   }
   if (host.tab === "channels") {
     await loadBusinessKnowledge(host as unknown as {
@@ -196,7 +206,9 @@ export async function refreshActiveTab(host: SettingsHost) {
     });
   }
   if (host.tab === "instances") {
-    await loadOos(host as unknown as OpenClawApp);
+    const state = host as unknown as OpenClawApp;
+    await loadOos(state);
+    await loadShortage(state);
   }
   if (host.tab === "sessions") {
     await loadSessions(host as unknown as OpenClawApp);

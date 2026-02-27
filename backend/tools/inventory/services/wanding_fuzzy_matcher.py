@@ -17,7 +17,35 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-PRICE_COLS = {"A": 8, "B": 10, "C": 12, "D": 14}
+# 价格列（0-based）：报单 A/B/C/D/D_low/E + 出厂价_含税/不含税、采购不含税
+PRICE_COLS = {
+    "A": 8, "B": 10, "C": 12, "D": 14, "D_LOW": 16, "E": 18,
+    "FACTORY_INC_TAX": 4,   # 出厂价_含税
+    "FACTORY_EXC_TAX": 5,   # 出厂价_不含税
+    "PURCHASE_EXC_TAX": 6,  # 采购不含税
+}
+
+
+def _normalize_price_level(customer_level: str) -> str:
+    """将用户/Agent 传入的档位或价格类型统一为 PRICE_COLS 的 key。"""
+    s = (customer_level or "B").strip()
+    if not s:
+        return "B"
+    # 中文：出厂价含税/不含税、采购不含税
+    if "出厂价" in s and "含税" in s:
+        return "FACTORY_INC_TAX"
+    if "出厂价" in s and "不含税" in s:
+        return "FACTORY_EXC_TAX"
+    if "采购" in s:
+        return "PURCHASE_EXC_TAX"
+    # 英文/代码
+    u = s.upper().replace(" ", "_")
+    if u in ("D_LOW", "D LOW", "DLOW"):
+        return "D_LOW"
+    for key in ("FACTORY_INC_TAX", "FACTORY_EXC_TAX", "PURCHASE_EXC_TAX"):
+        if key in u or u == key:
+            return key
+    return u if u in PRICE_COLS else "B"
 
 SYNONYM_GROUPS = [
     {"直接", "直接头", "直通", "直通接头"},
@@ -315,9 +343,9 @@ def search_fuzzy(
 
 
 def _load_one_sheet(ws, price_col: int) -> list[dict]:
-    """从已打开的 worksheet 读出一张表的行（Material, Describrition, unit_price）。"""
+    """从已打开的 worksheet 读出一张表的行（Material, Describrition, unit_price）。需覆盖 E 档列(0-based 18)，故 max_col=20。"""
     rows = []
-    for row in ws.iter_rows(max_col=16):
+    for row in ws.iter_rows(max_col=20):
         cells = [getattr(c, "value", None) for c in row]
         if len(cells) > 2 and cells[2]:
             up = 0.0
@@ -356,7 +384,7 @@ def load_wanding_df(
         logger.warning("万鼎价格库不存在: %s", p)
         return pd.DataFrame()
 
-    level = (customer_level or "B").strip().upper()
+    level = _normalize_price_level(customer_level)
     price_col = PRICE_COLS.get(level, PRICE_COLS["B"])
 
     try:
@@ -389,7 +417,7 @@ _df_cache_lock = threading.Lock()
 
 def _get_cached_df(path, customer_level: str) -> pd.DataFrame:
     """线程安全地获取（或加载）指定 path+level 的 DataFrame。"""
-    level = (customer_level or "B").strip().upper()
+    level = _normalize_price_level(customer_level)
     cache_key = f"{path}:{level}"
     if cache_key in _df_cache:
         return _df_cache[cache_key]

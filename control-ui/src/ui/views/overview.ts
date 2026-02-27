@@ -4,6 +4,7 @@ import { formatRelativeTimestamp, formatDurationHuman } from "../format.ts";
 import type { GatewayHelloOk } from "../gateway.ts";
 import { formatNextRun } from "../presenter.ts";
 import type { UiSettings } from "../storage.ts";
+import type { OosStats, ShortageStats } from "../types.ts";
 
 export type OverviewProps = {
   connected: boolean;
@@ -16,6 +17,9 @@ export type OverviewProps = {
   cronEnabled: boolean | null;
   cronNext: number | null;
   lastChannelsRefresh: number | null;
+  /** Overview 用的无货/缺货统计（来自各自 stats 接口） */
+  oosStats: OosStats | null;
+  shortageStats: ShortageStats | null;
   onSettingsChange: (next: UiSettings) => void;
   onPasswordChange: (next: string) => void;
   onSessionKeyChange: (next: string) => void;
@@ -131,6 +135,60 @@ export function renderOverview(props: OverviewProps) {
   const currentLocale = i18n.getLocale();
 
   return html`
+    <section class="card">
+      <div class="row" style="justify-content: space-between; align-items: center;">
+        <div>
+          <div class="card-title">${t("overview.health.title")}</div>
+          <div class="card-sub">
+            ${t("overview.health.subtitle")}
+          </div>
+        </div>
+        <div
+          class="pill ${props.connected ? "success" : "danger"}"
+          style="font-weight: 600; min-width: 96px; justify-content: center;"
+        >
+          ${props.connected ? t("common.ok") : t("common.offline")}
+        </div>
+      </div>
+      <div class="row" style="margin-top: 16px; gap: 12px; flex-wrap: wrap;">
+        <div class="card stat-card" style="min-width: 140px;">
+          <div class="stat-label">${t("overview.stats.instances")}</div>
+          <div class="stat-value">${props.presenceCount}</div>
+          <div class="muted">${t("overview.stats.instancesHint")}</div>
+        </div>
+        <div class="card stat-card" style="min-width: 140px;">
+          <div class="stat-label">${t("overview.stats.sessions")}</div>
+          <div class="stat-value">${props.sessionsCount ?? t("common.na")}</div>
+          <div class="muted">${t("overview.stats.sessionsHint")}</div>
+        </div>
+        <div class="card stat-card" style="min-width: 140px;">
+          <div class="stat-label">${t("overview.stats.cron")}</div>
+          <div class="stat-value">
+            ${props.cronEnabled == null
+              ? t("common.na")
+              : props.cronEnabled
+                ? t("common.enabled")
+                : t("common.disabled")}
+          </div>
+          <div class="muted">
+            ${t("overview.stats.cronNext", { time: formatNextRun(props.cronNext) })}
+          </div>
+        </div>
+      </div>
+      ${
+        props.lastError
+          ? html`<div class="callout danger" style="margin-top: 12px;">
+              <div style="font-weight: 600; margin-bottom: 4px;">
+                ${t("overview.health.lastErrorLabel")}
+              </div>
+              <div>${props.lastError}</div>
+            </div>`
+          : html`<div class="muted" style="margin-top: 12px;">
+              ${t("overview.health.noError")}
+            </div>`
+      }
+    </section>
+
     <section class="grid grid-cols-2">
       <div class="card">
         <div class="card-title">${t("overview.access.title")}</div>
@@ -253,23 +311,48 @@ export function renderOverview(props: OverviewProps) {
       </div>
     </section>
 
-    <section class="grid grid-cols-3" style="margin-top: 18px;">
-      <div class="card stat-card">
-        <div class="stat-label">${t("overview.stats.instances")}</div>
-        <div class="stat-value">${props.presenceCount}</div>
-        <div class="muted">${t("overview.stats.instancesHint")}</div>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-label">${t("overview.stats.sessions")}</div>
-        <div class="stat-value">${props.sessionsCount ?? t("common.na")}</div>
-        <div class="muted">${t("overview.stats.sessionsHint")}</div>
-      </div>
-      <div class="card stat-card">
-        <div class="stat-label">${t("overview.stats.cron")}</div>
-        <div class="stat-value">
-          ${props.cronEnabled == null ? t("common.na") : props.cronEnabled ? t("common.enabled") : t("common.disabled")}
+    <section class="grid grid-cols-2" style="margin-top: 18px;">
+      <div class="card">
+        <div class="card-title">无货总览</div>
+        <div class="card-sub">最近的无货情况汇总，点击「实例」页可查看明细。</div>
+        <div class="row" style="margin-top: 12px; gap: 12px; flex-wrap: wrap;">
+          ${props.oosStats
+            ? [
+                { label: "总记录数", value: props.oosStats.total_records },
+                { label: "无货产品数", value: props.oosStats.out_of_stock_count },
+                { label: "今日新增", value: props.oosStats.today_count },
+                { label: "被报无货≥2 次", value: props.oosStats.notified_count },
+              ].map(
+                (c) => html`
+                  <div class="card stat-card" style="min-width: 120px;">
+                    <div class="stat-value">${c.value}</div>
+                    <div class="stat-label">${c.label}</div>
+                  </div>
+                `,
+              )
+            : html`<div class="muted">暂无统计，稍后可在「实例」页查看。</div>`}
         </div>
-        <div class="muted">${t("overview.stats.cronNext", { time: formatNextRun(props.cronNext) })}</div>
+      </div>
+      <div class="card">
+        <div class="card-title">缺货总览</div>
+        <div class="card-sub">Work 匹配后库存不足的统计，需重点关注的紧缺物资。</div>
+        <div class="row" style="margin-top: 12px; gap: 12px; flex-wrap: wrap;">
+          ${props.shortageStats
+            ? [
+                { label: "总记录数", value: props.shortageStats.total_records },
+                { label: "缺货产品数", value: props.shortageStats.shortage_product_count },
+                { label: "今日新增", value: props.shortageStats.today_count },
+                { label: "被报缺货≥2 次", value: props.shortageStats.reported_ge2_count },
+              ].map(
+                (c) => html`
+                  <div class="card stat-card" style="min-width: 120px;">
+                    <div class="stat-value">${c.value}</div>
+                    <div class="stat-label">${c.label}</div>
+                  </div>
+                `,
+              )
+            : html`<div class="muted">暂无统计，稍后可在「实例」页查看。</div>`}
+        </div>
       </div>
     </section>
 

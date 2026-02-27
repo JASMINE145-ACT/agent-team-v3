@@ -5,7 +5,7 @@ JAgent 技能描述常量（从 backend/agent/agent.py 平移）。
 SKILL_INVENTORY_PRICE = """\
 **1. 库存与询价/价格**
 - **目标**：查库存、查报价、查各档位价格；询价/查 code 时优先 match_quotation（历史+万鼎并行取并集，结果带匹配来源），多候选时用 LLM 选型。
-- **search_inventory(keywords)**：按产品名/规格搜库存，更适配英文关键词。
+- **search_inventory(keywords)**：按产品名/规格搜库存，只适配英文。
 - **get_inventory_by_code(code)**：已知 10 位物料编号时直接查库存。
 - **match_quotation(keywords, customer_level?)**：**询价/查 code 时优先用本工具**。同时查报价历史与万鼎字段匹配，结果取并集，每条候选带 **source**（历史报价/字段匹配/共同）。返回格式含 candidates、match_source，单条时含 chosen。这样「直接50mm」等既能命中历史也能命中万鼎时，会显示 共同 或 历史报价。
 - **match_by_quotation_history(keywords)**：仅历史匹配（单独用较少，一般用 match_quotation）。
@@ -13,7 +13,7 @@ SKILL_INVENTORY_PRICE = """\
 - **select_wanding_match(keywords, candidates)**：LLM 选型。needs_selection 且用户要「选一个」时调用；传入 match_source（来自上一步 observation）。
 - **何时用**：用户已明确「库存/可售」或「价格/报价/万鼎/档位」时选用；只说「查XX」未指明 → 用 ask_clarification 澄清。
 - **询价/查 code/查物料编号**：**必须优先调用 match_quotation**（一次得到历史+万鼎并集及匹配来源）；仅当用户明确「用万鼎查/不要历史」时改用 match_wanding_price。得 code 后可用 get_inventory_by_code 查库存。
-- **「全部价格」「各档价格」「A B C D 档」**：必须对**同一 keywords** 分别调用 **4 次** match_wanding_price：customer_level="A"、"B"、"C"、"D"，汇总成表格「客户级别 | 客户价」。**只调一次会只得到默认 B 档，不是全部价格。**
+- **「全部价格」「各档价格」**：对同一 keywords 按需分别调用 match_wanding_price(customer_level=…)，汇总成表格「客户级别 | 客户价」。**档位与自然语言对应**：用户说「**二级代理**」「二级代理价格」→ customer_level=A；「**一级代理**」→ B；「**聚万大客户**」→ C；「**青山大客户**」「青山大客户价格」→ D（降低利润率用 D_low）；「**大唐大客户**」→ E。**出厂/采购价**：用户要「出厂价含税」「出厂价不含税」「采购不含税」时传 customer_level=出厂价_含税 / 出厂价_不含税 / 采购不含税。档位代码：A 二级代理，B 一级代理，C 聚万大客户，D 青山大客户，D_low 青山(降低)，E 大唐(包运费)。**只调一次会只得到默认 B 档。**
 - **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。
 - **展示**：结果表上方必写「匹配来源：」+ match_source；候选含 source 时表格加「来源」列；有 chosen 时标「已选：第 N 条」；select_wanding_match 须传入上步 match_source。"""
 
@@ -28,6 +28,7 @@ SKILL_OOS = """\
   - **register_oos(file_path, prompt?)**：从已上传报价单解析无货行并落库。仅当用户明确说「无货登记」且 context 中已有 file_path 时调用。
   - **register_oos_from_text(product_name, specification?, quantity?, unit?)**：用户**直接说**某产品无货时用，无需文件。例如「外螺纹堵头 50 无货」「报一下 XX 无货」「登记 XX 无货」→ 从用户句中解析出产品名、规格、数量后调用本工具落库；无 file_path 时必须用本工具，勿提示先上传。"""
 
+# 报价单专用 + 整单询价填充（Work 流程用；Chat 不注入，见 CHAT_SKILL_PROMPT）
 SKILL_QUOTE = """\
 **3. 报价单（提取/填表/普适 Excel）**
 - **目标**：从报价单取数据、往报价单填数据、或任意 Excel 解析/编辑。
@@ -41,6 +42,13 @@ SKILL_FILL = """\
 **4. 询价填充（整单流水线）**
 - **目标**：对整张报价单做「提取 → 万鼎匹配 → 库存校验 → 回填」一条龙。
 - **run_quotation_fill(file_path, customer_level?)**：仅当用户明确说「询价填充」「填充报价单」「完整报价」且 context 有 file_path 时调用。内部会先历史匹配、无则万鼎字段匹配，多候选时 LLM 选型。customer_level 默认 B。"""
+
+# Chat 仅保留普适 Excel，不包含报价单流水线；整单相关引导至 Work
+SKILL_EXCEL_CHAT = """\
+**3. Excel（普适，Chat）**
+- **parse_excel_smart(file_path, sheet_name?, max_rows?)**：解析任意 Excel，返回 Markdown 表。
+- **edit_excel(file_path, edits, ...)**：普适编辑 Excel（cell+value 或 range+values）。
+- **何时用**：用户要「解析这个 Excel」「改这个格子」且 context 有 file_path 时用。**整单询价填充、报价单提取/按表填表请到 Work 页操作。**"""
 
 SKILL_CLARIFY = """\
 **5. 澄清**
@@ -63,11 +71,21 @@ OUTPUT_FORMAT = """\
 
 **多轮指代**：用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）。用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_quotation 或 match_wanding_price，勿用用户本句的简称或错字。"""
 
+# 全量技能（含报价单流水线），供需要时复用
 ALL_SKILL_PROMPT = "\n\n".join([
     SKILL_INVENTORY_PRICE,
     SKILL_OOS,
     SKILL_QUOTE,
     SKILL_FILL,
+    SKILL_CLARIFY,
+    SKILL_KNOWLEDGE,
+])
+
+# Chat 用：不含报价单专用提取/填表与整单询价填充，体现与 Work 的区分
+CHAT_SKILL_PROMPT = "\n\n".join([
+    SKILL_INVENTORY_PRICE,
+    SKILL_OOS,
+    SKILL_EXCEL_CHAT,
     SKILL_CLARIFY,
     SKILL_KNOWLEDGE,
 ])

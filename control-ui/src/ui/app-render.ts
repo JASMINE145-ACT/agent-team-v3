@@ -44,7 +44,7 @@ import {
 } from "./controllers/exec-approvals.ts";
 import { loadLogs } from "./controllers/logs.ts";
 import { loadNodes } from "./controllers/nodes.ts";
-import { loadOos, deleteOosItem, addOosItem } from "./controllers/oos.ts";
+import { loadOos, deleteOosItem, addOosItem, loadShortage, deleteShortageItem, addShortageItem } from "./controllers/oos.ts";
 import { loadPresence } from "./controllers/presence.ts";
 import { deleteSessionAndRefresh, loadSessions, patchSession } from "./controllers/sessions.ts";
 import {
@@ -66,7 +66,7 @@ import { renderDebug } from "./views/debug.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
 import { renderLogs } from "./views/logs.ts";
-import { renderOosDashboard } from "./views/oos-dashboard.ts";
+import { renderOosDashboard, renderShortageBlock } from "./views/oos-dashboard.ts";
 import { renderNodes } from "./views/nodes.ts";
 import { renderOverview } from "./views/overview.ts";
 import { renderSessions } from "./views/sessions.ts";
@@ -215,6 +215,8 @@ export function renderApp(state: AppViewState) {
                 cronEnabled: state.cronStatus?.enabled ?? null,
                 cronNext,
                 lastChannelsRefresh: state.channelsLastSuccess,
+                oosStats: state.overviewOosStats,
+                shortageStats: state.overviewShortageStats,
                 onSettingsChange: (next) => state.applySettings(next),
                 onPasswordChange: (next) => (state.password = next),
                 onSessionKeyChange: (next) => {
@@ -252,24 +254,44 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "instances"
-            ? renderOosDashboard({
-                loading: state.oosLoading,
-                error: state.oosError,
-                stats: state.oosStats,
-                list: state.oosList,
-                byFile: state.oosByFile,
-                byTime: state.oosByTime,
-                onRefresh: () => loadOos(state),
-                onDelete: (productKey) => deleteOosItem(state, productKey),
-                showAddForm: state.oosShowAddForm,
-                onOpenAddForm: () => (state.oosShowAddForm = true),
-                onCloseAddForm: () => (state.oosShowAddForm = false),
-                onAdd: async (record) => {
-                  const ok = await addOosItem(state, record);
-                  if (ok) state.oosShowAddForm = false;
-                  return ok;
-                },
-              })
+            ? html`
+                ${renderOosDashboard({
+                  loading: state.oosLoading,
+                  error: state.oosError,
+                  stats: state.oosStats,
+                  list: state.oosList,
+                  byFile: state.oosByFile,
+                  byTime: state.oosByTime,
+                  onRefresh: () => loadOos(state),
+                  onDelete: (productKey) => deleteOosItem(state, productKey),
+                  showAddForm: state.oosShowAddForm,
+                  onOpenAddForm: () => (state.oosShowAddForm = true),
+                  onCloseAddForm: () => (state.oosShowAddForm = false),
+                  onAdd: async (record) => {
+                    const ok = await addOosItem(state, record);
+                    if (ok) state.oosShowAddForm = false;
+                    return ok;
+                  },
+                })}
+                ${renderShortageBlock({
+                  loading: state.shortageLoading,
+                  error: state.shortageError,
+                  stats: state.shortageStats,
+                  list: state.shortageList,
+                  byFile: state.shortageByFile,
+                  byTime: state.shortageByTime,
+                  onRefresh: () => loadShortage(state),
+                  onDelete: (productKey) => deleteShortageItem(state, productKey),
+                  showAddForm: state.shortageShowAddForm,
+                  onOpenAddForm: () => (state.shortageShowAddForm = true),
+                  onCloseAddForm: () => (state.shortageShowAddForm = false),
+                  onAdd: async (record) => {
+                    const ok = await addShortageItem(state, record);
+                    if (ok) state.shortageShowAddForm = false;
+                    return ok;
+                  },
+                })}
+              `
             : nothing
         }
 

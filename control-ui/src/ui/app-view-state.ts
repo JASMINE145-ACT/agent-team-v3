@@ -138,6 +138,17 @@ export type AppViewState = {
   oosByFile: import("./types.js").OosByFileRow[];
   oosByTime: import("./types.js").OosByTimeRow[];
   oosShowAddForm: boolean;
+  shortageLoading: boolean;
+  shortageError: string | null;
+  shortageStats: import("./types.js").ShortageStats | null;
+  shortageList: import("./types.js").ShortageRecord[];
+  shortageByFile: import("./types.js").ShortageByFileRow[];
+  shortageByTime: import("./types.js").ShortageByTimeRow[];
+  shortageShowAddForm: boolean;
+  overviewOosStats: import("./types.js").OosStats | null;
+  overviewOosError: string | null;
+  overviewShortageStats: import("./types.js").ShortageStats | null;
+  overviewShortageError: string | null;
   agentsLoading: boolean;
   agentsList: AgentsListResult | null;
   agentsError: string | null;

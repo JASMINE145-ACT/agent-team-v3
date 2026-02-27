@@ -6,7 +6,7 @@ from typing import Any
 
 from backend.core.extension import AgentExtension, ExtensionContext
 from backend.core.tool_utils import tool_error, validate_file_path
-from backend.plugins.jagent.skills import ALL_SKILL_PROMPT, OUTPUT_FORMAT
+from backend.plugins.jagent.skills import CHAT_SKILL_PROMPT, OUTPUT_FORMAT
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ _VALID_CUSTOMER_LEVELS = {"A", "B", "C", "D"}
 
 class JAgentExtension(AgentExtension):
     def get_skill_prompt(self) -> str:
-        return ALL_SKILL_PROMPT
+        return CHAT_SKILL_PROMPT  # Chat 不含报价单流水线；整单询价填充在 Work 页
 
     def get_output_format_prompt(self) -> str:
         return OUTPUT_FORMAT

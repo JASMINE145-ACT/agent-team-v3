@@ -130,6 +130,98 @@ def _find_col_by_header(header: List[str], keywords_list: List[str]) -> int:
     return -1
 
 
+def _extract_inquiry_items_smart_fallback(
+    file_path: str,
+    sheet_name: str | None = None,
+    max_rows: int = 200,
+) -> dict[str, Any]:
+    """
+    普适解析 fallback：不依赖 TOTAL_ROW_MARKER，读取工作表前 max_rows 行，
+    在前 3 行中按关键词识别名称/规格/数量列，构建 items。供 extract_inquiry_items 在主逻辑失败或无数据时调用。
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        return {"success": False, "items": [], "error": "请安装 openpyxl", "rows_count": 0}
+
+    path = Path(file_path)
+    if not path.is_absolute():
+        path = Path(os.getcwd()) / path
+    if not path.exists():
+        return {"success": False, "items": [], "error": f"文件不存在: {path}", "rows_count": 0}
+    if path.suffix.lower() not in (".xlsx", ".xlsm"):
+        return {"success": False, "items": [], "error": "仅支持 .xlsx / .xlsm", "rows_count": 0}
+
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    except Exception as e:
+        return {"success": False, "items": [], "error": f"打开 Excel 失败: {e}", "rows_count": 0}
+
+    try:
+        if sheet_name and sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+        else:
+            ws = wb.active or wb[wb.sheetnames[0]]
+        rows: List[List[str]] = []
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            if i >= max_rows:
+                break
+            rows.append([str(c).strip() if c is not None else "" for c in (row or [])])
+        wb.close()
+    except Exception as e:
+        try:
+            wb.close()
+        except Exception:
+            pass
+        return {"success": False, "items": [], "error": str(e), "rows_count": 0}
+
+    if not rows or len(rows) < 2:
+        return {"success": True, "items": [], "error": None, "rows_count": 0}
+
+    name_col = spec_col = qty_col = -1
+    header_row_idx = 0
+    for idx, header_row in enumerate(rows[:3]):
+        nc = _find_col_by_header(header_row, NAME_COL_KEYWORDS)
+        sc = _find_col_by_header(header_row, SPEC_COL_KEYWORDS)
+        qc = _find_col_by_header(header_row, QTY_COL_KEYWORDS)
+        if nc >= 0:
+            name_col, spec_col = nc, sc
+            if qc >= 0:
+                qty_col = qc
+            header_row_idx = idx
+            break
+
+    if name_col < 0:
+        return {"success": True, "items": [], "error": None, "rows_count": 0}
+
+    data_rows = rows[header_row_idx + 1:]
+    items: List[dict] = []
+    for i, row_cells in enumerate(data_rows):
+        row_num = header_row_idx + 2 + i
+        product_name = (row_cells[name_col] if name_col < len(row_cells) else "").strip()
+        specification = (row_cells[spec_col] if spec_col >= 0 and spec_col < len(row_cells) else "").strip()
+        keywords = f"{product_name} {specification}".strip() if specification else product_name
+        if not keywords:
+            continue
+        qty_val = 0
+        if qty_col >= 0 and qty_col < len(row_cells):
+            try:
+                v = row_cells[qty_col]
+                if v is not None and str(v).strip():
+                    qty_val = int(float(str(v).replace(",", "")))
+            except (ValueError, TypeError):
+                pass
+        items.append({
+            "row": row_num,
+            "product_name": product_name,
+            "specification": specification,
+            "keywords": keywords,
+            "qty": qty_val,
+        })
+
+    return {"success": True, "items": items, "error": None, "rows_count": len(items)}
+
+
 def extract_inquiry_items(
     file_path: str,
     sheet_name: str | None = None,
@@ -216,6 +308,12 @@ def extract_inquiry_items(
                 break
 
     if name_col < 0:
+        # Fallback：用普适解析（不依赖 Total Excluding PPN 与固定表头）再尝试识别列
+        fallback = _extract_inquiry_items_smart_fallback(file_path, sheet_name)
+        if fallback.get("items"):
+            fallback["_fallback_used"] = True
+            fallback["error"] = None
+            return fallback
         return {"success": False, "items": [], "error": "未找到询价货物名称列，请检查表头或提供 col_mapping", "rows_count": 0}
 
     # 数据行从表头下一行起，到 Total Excluding PPN 上一行
@@ -227,6 +325,10 @@ def extract_inquiry_items(
     data_rows = all_rows[data_start:data_end]
 
     if not data_rows:
+        fallback = _extract_inquiry_items_smart_fallback(file_path, sheet_name)
+        if fallback.get("items"):
+            fallback["_fallback_used"] = True
+            return fallback
         return {"success": True, "items": [], "error": None, "rows_count": 0}
 
     # spec_col 可为 -1，表示无规格列；qty_col 可为 -1，表示无数量列

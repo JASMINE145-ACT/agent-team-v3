@@ -356,6 +356,44 @@ export type OosByTimeRow = {
   count?: number;
 };
 
+/** 缺货记录：统计（与无货同一逻辑） */
+export type ShortageStats = {
+  total_records: number;
+  shortage_product_count: number;
+  today_count: number;
+  reported_ge2_count: number;
+};
+
+/** 缺货记录：产品记录 */
+export type ShortageRecord = {
+  id?: number;
+  product_name?: string;
+  specification?: string;
+  quantity?: number;
+  available_qty?: number;
+  shortfall?: number;
+  code?: string;
+  quote_name?: string;
+  unit_price?: number;
+  file_name?: string;
+  uploaded_at?: string | null;
+  product_key?: string;
+  count?: number;
+};
+
+/** 缺货记录：按文件汇总 */
+export type ShortageByFileRow = {
+  file_name?: string;
+  uploaded_at?: string | null;
+  total_records?: number;
+};
+
+/** 缺货记录：按日统计 */
+export type ShortageByTimeRow = {
+  date?: string;
+  count?: number;
+};
+
 export type GatewaySessionsDefaults = {
   model: string | null;
   contextTokens: number | null;

@@ -91,12 +91,12 @@ EXTRA_TOOLS = [
         "type": "function",
         "function": {
             "name": "run_quotation_fill",
-            "description": "【询价填充】整单流水线：提取询价项 → 万鼎匹配 → 库存校验 → 回填 Excel。仅当用户明确要求「询价填充/填充报价单/完整报价」且 context 中已有 file_path 时调用。customer_level 可选 A/B/C/D，默认 B。",
+            "description": "【询价填充】整单流水线：提取询价项 → 万鼎匹配 → 库存校验 → 回填 Excel。仅当用户明确要求「询价填充/填充报价单/完整报价」且 context 中已有 file_path 时调用。customer_level 可选报单档位 A/B/C/D/D_low/E 或 出厂价_含税/出厂价_不含税/采购不含税，默认 B。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "报价单绝对路径"},
-                    "customer_level": {"type": "string", "enum": ["A", "B", "C", "D"], "description": "客户档位，默认 B"},
+                    "customer_level": {"type": "string", "enum": ["A", "B", "C", "D", "D_low", "E", "出厂价_含税", "出厂价_不含税", "采购不含税"], "description": "价格档位：A 二级代理/B 一级代理/C 聚万大客户/D 青山大客户/D_low 青山(降低)/E 大唐(包运费)；或 出厂价_含税/出厂价_不含税/采购不含税。默认 B"},
                 },
                 "required": ["file_path"],
             },

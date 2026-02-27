@@ -264,7 +264,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     "type": "object",
                     "properties": {
                         "keywords": {"type": "string", "description": "产品名+规格，如 直接50mm、直径25PPR"},
-                        "customer_level": {"type": "string", "description": "万鼎查价档位 A/B/C/D，默认 B"},
+                        "customer_level": {"type": "string", "description": "价格档位：A/B/C/D/D_low/E（报单）或 出厂价_含税/出厂价_不含税/采购不含税。用户说「二级代理」用 A、「青山大客户」用 D、「出厂价含税」用 出厂价_含税。默认 B"},
                     },
                     "required": ["keywords"],
                 },
@@ -279,7 +279,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     "type": "object",
                     "properties": {
                         "keywords": {"type": "string", "description": "产品名+规格"},
-                        "customer_level": {"type": "string", "description": "万鼎查价档位 A/B/C/D，默认 B"},
+                        "customer_level": {"type": "string", "description": "价格档位：A/B/C/D/D_low/E（报单）或 出厂价_含税/出厂价_不含税/采购不含税。用户说「二级代理」用 A、「青山大客户」用 D、「出厂价含税」用 出厂价_含税。默认 B"},
                     },
                     "required": ["keywords"],
                 },
@@ -294,7 +294,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     "type": "object",
                     "properties": {
                         "keywords": {"type": "string", "description": "产品名+规格，如 25三通、进水软管 50cm"},
-                        "customer_level": {"type": "string", "description": "客户级别 A/B/C/D，默认 B"},
+                        "customer_level": {"type": "string", "description": "价格档位：A/B/C/D/D_low/E 或 出厂价_含税/出厂价_不含税/采购不含税；「二级代理」→A、「青山大客户」→D。默认 B"},
                     },
                     "required": ["keywords"],
                 },

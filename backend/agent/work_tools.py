@@ -104,6 +104,7 @@ def _run_work_quotation_match(
     price_library_path: Optional[str] = None,
     sheet_name: Optional[str] = None,
 ) -> dict[str, Any]:
+    """与 Chat 一致：共同查询（历史+万鼎并集）+ LLM 选型，见 match_price_and_get_inventory。"""
     from backend.tools.inventory.services.match_and_inventory import match_price_and_get_inventory
     from backend.tools.quotation.quote_tools import extract_inquiry_items
 
@@ -332,6 +333,16 @@ def execute_work_tool_sync(name: str, arguments: dict[str, Any]) -> str:
         customer_level = (args.get("customer_level") or "B").strip().upper() or "B"
         sheet_name = (args.get("sheet_name") or "").strip() or None
         out = _run_work_quotation_match(file_path, customer_level=customer_level, sheet_name=sheet_name)
+        # 缺货记录落库，与无货记录同一逻辑，供 OOS 看板「缺货记录」展示
+        shortage_list = out.get("shortage") or []
+        if shortage_list and out.get("success"):
+            try:
+                from backend.tools.oos.services.data_service import DataService
+                file_name = Path(file_path).name if file_path else "unknown"
+                ds = DataService()
+                ds.insert_shortage_records(file_name, [{"product_name": s.get("product_name"), "specification": s.get("specification"), "quantity": s.get("qty"), "available_qty": s.get("available_qty"), "shortfall": s.get("shortfall"), "code": s.get("code"), "quote_name": s.get("quote_name"), "unit_price": s.get("unit_price")} for s in shortage_list])
+            except Exception as e:
+                logger.debug("缺货记录落库跳过: %s", e)
         return json.dumps(out, ensure_ascii=False)
     if name == "work_quotation_fill":
         fill_items = args.get("fill_items") or []

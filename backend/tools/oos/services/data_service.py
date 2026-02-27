@@ -45,6 +45,26 @@ class OutOfStockRecordDB(Base):
     is_deleted = Column(Integer, nullable=False, default=0)  # 软删除：0=正常，1=已删除
 
 
+class ShortageRecordDB(Base):
+    """缺货记录表（与无货记录同一逻辑：Work 匹配后库存不足写入，看板展示统计/按文件/按时间）"""
+    __tablename__ = "shortage_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_name = Column(String(500), nullable=False)
+    specification = Column(String(500), nullable=True)
+    quantity = Column(Float, nullable=False)  # 需求数量
+    available_qty = Column(Float, nullable=False, default=0)  # 可用库存
+    shortfall = Column(Float, nullable=False, default=0)  # 缺口
+    code = Column(String(100), nullable=True)  # 物料编号
+    quote_name = Column(String(500), nullable=True)
+    unit_price = Column(Float, nullable=True)
+    file_name = Column(String(500), nullable=False, index=True)
+    uploaded_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    product_key = Column(String(1000), nullable=False, index=True)
+    count = Column(Integer, nullable=False, default=1)  # 该产品被报缺货次数
+    is_deleted = Column(Integer, nullable=False, default=0)
+
+
 class UploadSession(Base):
     """上传会话记录表（可选，用于溯源）"""
     __tablename__ = "upload_sessions"
@@ -604,4 +624,174 @@ class DataService:
             "email_sent_count": getattr(record, 'email_sent_count', 0),
             "last_email_sent_at": record.last_email_sent_at.isoformat() if getattr(record, 'last_email_sent_at', None) else None,
             "is_deleted": getattr(record, 'is_deleted', 0)
+        }
+
+    # ---------- 缺货记录（与无货记录同一逻辑：按产品聚合、按文件/按时间） ----------
+
+    def insert_shortage_records(self, file_name: str, shortage_items: List[Dict], max_rows: int = 5000) -> int:
+        """批量写入缺货记录。shortage_items 每项含 product_name, specification, quantity, available_qty, shortfall, code, quote_name, unit_price。"""
+        from pathlib import Path
+        name = (Path(file_name).name if file_name else "unknown").strip() or "unknown"
+        session = self.SessionLocal()
+        inserted = 0
+        try:
+            for item in shortage_items[:max_rows]:
+                product_name = (item.get("product_name") or "").strip()
+                specification = (item.get("specification") or "").strip()
+                if not product_name:
+                    continue
+                product_key = self._generate_product_key(product_name, specification)
+                stmt = select(func.max(ShortageRecordDB.count)).where(ShortageRecordDB.product_key == product_key)
+                max_count = session.execute(stmt).scalar() or 0
+                new_count = max_count + 1
+                record = ShortageRecordDB(
+                    product_name=product_name,
+                    specification=specification,
+                    quantity=float(item.get("quantity") or 0),
+                    available_qty=float(item.get("available_qty") or 0),
+                    shortfall=float(item.get("shortfall") or 0),
+                    code=(item.get("code") or "").strip(),
+                    quote_name=(item.get("quote_name") or "")[:500],
+                    unit_price=float(item.get("unit_price")) if item.get("unit_price") is not None else None,
+                    file_name=name,
+                    product_key=product_key,
+                    count=new_count,
+                )
+                session.add(record)
+                inserted += 1
+            session.commit()
+            return inserted
+        except Exception as e:
+            logger.exception("insert_shortage_records 失败: %s", e)
+            session.rollback()
+            return 0
+        finally:
+            session.close()
+
+    def get_shortage_statistics(self) -> Dict:
+        """缺货统计：总记录数、缺货产品数、今日新增、被报缺货≥2次。"""
+        session = self.SessionLocal()
+        try:
+            total = session.query(func.count(ShortageRecordDB.id)).filter(ShortageRecordDB.is_deleted == 0).scalar() or 0
+            unique_products = session.query(func.count(func.distinct(ShortageRecordDB.product_key))).filter(
+                ShortageRecordDB.is_deleted == 0
+            ).scalar() or 0
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_count = session.query(func.count(ShortageRecordDB.id)).filter(
+                ShortageRecordDB.uploaded_at >= today_start,
+                ShortageRecordDB.is_deleted == 0
+            ).scalar() or 0
+            reported_ge2 = session.query(func.count(ShortageRecordDB.id)).filter(
+                ShortageRecordDB.count >= 2,
+                ShortageRecordDB.is_deleted == 0
+            ).scalar() or 0
+            return {
+                "total_records": total,
+                "shortage_product_count": unique_products,
+                "today_count": today_count,
+                "reported_ge2_count": reported_ge2,
+            }
+        finally:
+            session.close()
+
+    def get_shortage_list(self, limit: Optional[int] = None) -> List[Dict]:
+        """缺货产品列表（按 product_key 聚合，每产品取被报缺货次数最大的一条，与无货列表逻辑一致）。"""
+        session = self.SessionLocal()
+        try:
+            records = session.query(ShortageRecordDB).filter(ShortageRecordDB.is_deleted == 0).order_by(
+                ShortageRecordDB.uploaded_at.desc()
+            ).limit((limit or 500) * 5).all()
+            by_key: Dict[str, ShortageRecordDB] = {}
+            for r in records:
+                key = r.product_key or ""
+                if not key:
+                    continue
+                if key not in by_key or (by_key[key].count or 0) < (r.count or 0):
+                    by_key[key] = r
+            out = [self._shortage_record_to_dict(by_key[k]) for k in sorted(by_key.keys(), key=lambda x: (by_key[x].uploaded_at or datetime.min), reverse=True)]
+            if limit:
+                out = out[:limit]
+            return out
+        finally:
+            session.close()
+
+    def get_shortage_files_summary(self) -> List[Dict]:
+        """按文件汇总缺货记录。"""
+        session = self.SessionLocal()
+        try:
+            rows = session.query(
+                ShortageRecordDB.file_name,
+                func.min(ShortageRecordDB.uploaded_at).label("uploaded_at"),
+                func.count(ShortageRecordDB.id).label("total_records"),
+            ).filter(ShortageRecordDB.is_deleted == 0).group_by(ShortageRecordDB.file_name).order_by(
+                func.min(ShortageRecordDB.uploaded_at).desc()
+            ).all()
+            return [
+                {"file_name": r.file_name, "uploaded_at": r.uploaded_at.isoformat() if r.uploaded_at else None, "total_records": r.total_records}
+                for r in rows
+            ]
+        finally:
+            session.close()
+
+    def get_shortage_by_time(self, last_n_days: int = 30) -> List[Dict]:
+        """按日统计新增缺货记录数。"""
+        from datetime import timedelta
+        cutoff = datetime.now() - timedelta(days=max(1, last_n_days))
+        session = self.SessionLocal()
+        try:
+            rows = session.query(
+                func.date(ShortageRecordDB.uploaded_at).label("d"),
+                func.count(ShortageRecordDB.id).label("cnt"),
+            ).filter(ShortageRecordDB.uploaded_at >= cutoff, ShortageRecordDB.is_deleted == 0).group_by(
+                func.date(ShortageRecordDB.uploaded_at)
+            ).order_by(func.date(ShortageRecordDB.uploaded_at).desc()).all()
+            return [{"date": (r.d.isoformat() if hasattr(r.d, "isoformat") else str(r.d)), "count": r.cnt} for r in rows]
+        except Exception as e:
+            logger.warning("get_shortage_by_time date() 失败: %s", e)
+            records = session.query(ShortageRecordDB).filter(
+                ShortageRecordDB.uploaded_at >= cutoff,
+                ShortageRecordDB.is_deleted == 0
+            ).all()
+            by_date: Dict[str, int] = {}
+            for r in records:
+                d = (r.uploaded_at.strftime("%Y-%m-%d") if r.uploaded_at else "")[:10]
+                if d:
+                    by_date[d] = by_date.get(d, 0) + 1
+            return [{"date": d, "count": c} for d, c in sorted(by_date.items(), reverse=True)]
+        finally:
+            session.close()
+
+    def delete_shortage_by_product_key(self, product_key: str) -> int:
+        """按 product_key 软删除该产品的所有缺货记录。"""
+        if not (product_key or "").strip():
+            return 0
+        session = self.SessionLocal()
+        try:
+            count = session.query(ShortageRecordDB).filter(ShortageRecordDB.product_key == product_key.strip()).update(
+                {"is_deleted": 1}, synchronize_session=False
+            )
+            session.commit()
+            return count
+        except Exception as e:
+            logger.exception("delete_shortage_by_product_key 失败: %s", e)
+            session.rollback()
+            return 0
+        finally:
+            session.close()
+
+    def _shortage_record_to_dict(self, record: ShortageRecordDB) -> Dict:
+        return {
+            "id": record.id,
+            "product_name": record.product_name,
+            "specification": record.specification,
+            "quantity": record.quantity,
+            "available_qty": record.available_qty,
+            "shortfall": record.shortfall,
+            "code": record.code,
+            "quote_name": record.quote_name,
+            "unit_price": record.unit_price,
+            "file_name": record.file_name,
+            "uploaded_at": record.uploaded_at.isoformat() if record.uploaded_at else None,
+            "product_key": record.product_key,
+            "count": record.count,
         }
