@@ -105,6 +105,7 @@ class DataService:
                 )
                 Base.metadata.create_all(self.engine)
                 self.using_postgres = True
+                logger.info("Connected to Postgres successfully (OOS/Shortage)")
             except OperationalError as e:
                 logger.error(
                     "Postgres unreachable, falling back to SQLite: %s",

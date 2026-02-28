@@ -1,6 +1,11 @@
 """
 一键启动 Jagent 前后端：在新窗口启动后端（API + 静态 UI），并自动打开浏览器。
 双击运行或命令行：python start.py
+
+注意：本脚本会清空 DATABASE_URL，强制使用本地 SQLite，适合本地开发。
+生产/云端（如 Render、Neon）请勿用 start.py，应直接运行：
+  uvicorn backend.server.api.app:app --host 0.0.0.0 --port $PORT
+或 python run_backend.py，并设置环境变量 DATABASE_URL=postgresql://...（无空格）。
 """
 import os
 import subprocess
