@@ -45,7 +45,11 @@ export async function loadChatHistory(state: ChatState) {
         limit: 200,
       },
     );
-    state.chatMessages = Array.isArray(res.messages) ? res.messages : [];
+    const next = Array.isArray(res.messages) ? res.messages : [];
+    // 避免 foreign_final 竞态：后端尚未落库时返回空，若直接覆盖会导致「session 突然消失」
+    if (next.length > 0 || state.chatMessages.length === 0) {
+      state.chatMessages = next;
+    }
     state.chatThinkingLevel = res.thinkingLevel ?? null;
   } catch (err) {
     state.lastError = String(err);

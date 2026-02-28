@@ -3,7 +3,15 @@ FastAPI 主应用 — version3 单 Agent
 """
 import asyncio
 import logging
+import warnings
 from pathlib import Path
+
+# 抑制 openpyxl 读取含 WMF 图片的 Excel 时的告警（图片会被忽略，不影响表格数据）
+warnings.filterwarnings(
+    "ignore",
+    message=".*wmf image format is not supported.*",
+    category=UserWarning,
+)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

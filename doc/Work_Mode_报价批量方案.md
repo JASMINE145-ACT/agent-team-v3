@@ -17,7 +17,7 @@
 ## 2. 固定流程（每文件重复）
 
 1. **识别表数据**：`work_quotation_extract(file_path)` → 得到 items。
-2. **查价格与库存（无货登记、缺货记录）**：`work_quotation_match(file_path, customer_level)` → to_fill、shortage、unmatched、fill_items_merged；`work_quotation_shortage_report(shortage_items)` 生成缺货报告；可选 `register_oos(file_path)` 无货登记。
+2. **查价格与库存（无货登记、缺货记录）**：`work_quotation_match(file_path, customer_level)` → to_fill、shortage、unmatched、fill_items_merged；`work_quotation_shortage_report(shortage_items)` 生成缺货报告；可选 `register_oos(file_path)` 无货登记。**选不出来就无货**：匹配不到的行、以及多候选需人工选型但用户未选或选择「按无货」的项，一律按无货处理（填表时 code 写「无货」）；resume 时对某 item 传 `selected_code: "__OOS__"` 或省略该 item 即按无货。
 3. **填表**：`work_quotation_fill(file_path, fill_items)`，fill_items 来自上一步的 fill_items_merged。
 
 对每个文件依次完成 1→2→3，再处理下一个文件。
@@ -69,8 +69,14 @@
 
 ---
 
-## 7. 小结
+## 7. 选不出来就无货
+
+- **unmatched**（匹配不到）：填表时 code 写「无货」，已在 `work_quotation_match` 的 fill_items_merged 中体现。
+- **pending_choices**（多候选需人工选）：用户未选、或某条选「按无货」、或 resume 时对某 item 传 `selected_code: "__OOS__"`（或该 item 不传），该项按无货并入 unmatched 与 fill_items_merged（code 无货），保证填表不丢行、逻辑一致。
+
+## 8. 小结
 
 - **无 Plan**：流程固定（识别表数据 → 查价格与库存/无货缺货 → 填表），无需显式计划。
 - **ReAct**：每步由模型选工具、看 observation，严格按 ReAct 范式。
 - **多文件**：对每个文件按固定三步依次执行，由 prompt 约定顺序。
+- **选不出来就无货**：匹配不到或人工未选/选按无货的，一律填表 code「无货」。

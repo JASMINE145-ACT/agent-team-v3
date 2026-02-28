@@ -109,14 +109,11 @@ export async function runWork(state: WorkState): Promise<void> {
 export async function resumeWork(state: WorkState): Promise<void> {
   const runId = state.workRunId;
   if (!runId || state.workPendingChoices.length === 0) return;
+  // 每项都提交：选型号或「按无货」(__OOS__)；未选时默认第一项，后端对空/__OOS__ 按无货处理
   const selections = state.workPendingChoices.map((p) => ({
     item_id: p.id,
-    selected_code: state.workSelections[p.id] ?? p.options?.[0]?.code ?? "",
-  })).filter((s) => s.selected_code);
-  if (selections.length !== state.workPendingChoices.length) {
-    state.workError = "请为每项选择一个型号";
-    return;
-  }
+    selected_code: state.workSelections[p.id] ?? p.options?.[0]?.code ?? "__OOS__",
+  }));
   state.workRunning = true;
   state.workError = null;
   try {

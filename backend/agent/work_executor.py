@@ -18,6 +18,7 @@ from backend.agent.work_tools import (
     execute_work_tool_sync,
     merge_work_pending_choices,
 )
+from backend.tools.inventory.services.wanding_fuzzy_matcher import get_price_level_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def _build_work_system_content(file_paths: List[str], customer_level: str, do_re
 - 对每个文件依次完成 1→2→3，再处理下一个文件。file_path 从下方文件列表中取。
 - work_quotation_fill 的 fill_items 必须来自上一步 work_quotation_match 返回的 fill_items_merged（从上一轮 tool 结果中复制）。
 - work_quotation_shortage_report 的 shortage_items 来自 work_quotation_match 返回的 shortage。
-- 客户档位：{customer_level}。是否执行无货登记：{"是" if do_register_oos else "否"}。
+- 客户档位：{get_price_level_display_name(customer_level)}（代码 {customer_level}）。是否执行无货登记：{"是" if do_register_oos else "否"}。
 - 所有文件处理完毕后，输出简短总结（已处理文件数、填充数、缺货项数等），不再调用工具。
 
 **待处理文件列表：**
@@ -48,7 +49,7 @@ def _build_work_system_content(file_paths: List[str], customer_level: str, do_re
 
 async def run_work_flow(
     file_paths: List[str],
-    customer_level: str = "B",
+    customer_level: str = "B_QUOTE",
     do_register_oos: bool = True,
     *,
     api_key: Optional[str] = None,

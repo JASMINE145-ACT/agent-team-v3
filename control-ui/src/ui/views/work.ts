@@ -2,6 +2,24 @@ import { html, nothing } from "lit";
 import { t } from "../../i18n/index.ts";
 import type { WorkState, WorkPendingChoice } from "../controllers/work.ts";
 
+/** 价格档位：value 与后端一致，label 与价格库表头全名一致 */
+const PRICE_LEVEL_OPTIONS: { value: string; label: string }[] = [
+  { value: "FACTORY_INC_TAX", label: "出厂价_含税" },
+  { value: "FACTORY_EXC_TAX", label: "出厂价_不含税" },
+  { value: "PURCHASE_EXC_TAX", label: "采购不含税" },
+  { value: "A_MARGIN", label: "（二级代理）A级别 利润率" },
+  { value: "A_QUOTE", label: "（二级代理）A级别 报单价格" },
+  { value: "B_MARGIN", label: "（一级代理）B级别 利润率" },
+  { value: "B_QUOTE", label: "（一级代理）B级别 报单价格" },
+  { value: "C_MARGIN", label: "（聚万大客户）C级别 利润率" },
+  { value: "C_QUOTE", label: "（聚万大客户）C级别报单价格" },
+  { value: "D_MARGIN", label: "（青山大客户）D级别 利润率" },
+  { value: "D_QUOTE", label: "（青山大客户）D级别 报单价格" },
+  { value: "D_LOW", label: "（青山大客户）D级别 降低利润率" },
+  { value: "E_MARGIN", label: "（大唐大客户）E级别（包运费） 利润率" },
+  { value: "E_QUOTE", label: "（大唐大客户）E级别（包运费） 报单价格" },
+];
+
 export type WorkProps = WorkState & {
   onAddFile: (filePath: string, fileName: string) => void;
   onRemoveFile: (index: number) => void;
@@ -116,6 +134,25 @@ function renderTraceStep(entry: Record<string, unknown>, index: number): ReturnT
 
 const WORK_STAGES = ["识别表数据", "查价格与库存", "填表"] as const;
 
+/** 从 trace 中解析 work_quotation_fill 的 observation，收集产出文件 basename 列表（供云端下载到本地） */
+function getOutputFileBasenamesFromTrace(trace: unknown[] | undefined): string[] {
+  if (!Array.isArray(trace)) return [];
+  const basenames: string[] = [];
+  for (const entry of trace) {
+    const type = (entry as Record<string, unknown>).type;
+    const content = (entry as Record<string, unknown>).content;
+    if (type !== "observation" || typeof content !== "string") continue;
+    const obj = tryParseJson(content) as Record<string, unknown> | null;
+    if (!obj || typeof obj !== "object") continue;
+    const outPath = obj.output_path;
+    if (typeof outPath === "string" && outPath.trim()) {
+      const base = outPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
+      if (base && !basenames.includes(base)) basenames.push(base);
+    }
+  }
+  return basenames;
+}
+
 export function renderWork(props: WorkProps) {
   const {
     basePath,
@@ -199,12 +236,11 @@ export function renderWork(props: WorkProps) {
           <select
             .value=${workCustomerLevel}
             @change=${(e: Event) => onCustomerLevelChange((e.target as HTMLSelectElement).value)}
-            style="margin-left: 8px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text);"
+            style="margin-left: 8px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); min-width: 140px;"
           >
-            <option value="A">A</option>
-            <option value="B">B</option>
-            <option value="C">C</option>
-            <option value="D">D</option>
+            ${PRICE_LEVEL_OPTIONS.map(
+              (opt) => html`<option value=${opt.value}>${opt.label}</option>`,
+            )}
           </select>
         </div>
         <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
@@ -224,8 +260,8 @@ export function renderWork(props: WorkProps) {
                         padding: 6px 12px;
                         border-radius: 8px;
                         font-size: 13px;
-                        background: ${i === workProgressStage ? "var(--accent)" : "var(--bg-secondary, #eee)"};
-                        color: ${i === workProgressStage ? "var(--bg)" : "var(--muted)"};
+                        background: ${workProgressStage >= 0 && i === workProgressStage ? "var(--accent)" : "var(--bg-secondary, #eee)"};
+                        color: ${workProgressStage >= 0 && i === workProgressStage ? "var(--bg)" : "var(--muted)"};
                         transition: background 0.2s, color 0.2s;
                       "
                     >
@@ -234,7 +270,7 @@ export function renderWork(props: WorkProps) {
                   `,
                 )}
               </div>
-              <p class="muted" style="font-size: 12px; margin: 0;">当前阶段：${WORK_STAGES[workProgressStage]}</p>
+              <p class="muted" style="font-size: 12px; margin: 0;">当前阶段：${workProgressStage >= 0 && workProgressStage < WORK_STAGES.length ? WORK_STAGES[workProgressStage] : "执行中"}</p>
             `
           : nothing}
         <div style="display: flex; gap: 8px;">
@@ -271,6 +307,7 @@ export function renderWork(props: WorkProps) {
                       .value=${workSelections[item.id] ?? item.options?.[0]?.code ?? ""}
                       @change=${(e: Event) => onSelectionChange(item.id, (e.target as HTMLSelectElement).value)}
                     >
+                      <option value="__OOS__">按无货</option>
                       ${(item.options ?? []).map(
                         (opt) =>
                           html`<option value=${opt.code}>${opt.code}${opt.matched_name ? ` · ${opt.matched_name}` : ""}${opt.unit_price != null ? ` · ¥${opt.unit_price}` : ""}</option>`,
@@ -297,6 +334,28 @@ export function renderWork(props: WorkProps) {
           <section class="card">
             <div class="card-title">执行结果</div>
             ${workFilePaths.length > 1 ? html`<p class="muted" style="font-size: 12px; margin-bottom: 8px;">多文件时为汇总结果，输出文件见下方总结。</p>` : nothing}
+            ${((): ReturnType<typeof html> => {
+              const basenames = getOutputFileBasenamesFromTrace(workResult.trace as unknown[] | undefined);
+              return basenames.length
+                ? html`
+                    <div style="margin-bottom: 12px;">
+                      ${basenames.map(
+                        (name) => html`
+                          <a
+                            href=${apiUrl(basePath, `/api/quotation/download?path=${encodeURIComponent(name)}`)}
+                            download=${name}
+                            class="btn btn-sm"
+                            style="margin-right: 8px; margin-bottom: 6px; text-decoration: none;"
+                          >
+                            下载 ${name}
+                          </a>
+                        `,
+                      )}
+                      <p class="muted" style="font-size: 11px; margin: 4px 0 0 0;">云端部署时请及时下载到本地保存，服务器重启后文件会丢失。</p>
+                    </div>
+                  `
+                : nothing;
+            })()}
             ${workResult.answer ? html`<div style="white-space: pre-wrap; margin-bottom: 12px;">${workResult.answer}</div>` : nothing}
             ${workResult.error ? html`<p style="color: var(--danger, #e53935);">${workResult.error}</p>` : nothing}
             ${workResult.trace?.length

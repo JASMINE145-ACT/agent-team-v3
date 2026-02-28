@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from typing import Any, Dict
 
 from backend.config import Config
@@ -35,6 +35,33 @@ async def health_check():
         out["oos_db"] = None
         out["oos_using_postgres"] = False
     return out
+
+
+@router.get("/api/config/price-levels")
+async def get_price_levels() -> Dict[str, Any]:
+    """返回价格档位列表（value + 全名 label），供 Work/Chat 下拉与展示用。顺序与价格库表头一致。"""
+    try:
+        from backend.tools.inventory.services.wanding_fuzzy_matcher import (
+            PRICE_LEVEL_DISPLAY_NAMES,
+            PRICE_COLS,
+        )
+        # 顺序与价格库表头一致：出厂价 → 采购 → A/B/C/D/E 各级别（利润率、报单价格、D 降低利润率）
+        order = [
+            "FACTORY_INC_TAX", "FACTORY_EXC_TAX", "PURCHASE_EXC_TAX",
+            "A_MARGIN", "A_QUOTE", "B_MARGIN", "B_QUOTE",
+            "C_MARGIN", "C_QUOTE",
+            "D_MARGIN", "D_QUOTE", "D_LOW",
+            "E_MARGIN", "E_QUOTE",
+        ]
+        options = [
+            {"value": k, "label": PRICE_LEVEL_DISPLAY_NAMES.get(k, k)}
+            for k in order
+            if k in PRICE_COLS
+        ]
+        return {"success": True, "data": options}
+    except Exception as e:
+        logger.debug("price-levels: %s", e)
+        return {"success": False, "data": []}
 
 
 def _sanitize_upload_filename(name: str, max_len: int = 80) -> str:
@@ -83,6 +110,35 @@ async def quotation_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
     except Exception as e:
         logger.error("上传失败: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/quotation/download")
+async def quotation_download(path: str = "") -> FileResponse:
+    """
+    下载云端上传/Work 产出的文件到本地。path 为文件名（basename），必须在 UPLOAD_DIR 下，禁止路径穿越。
+    用于 Render 等云端部署：文件在服务器临时盘，用户通过本接口下载到本地保存。
+    """
+    path = (path or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="请提供 path（文件名）")
+    # 只允许单层文件名，禁止 .. 与路径分隔符
+    if ".." in path or "/" in path or "\\" in path:
+        raise HTTPException(status_code=400, detail="path 仅允许文件名")
+    safe = _sanitize_upload_filename(path, max_len=200)
+    if safe != path:
+        raise HTTPException(status_code=400, detail="文件名含非法字符")
+    full = (Config.UPLOAD_DIR / path).resolve()
+    try:
+        full.relative_to(Config.UPLOAD_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="禁止访问该路径")
+    if not full.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在或已过期")
+    return FileResponse(
+        path=str(full),
+        filename=path,
+        media_type="application/octet-stream",
+    )
 
 
 @router.post("/api/query")

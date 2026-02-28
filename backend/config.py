@@ -34,7 +34,8 @@ class Config:
     # 云端平台常注入 PORT，本地默认 8000
     API_PORT = int(os.getenv("API_PORT") or os.getenv("PORT", "8000"))
     DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-    # Vercel/Serverless 仅 /tmp 可写，/var/task 只读；本地用项目目录
+    # Vercel/Serverless 仅 /tmp 可写；Render 默认无持久盘，base_dir 为临时目录，重启/部署后丢失
+    # 本地：base_dir/uploads；Render 持久化请挂载 Disk 并设置 UPLOAD_DIR 指向挂载路径（如 /data/uploads）
     _is_vercel = os.getenv("VERCEL") in ("1", "true")
     UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/tmp/uploads" if _is_vercel else str(base_dir / "uploads")))
     MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "200"))

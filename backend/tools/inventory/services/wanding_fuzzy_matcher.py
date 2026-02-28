@@ -17,26 +17,38 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# 价格列（0-based）：报单 A/B/C/D/D_low/E + 出厂价_含税/不含税、采购不含税
+# 价格列（0-based）：与价格库表头顺序一致；多档位共用同一列时取同一索引
 PRICE_COLS = {
-    "A": 8, "B": 10, "C": 12, "D": 14, "D_LOW": 16, "E": 18,
-    "FACTORY_INC_TAX": 4,   # 出厂价_含税
-    "FACTORY_EXC_TAX": 5,   # 出厂价_不含税
-    "PURCHASE_EXC_TAX": 6,  # 采购不含税
+    "FACTORY_INC_TAX": 4,
+    "FACTORY_EXC_TAX": 5,
+    "PURCHASE_EXC_TAX": 6,
+    "A_MARGIN": 8, "A_QUOTE": 8,
+    "B_MARGIN": 10, "B_QUOTE": 10,
+    "C_MARGIN": 12, "C_QUOTE": 12,
+    "D_MARGIN": 14, "D_QUOTE": 14,
+    "D_LOW": 16,
+    "E_MARGIN": 18, "E_QUOTE": 18,
+    # 兼容旧代码
+    "A": 8, "A_TURN": 8, "A_ANNUAL": 8,
+    "B": 10, "B_TURN": 10, "B_ANNUAL": 10, "B_QUOTE": 10,
+    "C": 12, "C_TURN": 12, "C_QUOTE": 12,
+    "D": 14, "D_NOADJ": 14,
+    "D_WHOLESALE": 16,
+    "E": 18,
 }
 
 
 def _normalize_price_level(customer_level: str) -> str:
     """将用户/Agent 传入的档位或价格类型统一为 PRICE_COLS 的 key。"""
-    s = (customer_level or "B").strip()
+    s = (customer_level or "B_QUOTE").strip()
     if not s:
-        return "B"
+        return "B_QUOTE"
     # 中文：出厂价含税/不含税、采购不含税
     if "出厂价" in s and "含税" in s:
         return "FACTORY_INC_TAX"
     if "出厂价" in s and "不含税" in s:
         return "FACTORY_EXC_TAX"
-    if "采购" in s:
+    if "采购" in s and "不含税" in s:
         return "PURCHASE_EXC_TAX"
     # 英文/代码
     u = s.upper().replace(" ", "_")
@@ -45,7 +57,46 @@ def _normalize_price_level(customer_level: str) -> str:
     for key in ("FACTORY_INC_TAX", "FACTORY_EXC_TAX", "PURCHASE_EXC_TAX"):
         if key in u or u == key:
             return key
-    return u if u in PRICE_COLS else "B"
+    return u if u in PRICE_COLS else "B_QUOTE"
+
+
+# 档位代码 → 全名（与价格库表头一致，Chat/Work 统一显示）
+PRICE_LEVEL_DISPLAY_NAMES: dict[str, str] = {
+    "FACTORY_INC_TAX": "出厂价_含税",
+    "FACTORY_EXC_TAX": "出厂价_不含税",
+    "PURCHASE_EXC_TAX": "采购不含税",
+    "A_MARGIN": "（二级代理）A级别 利润率",
+    "A_QUOTE": "（二级代理）A级别 报单价格",
+    "B_MARGIN": "（一级代理）B级别 利润率",
+    "B_QUOTE": "（一级代理）B级别 报单价格",
+    "C_MARGIN": "（聚万大客户）C级别 利润率",
+    "C_QUOTE": "（聚万大客户）C级别报单价格",
+    "D_MARGIN": "（青山大客户）D级别 利润率",
+    "D_QUOTE": "（青山大客户）D级别 报单价格",
+    "D_LOW": "（青山大客户）D级别 降低利润率",
+    "E_MARGIN": "（大唐大客户）E级别（包运费） 利润率",
+    "E_QUOTE": "（大唐大客户）E级别（包运费） 报单价格",
+    # 兼容旧代码
+    "A": "（二级代理）A级别 利润率",
+    "A_TURN": "（二级代理）A级别 利润率",
+    "A_ANNUAL": "（二级代理）A级别 报单价格",
+    "B": "（一级代理）B级别 利润率",
+    "B_TURN": "（一级代理）B级别 利润率",
+    "B_ANNUAL": "（一级代理）B级别 报单价格",
+    "C": "（聚万大客户）C级别 利润率",
+    "C_TURN": "（聚万大客户）C级别 利润率",
+    "D": "（青山大客户）D级别 利润率",
+    "D_NOADJ": "（青山大客户）D级别 报单价格",
+    "D_WHOLESALE": "（青山大客户）D级别 降低利润率",
+    "E": "（大唐大客户）E级别（包运费） 利润率",
+}
+
+
+def get_price_level_display_name(customer_level: str) -> str:
+    """将档位代码转为全名，供界面与接口返回使用。"""
+    key = _normalize_price_level(customer_level or "B_QUOTE")
+    return PRICE_LEVEL_DISPLAY_NAMES.get(key, key)
+
 
 SYNONYM_GROUPS = [
     {"直接", "直接头", "直通", "直通接头"},

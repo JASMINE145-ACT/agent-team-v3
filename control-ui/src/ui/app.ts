@@ -345,7 +345,7 @@ export class OpenClawApp extends LitElement {
   @state() workSelections: Record<string, string> = {};
   @state() workResult: { success?: boolean; answer?: string; trace?: unknown[]; error?: string } | null = null;
   @state() workError: string | null = null;
-  @state() workCustomerLevel = "B";
+  @state() workCustomerLevel = "B_QUOTE";
   @state() workDoRegisterOos = true;
 
   @state() cronLoading = false;
@@ -432,10 +432,12 @@ export class OpenClawApp extends LitElement {
   protected updated(changed: Map<PropertyKey, unknown>) {
     if (changed.has("workRunning")) {
       if (this.workRunning) {
-        this.workProgressStage = 0;
-        this._workProgressInterval = window.setInterval(() => {
-          this.workProgressStage = (this.workProgressStage + 1) % 3;
-        }, 2600);
+        // 执行中不循环阶段，固定为“执行中”（由 view 用 -1 表示）
+        this.workProgressStage = -1;
+        if (this._workProgressInterval != null) {
+          clearInterval(this._workProgressInterval);
+          this._workProgressInterval = null;
+        }
       } else {
         if (this._workProgressInterval != null) {
           clearInterval(this._workProgressInterval);

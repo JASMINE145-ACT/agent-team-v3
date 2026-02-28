@@ -37,7 +37,7 @@ WORK_TOOLS_OPENAI_FORMAT = [
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "报价单路径（用于与 extract 对应）"},
-                    "customer_level": {"type": "string", "enum": ["A", "B", "C", "D"], "description": "客户档位，默认 B"},
+                    "customer_level": {"type": "string", "enum": ["FACTORY_INC_TAX", "FACTORY_EXC_TAX", "PURCHASE_EXC_TAX", "A_MARGIN", "A_QUOTE", "B_MARGIN", "B_QUOTE", "C_MARGIN", "C_QUOTE", "D_MARGIN", "D_QUOTE", "D_LOW", "E_MARGIN", "E_QUOTE"], "description": "价格档位：出厂价_含税/不含税、采购不含税、二级代理A/一级代理B/聚万C/青山D/大唐E 各级别（利润率、报单价格、D降低利润率），默认 B_QUOTE"},
                 },
                 "required": ["file_path"],
             },
@@ -223,22 +223,28 @@ def _run_work_quotation_match(
     return out
 
 
+# 人工选择时用此 code 表示「选不出来，按无货」
+PENDING_AS_OOS_CODE = "__OOS__"
+
+
 def merge_work_pending_choices(match_result: dict[str, Any], selections: list[dict]) -> dict[str, Any]:
     """
     将人工选择合并进 work_quotation_match 结果。
     match_result 含 needs_human_choice 与 pending_choices；selections 为 [{ item_id, selected_code }]。
-    返回同结构但无 needs_human_choice，pending 项已并入 to_fill/shortage/fill_items_merged。
+    selected_code 为 __OOS__ 或未提供选择的项：一律按无货（选不出来就无货）。
+    返回同结构但无 needs_human_choice，pending 项已并入 to_fill/shortage/unmatched/fill_items_merged。
     """
     import copy
     pending = match_result.get("pending_choices", [])
-    if not pending or not selections:
+    if not pending:
         out = copy.deepcopy(match_result)
         out.pop("needs_human_choice", None)
         out["pending_choices"] = []
         return out
-    sel_map = {str(s.get("item_id", "")).strip(): str(s.get("selected_code", "")).strip() for s in selections if s.get("item_id") is not None}
+    sel_map = {str(s.get("item_id", "")).strip(): str(s.get("selected_code", "")).strip() for s in (selections or []) if s.get("item_id") is not None}
     to_fill = list(match_result.get("to_fill", []))
     shortage = list(match_result.get("shortage", []))
+    unmatched = list(match_result.get("unmatched", []))
     fill_items_merged = list(match_result.get("fill_items_merged", []))
     available_qty_fn = None
     try:
@@ -252,18 +258,38 @@ def merge_work_pending_choices(match_result: dict[str, Any], selections: list[di
         pass
     for pc in pending:
         cid = pc.get("id", "")
-        code = sel_map.get(cid) or sel_map.get(cid.strip())
-        if not code:
+        code = (sel_map.get(cid) or sel_map.get(cid.strip()) or "").strip()
+        row = pc.get("row")
+        qty = int(pc.get("qty", 0) or 0)
+        specification = pc.get("specification", "")
+        product_name = pc.get("product_name", "")
+        # 选不出来就无货：未选、选 __OOS__、或选的 code 不在 options 里 → 按无货
+        if not code or code.upper() == PENDING_AS_OOS_CODE:
+            unmatched.append({"row": row, "product_name": product_name, "specification": specification, "qty": qty})
+            fill_items_merged.append({
+                "row": row,
+                "code": "无货",
+                "quote_name": "",
+                "unit_price": None,
+                "qty": qty,
+                "specification": specification,
+            })
             continue
         options = pc.get("options", [])
         opt = next((o for o in options if (str(o.get("code") or "").strip() == code)), None)
         if not opt:
+            unmatched.append({"row": row, "product_name": product_name, "specification": specification, "qty": qty})
+            fill_items_merged.append({
+                "row": row,
+                "code": "无货",
+                "quote_name": "",
+                "unit_price": None,
+                "qty": qty,
+                "specification": specification,
+            })
             continue
-        row = pc.get("row")
-        qty = int(pc.get("qty", 0) or 0)
         quote_name = (opt.get("matched_name") or "")[:200]
         unit_price = float(opt.get("unit_price", 0) or 0)
-        specification = pc.get("specification", "")
         available_qty = available_qty_fn(code) if available_qty_fn else 0.0
         if available_qty >= qty:
             to_fill.append({"row": row, "code": code, "quote_name": quote_name, "unit_price": unit_price, "qty": qty, "specification": specification})
@@ -272,7 +298,7 @@ def merge_work_pending_choices(match_result: dict[str, Any], selections: list[di
             shortfall = max(0, qty - available_qty)
             shortage.append({
                 "row": row,
-                "product_name": pc.get("product_name", ""),
+                "product_name": product_name,
                 "specification": specification,
                 "qty": qty,
                 "available_qty": available_qty,
@@ -292,6 +318,7 @@ def merge_work_pending_choices(match_result: dict[str, Any], selections: list[di
     out = copy.deepcopy(match_result)
     out["to_fill"] = to_fill
     out["shortage"] = shortage
+    out["unmatched"] = unmatched
     out["fill_items_merged"] = fill_items_merged
     out.pop("needs_human_choice", None)
     out["pending_choices"] = []
