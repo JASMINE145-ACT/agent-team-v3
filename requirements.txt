@@ -25,5 +25,9 @@ chardet>=5.0.0
 # 库存 / Accurate API 请求（必选）
 requests>=2.28.0
 
+# 可选：Gmail API 发信（无货/缺货提醒），不使用时可不装
+google-auth>=2.0.0
+google-api-python-client>=2.0.0
+
 # 可选：企业微信回调（若需可取消注释）
 # pycryptodome>=3.19.0

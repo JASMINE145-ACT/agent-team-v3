@@ -47,7 +47,7 @@ class OutOfStockRecordDB(Base):
 
 
 class ShortageRecordDB(Base):
-    """缺货记录表（与无货记录同一逻辑：Work 匹配后库存不足写入，看板展示统计/按文件/按时间）"""
+    """缺货记录表（与无货记录同一逻辑：Work 匹配后库存不足写入，看板展示统计/按文件/按时间；两次缺货发邮件与无货对齐）"""
     __tablename__ = "shortage_records"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -64,6 +64,12 @@ class ShortageRecordDB(Base):
     product_key = Column(String(1000), nullable=False, index=True)
     count = Column(Integer, nullable=False, default=1)  # 该产品被报缺货次数
     is_deleted = Column(Integer, nullable=False, default=0)
+
+    # 邮件相关（与无货对齐：count>=2 触发、冷却、已发标记）
+    last_email_sent_at = Column(DateTime, nullable=True)
+    email_status = Column(String(20), nullable=True, default='pending')
+    email_sent_by = Column(String(100), nullable=True)
+    email_sent_count = Column(Integer, nullable=False, default=0)
 
 
 class UploadSession(Base):
@@ -319,6 +325,49 @@ class DataService:
         finally:
             session.close()
 
+    def should_trigger_email_shortage(self, product_key: str, current_count: int) -> bool:
+        """缺货：与无货同一逻辑，count>=2 且未发过或已过冷却则触发发信。"""
+        if current_count < 2:
+            return False
+        session = self.SessionLocal()
+        try:
+            stmt = select(
+                func.max(ShortageRecordDB.last_email_sent_at),
+                func.max(ShortageRecordDB.email_sent_count)
+            ).where(ShortageRecordDB.product_key == product_key)
+            result = session.execute(stmt).first()
+            last_sent = result[0] if result else None
+            sent_count = result[1] if result and result[1] else 0
+            if sent_count == 0:
+                return True
+            if last_sent is None:
+                return True
+            cooldown_seconds = max(0, EMAIL_COOLDOWN_HOURS) * 3600
+            if cooldown_seconds == 0:
+                return False
+            if (datetime.now() - last_sent).total_seconds() > cooldown_seconds:
+                return True
+            return False
+        finally:
+            session.close()
+
+    def mark_email_sent_shortage(self, product_key: str, sent_by: Optional[str] = None, status: str = 'sent'):
+        """缺货：标记该 product_key 已发邮件（与无货 mark_email_sent 对齐）。"""
+        session = self.SessionLocal()
+        try:
+            now = datetime.now()
+            records = session.query(ShortageRecordDB).filter_by(product_key=product_key).all()
+            for record in records:
+                record.last_email_sent_at = now
+                record.email_status = status
+                if sent_by:
+                    record.email_sent_by = sent_by
+                if status == 'sent':
+                    record.email_sent_count = (record.email_sent_count or 0) + 1
+            session.commit()
+        finally:
+            session.close()
+
     def delete_record(self, record_id: int) -> bool:
         """
         软删除单条记录
@@ -373,13 +422,7 @@ class DataService:
 
     def delete_by_product_key(self, product_key: str) -> int:
         """
-        按 product_key 软删除该产品的所有无货记录（看板「删除」用）
-
-        Args:
-            product_key: 产品键（与 _generate_product_key 一致）
-
-        Returns:
-            被软删除的记录数
+        按 product_key 软删除该产品的所有无货记录（仅设 is_deleted=1，列表不展示，Neon 中行仍存在）。
         """
         if not (product_key or "").strip():
             return 0
@@ -392,6 +435,27 @@ class DataService:
             return count
         except Exception as e:
             logger.error("delete_by_product_key failed: %s", e)
+            session.rollback()
+            return 0
+        finally:
+            session.close()
+
+    def delete_by_product_key_hard(self, product_key: str) -> int:
+        """
+        按 product_key 物理删除该产品的所有无货记录（真正从库中移除，Neon 中也会消失）。
+        看板「删除」使用此方法，与添加数据到 Neon 的行为一致。
+        """
+        if not (product_key or "").strip():
+            return 0
+        session = self.SessionLocal()
+        try:
+            count = session.query(OutOfStockRecordDB).filter(
+                OutOfStockRecordDB.product_key == product_key.strip()
+            ).delete(synchronize_session=False)
+            session.commit()
+            return count
+        except Exception as e:
+            logger.error("delete_by_product_key_hard failed: %s", e)
             session.rollback()
             return 0
         finally:
@@ -645,12 +709,16 @@ class DataService:
 
     # ---------- 缺货记录（与无货记录同一逻辑：按产品聚合、按文件/按时间） ----------
 
-    def insert_shortage_records(self, file_name: str, shortage_items: List[Dict], max_rows: int = 5000) -> int:
-        """批量写入缺货记录。shortage_items 每项含 product_name, specification, quantity, available_qty, shortfall, code, quote_name, unit_price。"""
+    def insert_shortage_records(self, file_name: str, shortage_items: List[Dict], max_rows: int = 5000) -> tuple:
+        """
+        批量写入缺货记录。shortage_items 每项含 product_name, specification, quantity, available_qty, shortfall, code, quote_name, unit_price。
+        返回 (inserted_count, email_alerts)，email_alerts 为需发「缺货两次」提醒的列表，每项含 product_name, specification, product_key, count, file_name。
+        """
         from pathlib import Path
         name = (Path(file_name).name if file_name else "unknown").strip() or "unknown"
         session = self.SessionLocal()
         inserted = 0
+        candidates: List[Dict] = []  # 待检查是否触发邮件的 (product_key, count, product_name, specification, file_name)
         try:
             for item in shortage_items[:max_rows]:
                 product_name = (item.get("product_name") or "").strip()
@@ -682,6 +750,13 @@ class DataService:
                 )
                 session.add(record)
                 inserted += 1
+                candidates.append({
+                    "product_key": product_key,
+                    "count": new_count,
+                    "product_name": product_name,
+                    "specification": specification,
+                    "file_name": name,
+                })
 
                 # 同步缺货记录到 Supabase（best effort，不影响本地 DB）
                 try:
@@ -702,13 +777,19 @@ class DataService:
                 except Exception as e:
                     logger.warning("同步缺货记录到 Supabase 失败（忽略）: %s", e)
             session.commit()
-            return inserted
         except Exception as e:
             logger.exception("insert_shortage_records 失败: %s", e)
             session.rollback()
-            return 0
+            return (0, [])
         finally:
             session.close()
+
+        # 与无货对齐：count>=2 且满足冷却时触发发信
+        email_alerts: List[Dict] = []
+        for c in candidates:
+            if self.should_trigger_email_shortage(c["product_key"], c["count"]):
+                email_alerts.append(c)
+        return (inserted, email_alerts)
 
     def get_shortage_statistics(self) -> Dict:
         """缺货统计：总记录数、缺货产品数、今日新增、被报缺货≥2次。"""
@@ -804,7 +885,7 @@ class DataService:
             session.close()
 
     def delete_shortage_by_product_key(self, product_key: str) -> int:
-        """按 product_key 软删除该产品的所有缺货记录。"""
+        """按 product_key 软删除该产品的所有缺货记录（仅设 is_deleted=1）。"""
         if not (product_key or "").strip():
             return 0
         session = self.SessionLocal()
@@ -816,6 +897,24 @@ class DataService:
             return count
         except Exception as e:
             logger.exception("delete_shortage_by_product_key 失败: %s", e)
+            session.rollback()
+            return 0
+        finally:
+            session.close()
+
+    def delete_shortage_by_product_key_hard(self, product_key: str) -> int:
+        """按 product_key 物理删除该产品的所有缺货记录（真正从库中移除，Neon 中也会消失）。"""
+        if not (product_key or "").strip():
+            return 0
+        session = self.SessionLocal()
+        try:
+            count = session.query(ShortageRecordDB).filter(
+                ShortageRecordDB.product_key == product_key.strip()
+            ).delete(synchronize_session=False)
+            session.commit()
+            return count
+        except Exception as e:
+            logger.exception("delete_shortage_by_product_key_hard 失败: %s", e)
             session.rollback()
             return 0
         finally:
@@ -836,4 +935,7 @@ class DataService:
             "uploaded_at": record.uploaded_at.isoformat() if record.uploaded_at else None,
             "product_key": record.product_key,
             "count": record.count,
+            "last_email_sent_at": record.last_email_sent_at.isoformat() if getattr(record, "last_email_sent_at", None) else None,
+            "email_status": getattr(record, "email_status", "pending"),
+            "email_sent_count": getattr(record, "email_sent_count", 0),
         }

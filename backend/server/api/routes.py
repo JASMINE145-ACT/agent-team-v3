@@ -322,13 +322,13 @@ async def oos_by_time(days: int = 30) -> Dict[str, Any]:
 
 @router.post("/api/oos/delete")
 async def oos_delete(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """无货看板：按 product_key 软删除该产品的所有无货记录。Body: { "product_key": "..." }"""
+    """无货看板：按 product_key 物理删除该产品的所有无货记录（Neon 中也会移除）。Body: { "product_key": "..." }"""
     product_key = (body.get("product_key") or "").strip()
     if not product_key:
         raise HTTPException(status_code=400, detail="请提供 product_key")
     try:
         ds = _get_oos_data_service()
-        n = ds.delete_by_product_key(product_key)
+        n = ds.delete_by_product_key_hard(product_key)
         return {"success": True, "deleted": n}
     except Exception as e:
         logger.exception("oos/delete 失败")
@@ -486,13 +486,13 @@ async def shortage_by_time(days: int = 30) -> Dict[str, Any]:
 
 @router.post("/api/shortage/delete")
 async def shortage_delete(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """缺货看板：按 product_key 软删除该产品的所有缺货记录。Body: { "product_key": "..." }"""
+    """缺货看板：按 product_key 物理删除该产品的所有缺货记录（Neon 中也会移除）。Body: { "product_key": "..." }"""
     product_key = (body.get("product_key") or "").strip()
     if not product_key:
         raise HTTPException(status_code=400, detail="请提供 product_key")
     try:
         ds = _get_oos_data_service()
-        n = ds.delete_shortage_by_product_key(product_key)
+        n = ds.delete_shortage_by_product_key_hard(product_key)
         return {"success": True, "deleted": n}
     except Exception as e:
         logger.exception("shortage/delete 失败")

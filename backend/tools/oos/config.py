@@ -50,14 +50,19 @@ USE_WUHOU_CONTEXT_MODE = os.getenv("USE_WUHOU_CONTEXT_MODE", "false").lower() in
 # 无货行上下各保留几行作为上下文（仅 USE_WUHOU_CONTEXT_MODE 时生效）
 WUHOU_CONTEXT_ROWS = int(os.getenv("WUHOU_CONTEXT_ROWS", "2"))
 
-# Email 配置（发信需填：SMTP 主机/端口/发件人/账号/密码/收件人，见 .env.example）
+# Email 配置（无货/缺货共用；未配置则不发信、不报错）
+# 方式一（推荐）：Gmail API，用你的 Google 账号发信，发件人即该账号，只需配置一次 OAuth
+GMAIL_REFRESH_TOKEN = os.getenv("GMAIL_REFRESH_TOKEN", "").strip() or None
+GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID", "").strip() or None
+GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET", "").strip() or None
+# 方式二：SMTP（任意邮箱，含 Gmail 需用应用专用密码）
 EMAIL_RECIPIENTS = os.getenv("EMAIL_RECIPIENTS", "").split(",") if os.getenv("EMAIL_RECIPIENTS") else []
 EMAIL_SMTP_HOST = os.getenv("EMAIL_SMTP_HOST")
 EMAIL_SMTP_PORT = os.getenv("EMAIL_SMTP_PORT", "587")
 EMAIL_FROM = os.getenv("EMAIL_FROM")
 EMAIL_USERNAME = os.getenv("EMAIL_USERNAME")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
-# 同一产品两次无货发邮件后，间隔多少小时可再次发（0=仅首次 count>=2 发一次）
+# 同一产品两次无货/缺货发邮件后，间隔多少小时可再次发（0=仅首次 count>=2 发一次）
 EMAIL_COOLDOWN_HOURS = int(os.getenv("EMAIL_COOLDOWN_HOURS", "24"))
 
 # 无货标识关键词
