@@ -2,10 +2,9 @@
 一键启动 Jagent 前后端：在新窗口启动后端（API + 静态 UI），并自动打开浏览器。
 双击运行或命令行：python start.py
 
-注意：本脚本会清空 DATABASE_URL，强制使用本地 SQLite，适合本地开发。
-生产/云端（如 Render、Neon）请勿用 start.py，应直接运行：
-  uvicorn backend.server.api.app:app --host 0.0.0.0 --port $PORT
-或 python run_backend.py，并设置环境变量 DATABASE_URL=postgresql://...（无空格）。
+本地开发：会清空 DATABASE_URL，强制用 SQLite（避免依赖 psycopg2）。
+云端（Render 等）：若平台已设置 PORT，则保留 DATABASE_URL，保证无货/缺货数据连 Neon 不丢。
+生产推荐仍用：uvicorn backend.server.api.app:app --host 0.0.0.0 --port $PORT 或 python run_backend.py。
 """
 import os
 import subprocess
@@ -24,13 +23,21 @@ def main():
     port = Config.API_PORT
     url = f"http://127.0.0.1:{port}/"
 
+    # 云端（Render/Heroku 等）会注入 PORT；此时保留 DATABASE_URL，否则每次部署无货数据会丢
+    on_cloud = "PORT" in os.environ
+
     if sys.platform == "win32":
-        # 新开一个 cmd 窗口跑后端，便于看日志（路径含空格时用引号）
-        # 本地启动时取消 DATABASE_URL，强制用 SQLite，避免依赖 psycopg2/云端
-        cmd_str = f'start "Jagent Backend" cmd /k "cd /d \"{root}\" && set DATABASE_URL= && python run_backend.py"'
+        # 新开一个 cmd 窗口跑后端
+        if on_cloud:
+            cmd_str = f'start "Jagent Backend" cmd /k "cd /d \"{root}\" && python run_backend.py"'
+        else:
+            cmd_str = f'start "Jagent Backend" cmd /k "cd /d \"{root}\" && set DATABASE_URL= && python run_backend.py"'
         subprocess.Popen(cmd_str, cwd=root, shell=True)
     else:
-        env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
+        if on_cloud:
+            env = os.environ.copy()  # 云端：保留 DATABASE_URL
+        else:
+            env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
         subprocess.Popen(
             [sys.executable, "run_backend.py"],
             cwd=root,

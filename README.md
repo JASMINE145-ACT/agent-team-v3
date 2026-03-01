@@ -94,6 +94,7 @@ python run_backend.py
 - **缺少 session / 会话列表为空**：会话目录会在首次启动时自动创建；若仍报错，请从项目根目录运行、确认 `data/sessions` 已存在后重启。
 - **工具参数不合法**：多为以下情况：① 使用询价填充/无货登记时**未先上传文件**，工具需要 `file_path`，请先在聊天中上传 Excel 再操作；② LLM 返回的参数格式异常，可检查 `.env` 中 API Key、BASE_URL 是否正确及网络是否正常；③ 智谱等模型偶发少传必填参数，可重试或换一句描述。
 - **端口被占用**：设置 `API_PORT=8001`（或其它未占用端口）后重启。
+- **重新部署后无货/缺货数据全没了**：说明部署环境未连接云端库。在云平台 Environment 中设置 `DATABASE_URL` 为 Neon 连接串，并用 `uvicorn` 或 `python run_backend.py` 启动（不要用 `start.py`），部署后即可继续读到原有数据。
 
 ---
 
@@ -118,16 +119,27 @@ python run_backend.py
 | `MAPPING_TABLE_PATH` | 否 | 未设置则用 `data/整理产品(2).xlsx` |
 | `SESSION_STORE_DIR` | 否 | 会话目录，默认 `data/sessions` |
 | `UPLOAD_DIR` | 否 | 上传目录，默认 `uploads` |
-| `QUOTATION_DB_PATH` | 否 | 无货登记 SQLite，默认 `data/out_of_stock.db` |
+| **`DATABASE_URL`** | **推荐** | **无货/缺货用云端库时必设**，见下方「无货/缺货数据持久化」 |
+| `QUOTATION_DB_PATH` | 否 | 未设 DATABASE_URL 时 SQLite 路径，默认 `data/out_of_stock.db` |
 
-### 2. 业务文件与持久化
+### 2. 无货/缺货数据持久化（推荐：每次部署都读云端库）
+
+**原则：部署时应连接现有云端数据库，这样无货/缺货数据不会因重新部署而丢失。**
+
+- 在云平台（如 Render）的 **Environment** 中设置 **`DATABASE_URL`** 为 Neon 的 Postgres 连接串，例如：
+  ```bash
+  DATABASE_URL=postgresql://user:pass@ep-xxx-pooler.region.neon.tech/neondb?sslmode=require
+  ```
+  （等号两侧无空格；若报错可去掉 URL 中的 `&channel_binding=require`，只保留 `?sslmode=require`。）
+- **启动命令**必须用 **`uvicorn backend.server.api.app:app --host 0.0.0.0 --port $PORT`** 或 **`python run_backend.py`**，**不要用 `start.py`**（`start.py` 会清空 `DATABASE_URL`，仅适合本地开发）。
+- 配置正确时，后端日志会出现 `Connected to Postgres successfully (OOS/Shortage)`，看板会显示云端已有数据；未配置或连接失败时会回退到本地 SQLite，实例重启后无货/缺货数据会丢。
+
+### 3. 业务文件与持久化目录
 
 - **业务文件**：`data/万鼎价格库_管材与国标管件_标准格式.xlsx`、`data/整理产品(2).xlsx` 若已提交到 Git，部署时会自带；否则需通过对象存储/挂载卷提供，并用环境变量指向路径。
-- **持久化目录**（会话、上传、无货库）：云实例重启后通常清空本地盘。若需保留：
-  - **容器/虚拟机**：把 `data/`、`uploads/` 挂载到持久卷（如 Docker volume、云盘）。
-  - **Serverless/无持久盘**：会话和上传会丢；无货库可考虑后续改为外接数据库（如云 MySQL）。
+- **持久化目录**（会话、上传）：云实例重启后通常清空本地盘。若需保留会话/上传，可将 `data/`、`uploads/` 挂载到持久卷。**无货/缺货**：设好 `DATABASE_URL` 后数据在 Neon，无需本地盘持久化。
 
-### 3. 启动命令
+### 4. 启动命令
 
 在云平台填「启动命令」时，用项目根目录为工作目录，例如：
 
@@ -137,12 +149,12 @@ pip install -r requirements.txt && python run_backend.py
 
 或先建虚拟环境再启动（按平台要求）。前端已包含在仓库的 `dist/control-ui/`，无需再执行 `npm run build`。
 
-### 4. 端口与 HTTPS
+### 5. 端口与 HTTPS
 
 - 应用默认监听 `0.0.0.0:API_PORT`，云平台若分配了 `PORT`，本应用会读取 `API_PORT` 或 `PORT`。
 - 对外需用 **HTTPS**：由云平台提供（反向代理、负载均衡）即可，应用本身只跑 HTTP。
 
-### 5. 可选：Docker 部署
+### 6. 可选：Docker 部署
 
 若使用 Docker，可在项目根目录建 `Dockerfile`，例如：
 
