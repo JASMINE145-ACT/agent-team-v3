@@ -283,9 +283,9 @@ async def oos_list(limit: int = 100) -> Dict[str, Any]:
         records = ds.get_all_records(limit=limit * 5)
         by_key: Dict[str, dict] = {}
         for r in records:
-            key = r.get("product_key") or ""
+            key = (r.get("product_key") or "").strip()
             if not key:
-                continue
+                key = "_id_" + str(r.get("id", ""))  # Neon 控制台手动添加的行可能无 product_key，用 id 兜底展示
             cnt = r.get("count") or 1
             if key not in by_key or (by_key[key].get("count") or 0) < cnt:
                 by_key[key] = r

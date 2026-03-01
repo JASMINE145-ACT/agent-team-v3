@@ -5,7 +5,7 @@ import re
 import logging
 from datetime import datetime
 from typing import List, Optional, Dict
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, func, select, text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, func, select, text, or_
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.pool import QueuePool, StaticPool
@@ -498,9 +498,9 @@ class DataService:
         try:
             query = session.query(OutOfStockRecordDB)
 
-            # 默认过滤已删除记录
+            # 默认过滤已删除记录（Neon 控制台手动添加的行可能 is_deleted 为 NULL，视为未删除）
             if not include_deleted:
-                query = query.filter(OutOfStockRecordDB.is_deleted == 0)
+                query = query.filter(or_(OutOfStockRecordDB.is_deleted == 0, OutOfStockRecordDB.is_deleted.is_(None)))
 
             query = query.order_by(OutOfStockRecordDB.uploaded_at.desc())
 
@@ -514,39 +514,37 @@ class DataService:
     
     def get_statistics(self) -> Dict:
         """获取统计信息"""
+        _not_deleted = or_(OutOfStockRecordDB.is_deleted == 0, OutOfStockRecordDB.is_deleted.is_(None))
         session = self.SessionLocal()
         try:
-            # 总记录数（不含已删除）
-            total_records = session.query(func.count(OutOfStockRecordDB.id)).filter(
-                OutOfStockRecordDB.is_deleted == 0
-            ).scalar()
+            # 总记录数（不含已删除；is_deleted 为 NULL 视为未删除，兼容 Neon 控制台手动添加）
+            total_records = session.query(func.count(OutOfStockRecordDB.id)).filter(_not_deleted).scalar()
 
-            # 唯一无货产品数
+            # 唯一无货产品数（空 product_key 在 distinct 中算一条，用 coalesce 归一）
             unique_products = session.query(
-                func.count(func.distinct(OutOfStockRecordDB.product_key))
-            ).filter(
-                OutOfStockRecordDB.is_deleted == 0
-            ).scalar()
+                func.count(func.distinct(func.coalesce(OutOfStockRecordDB.product_key, "")))
+            ).filter(_not_deleted).scalar()
+            # 若全部 product_key 为空，distinct(coalesce('','')) 得 1，但希望显示「有 N 条」；用总行数更直观
+            if (unique_products or 0) == 0 and (total_records or 0) > 0:
+                unique_products = total_records
 
             # 触发通知数（count >= 2）
             notified_count = session.query(func.count(OutOfStockRecordDB.id)).filter(
-                OutOfStockRecordDB.count >= 2,
-                OutOfStockRecordDB.is_deleted == 0
+                OutOfStockRecordDB.count >= 2, _not_deleted
             ).scalar()
 
             # 今日新增（从今天 00:00:00 开始）
             from datetime import datetime
             today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             today_count = session.query(func.count(OutOfStockRecordDB.id)).filter(
-                OutOfStockRecordDB.uploaded_at >= today_start,
-                OutOfStockRecordDB.is_deleted == 0
+                OutOfStockRecordDB.uploaded_at >= today_start, _not_deleted
             ).scalar()
 
             # 已发邮件产品数（至少发过一封提醒的 product_key 数）
             email_sent_product_count = session.query(
                 func.count(func.distinct(OutOfStockRecordDB.product_key))
             ).filter(
-                OutOfStockRecordDB.is_deleted == 0,
+                _not_deleted,
                 (OutOfStockRecordDB.email_sent_count > 0) | (OutOfStockRecordDB.email_status == "sent")
             ).scalar()
 
@@ -577,7 +575,7 @@ class DataService:
             )
 
             if not include_deleted:
-                query = query.filter(OutOfStockRecordDB.is_deleted == 0)
+                query = query.filter(or_(OutOfStockRecordDB.is_deleted == 0, OutOfStockRecordDB.is_deleted.is_(None)))
 
             files = query.group_by(
                 OutOfStockRecordDB.file_name,
@@ -619,7 +617,7 @@ class DataService:
                 func.count(OutOfStockRecordDB.id).label("cnt"),
             ).filter(OutOfStockRecordDB.uploaded_at >= cutoff)
             if not include_deleted:
-                q = q.filter(OutOfStockRecordDB.is_deleted == 0)
+                q = q.filter(or_(OutOfStockRecordDB.is_deleted == 0, OutOfStockRecordDB.is_deleted.is_(None)))
             rows = q.group_by(func.date(OutOfStockRecordDB.uploaded_at)).order_by(
                 func.date(OutOfStockRecordDB.uploaded_at).desc()
             ).all()
