@@ -21,6 +21,7 @@ class Config:
         if _IS_ZHIPU
         else (os.getenv("OPENAI_API_KEY") or os.getenv("ZHIPU_API_KEY"))
     )
+    # 主 LLM（默认智谱 GLM，可通过 .env 中的 LLM_MODEL 覆盖）
     LLM_MODEL = os.getenv("LLM_MODEL", "glm-4-flash")
     LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "5000"))
     # 上下文压缩：用轻量模型对历史 tool 结果做摘要，默认 gpt-4o-mini；未设则用主模型同 endpoint
@@ -47,6 +48,16 @@ class Config:
         or (str(_v3_standard) if _v3_standard.exists() else str(_v3_old) if _v3_old.exists() else str(_v3_standard))
     )
     SESSION_STORE_DIR = Path(os.getenv("SESSION_STORE_DIR", "/tmp/sessions" if _is_vercel else str(base_dir / "data" / "sessions")))
+
+    # LangSmith：Work/Chat 模式下 LLM 调用与 token 消耗追踪（可选）
+    LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "").lower() in ("1", "true", "yes")
+    LANGSMITH_API_KEY = (os.getenv("LANGSMITH_API_KEY") or "").strip() or None
+    LANGSMITH_PROJECT = (os.getenv("LANGSMITH_PROJECT") or "agent-jk-v3").strip() or None
+
+    # 可选：主模型失败时自动 fallback 到备用模型（例如 GLM 超时时切到 gpt-4o-mini）
+    FALLBACK_LLM_BASE_URL = (os.getenv("FALLBACK_BASE_URL") or "").strip() or None
+    FALLBACK_LLM_API_KEY = (os.getenv("FALLBACK_API_KEY") or "").strip() or None
+    FALLBACK_LLM_MODEL = (os.getenv("FALLBACK_MODEL") or "").strip() or None
 
     @classmethod
     def validate(cls):

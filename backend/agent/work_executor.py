@@ -11,19 +11,43 @@ import logging
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
-from openai import OpenAI
+import openai
 
+from backend.core.llm_client import get_openai_client
 from backend.agent.work_tools import (
     WORK_TOOLS_OPENAI_FORMAT,
     execute_work_tool_sync,
     merge_work_pending_choices,
 )
 from backend.tools.inventory.services.wanding_fuzzy_matcher import get_price_level_display_name
+from backend.core.context_compression import _trim_context, build_tool_call_id_to_name, make_summarizer
+
+# 每个文件三步完成后压缩历史 tool 结果，避免多文件场景 context 线性膨胀
+_WORK_CONTEXT_MAX_CHARS = 8_000
 
 logger = logging.getLogger(__name__)
 
 # run_id -> { messages, step, trace, file_paths, customer_level, do_register_oos, _api_key, _base_url, _model, max_tokens }
 _work_run_state: Dict[str, dict] = {}
+
+
+def _extract_pending_quotation_draft_from_trace(trace: List[dict]) -> Optional[dict]:
+    if not isinstance(trace, list):
+        return None
+    for entry in reversed(trace):
+        if entry.get("type") != "observation":
+            continue
+        content = entry.get("content")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        try:
+            obj = json.loads(content)
+        except Exception:
+            continue
+        draft = obj.get("pending_quotation_draft") if isinstance(obj, dict) else None
+        if isinstance(draft, dict) and isinstance(draft.get("lines"), list):
+            return draft
+    return None
 
 
 def _build_work_system_content(file_paths: List[str], customer_level: str, do_register_oos: bool) -> str:
@@ -76,18 +100,32 @@ async def run_work_flow(
         return {"status": "done", "success": False, "answer": "", "trace": [], "error": "file_paths 为空"}
     try:
         from backend.config import Config
+
         _api_key = api_key or getattr(Config, "OPENAI_API_KEY", None)
         _base_url = getattr(Config, "OPENAI_BASE_URL", None) or base_url
         _model = model or getattr(Config, "LLM_MODEL", "gpt-4o")
         max_tokens = getattr(Config, "LLM_MAX_TOKENS", 5000)
+
+        # 备用模型配置（例如 GLM 超时时自动切到 gpt-4o-mini）
+        fb_api_key = getattr(Config, "FALLBACK_LLM_API_KEY", None)
+        fb_base_url = getattr(Config, "FALLBACK_LLM_BASE_URL", None)
+        fb_model = getattr(Config, "FALLBACK_LLM_MODEL", None)
     except Exception:
         _api_key = api_key
         _base_url = base_url
         _model = model or "gpt-4o"
         max_tokens = 5000
+        fb_api_key = None
+        fb_base_url = None
+        fb_model = None
     if not _api_key:
         return {"status": "done", "success": False, "answer": "", "trace": [], "error": "缺少 OPENAI_API_KEY"}
-    client = OpenAI(api_key=_api_key, base_url=_base_url)
+    client = get_openai_client(api_key=_api_key, base_url=_base_url)
+    fb_client = (
+        get_openai_client(api_key=fb_api_key, base_url=fb_base_url)
+        if fb_api_key and fb_base_url and fb_model
+        else None
+    )
 
     system_content = _build_work_system_content(file_paths, customer_level, do_register_oos)
     user_content = f"请按固定流程执行。共 {len(file_paths)} 个文件，客户档位 {customer_level}。从第一个文件的 work_quotation_extract 开始。"
@@ -112,6 +150,31 @@ async def run_work_flow(
 
         try:
             resp = client.chat.completions.create(**kwargs)
+        except (openai.APITimeoutError, openai.APIConnectionError) as e:
+            if fb_client and fb_model:
+                logger.warning("Work 主模型调用超时，fallback 到备用模型: %s", fb_model)
+                fb_kwargs: Dict[str, Any] = {**kwargs, "model": fb_model}
+                try:
+                    resp = fb_client.chat.completions.create(**fb_kwargs)
+                    trace.append({"step": step + 1, "type": "fallback", "model": fb_model})
+                except Exception as e2:
+                    logger.exception("Work LLM fallback 调用失败")
+                    return {
+                        "status": "done",
+                        "success": False,
+                        "answer": last_answer or "",
+                        "trace": trace,
+                        "error": str(e2),
+                    }
+            else:
+                logger.exception("Work LLM 调用失败（无 fallback 配置）")
+                return {
+                    "status": "done",
+                    "success": False,
+                    "answer": last_answer or "",
+                    "trace": trace,
+                    "error": str(e),
+                }
         except Exception as e:
             logger.exception("Work LLM 调用失败")
             return {"status": "done", "success": False, "answer": last_answer or "", "trace": trace, "error": str(e)}
@@ -127,7 +190,14 @@ async def run_work_flow(
 
         if not tool_calls:
             last_answer = content or last_answer
-            return {"status": "done", "success": True, "answer": last_answer or "", "trace": trace, "error": None}
+            return {
+                "status": "done",
+                "success": True,
+                "answer": last_answer or "",
+                "trace": trace,
+                "error": None,
+                "pending_quotation_draft": _extract_pending_quotation_draft_from_trace(trace),
+            }
 
         tool_calls_for_msg = []
         for i, tc in enumerate(tool_calls):
@@ -155,12 +225,19 @@ async def run_work_flow(
             if name == "work_quotation_match" and "customer_level" not in args:
                 args["customer_level"] = customer_level
             step_count += 1
+            # 在开始执行工具前推送阶段，便于前端进度条实时更新
+            if on_step:
+                try:
+                    on_step(step_count, name, args, "")
+                except Exception:
+                    pass
             try:
                 obs = await asyncio.to_thread(execute_work_tool_sync, name, args)
             except Exception as e:
                 logger.exception("Work 工具执行失败: %s", name)
                 obs = json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
-            if len(obs) > 16000:
+            # Keep match observation intact: downstream fill and draft extraction depend on valid full JSON.
+            if name != "work_quotation_match" and len(obs) > 16000:
                 obs = obs[:16000] + "\n…（已截断）"
             trace.append({"step": step + 1, "type": "tool_call", "name": name, "arguments": args})
             trace.append({"step": step + 1, "type": "observation", "content": obs})
@@ -201,12 +278,20 @@ async def run_work_flow(
                 except (json.JSONDecodeError, KeyError):
                     pass
 
+            if name == "work_quotation_fill":
+                # 一个文件的三步已全部完成，压缩历史 tool 结果
+                # 此时 fill 已经读取并使用了 match 结果，压缩安全不影响数据流
+                _id_to_name = build_tool_call_id_to_name(messages)
+                _summarizer = make_summarizer(_api_key, _base_url, "gpt-4o-mini")
+                _trim_context(messages, _WORK_CONTEXT_MAX_CHARS, _id_to_name, _summarizer)
+
     return {
         "status": "done",
         "success": True,
         "answer": last_answer or "",
         "trace": trace,
         "error": None,
+        "pending_quotation_draft": _extract_pending_quotation_draft_from_trace(trace),
     }
 
 
@@ -231,7 +316,26 @@ async def run_work_flow_resume(
     _base_url = state["_base_url"]
     _model = state["_model"]
     max_tokens = state["max_tokens"]
-    client = OpenAI(api_key=_api_key, base_url=_base_url)
+
+    # 重新构建主/备用 client（避免在长时间暂停后使用过期连接）
+    try:
+        from backend.config import Config
+
+        fb_api_key = getattr(Config, "FALLBACK_LLM_API_KEY", None)
+        fb_base_url = getattr(Config, "FALLBACK_LLM_BASE_URL", None)
+        fb_model = getattr(Config, "FALLBACK_LLM_MODEL", None)
+    except Exception:
+        fb_api_key = None
+        fb_base_url = None
+        fb_model = None
+
+    client = get_openai_client(api_key=_api_key, base_url=_base_url)
+    fb_client = (
+        get_openai_client(api_key=fb_api_key, base_url=fb_base_url)
+        if fb_api_key and fb_base_url and fb_model
+        else None
+    )
+    resolved_pending_draft: Optional[dict] = None
 
     for i in range(len(messages) - 1, -1, -1):
         if messages[i].get("role") == "tool":
@@ -240,6 +344,19 @@ async def run_work_flow_resume(
                 if parsed.get("needs_human_choice") and parsed.get("pending_choices"):
                     resolved = merge_work_pending_choices(parsed, selections)
                     messages[i] = {**messages[i], "content": json.dumps(resolved, ensure_ascii=False)}
+                    resolved_pending_draft = (
+                        resolved.get("pending_quotation_draft")
+                        if isinstance(resolved, dict) and isinstance(resolved.get("pending_quotation_draft"), dict)
+                        else None
+                    )
+                    # 让前端能从 trace 直接解析到合并后的可编辑草稿
+                    trace.append(
+                        {
+                            "step": step_start,
+                            "type": "observation",
+                            "content": json.dumps(resolved, ensure_ascii=False),
+                        }
+                    )
             except (json.JSONDecodeError, KeyError):
                 pass
             break
@@ -258,6 +375,31 @@ async def run_work_flow_resume(
         }
         try:
             resp = client.chat.completions.create(**kwargs)
+        except (openai.APITimeoutError, openai.APIConnectionError) as e:
+            if fb_client and fb_model:
+                logger.warning("Work resume 主模型调用超时，fallback 到备用模型: %s", fb_model)
+                fb_kwargs = {**kwargs, "model": fb_model}
+                try:
+                    resp = fb_client.chat.completions.create(**fb_kwargs)
+                    trace.append({"step": step + 1, "type": "fallback", "model": fb_model})
+                except Exception as e2:
+                    logger.exception("Work resume LLM fallback 调用失败")
+                    return {
+                        "status": "done",
+                        "success": False,
+                        "answer": last_answer or "",
+                        "trace": trace,
+                        "error": str(e2),
+                    }
+            else:
+                logger.exception("Work resume LLM 调用失败（无 fallback 配置）")
+                return {
+                    "status": "done",
+                    "success": False,
+                    "answer": last_answer or "",
+                    "trace": trace,
+                    "error": str(e),
+                }
         except Exception as e:
             logger.exception("Work resume LLM 调用失败")
             return {"status": "done", "success": False, "answer": last_answer or "", "trace": trace, "error": str(e)}
@@ -270,7 +412,15 @@ async def run_work_flow_resume(
             trace.append({"step": step + 1, "type": "response", "content": content})
         if not tool_calls:
             last_answer = content or last_answer
-            return {"status": "done", "success": True, "answer": last_answer or "", "trace": trace, "error": None}
+            return {
+                "status": "done",
+                "success": True,
+                "answer": last_answer or "",
+                "trace": trace,
+                "error": None,
+                "pending_quotation_draft": _extract_pending_quotation_draft_from_trace(trace)
+                or resolved_pending_draft,
+            }
         tool_calls_for_msg = []
         for j, tc in enumerate(tool_calls):
             name = getattr(tc.function, "name", "") or ""
@@ -296,7 +446,8 @@ async def run_work_flow_resume(
             except Exception as e:
                 logger.exception("Work 工具执行失败: %s", name)
                 obs = json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
-            if len(obs) > 16000:
+            # Keep match observation intact: downstream fill and draft extraction depend on valid full JSON.
+            if name != "work_quotation_match" and len(obs) > 16000:
                 obs = obs[:16000] + "\n…（已截断）"
             trace.append({"step": step + 1, "type": "tool_call", "name": name, "arguments": args})
             trace.append({"step": step + 1, "type": "observation", "content": obs})
@@ -321,4 +472,18 @@ async def run_work_flow_resume(
                         return {"status": "awaiting_choices", "run_id": new_run_id, "pending_choices": parsed["pending_choices"], "trace": trace}
                 except (json.JSONDecodeError, KeyError):
                     pass
-    return {"status": "done", "success": True, "answer": last_answer or "", "trace": trace, "error": None}
+
+            if name == "work_quotation_fill":
+                _id_to_name = build_tool_call_id_to_name(messages)
+                _summarizer = make_summarizer(_api_key, _base_url, "gpt-4o-mini")
+                _trim_context(messages, _WORK_CONTEXT_MAX_CHARS, _id_to_name, _summarizer)
+
+    return {
+        "status": "done",
+        "success": True,
+        "answer": last_answer or "",
+        "trace": trace,
+        "error": None,
+        "pending_quotation_draft": _extract_pending_quotation_draft_from_trace(trace)
+        or resolved_pending_draft,
+    }

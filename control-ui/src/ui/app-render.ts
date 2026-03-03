@@ -128,10 +128,10 @@ export function renderApp(state: AppViewState) {
           </button>
           <div class="brand">
             <div class="brand-logo">
-              <img src=${basePath ? `${basePath}/favicon.svg` : "/favicon.svg"} alt="Jagent" />
+              <img src=${basePath ? `${basePath}/favicon.svg` : "/favicon.svg"} alt="PT Vansting Agent" />
             </div>
             <div class="brand-text">
-              <div class="brand-title">JAGENT</div>
+              <div class="brand-title">PT VANSTING AGENT</div>
               <div class="brand-sub">Gateway Dashboard</div>
             </div>
           </div>

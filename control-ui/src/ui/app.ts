@@ -335,6 +335,7 @@ export class OpenClawApp extends LitElement {
   usageQueryDebounceTimer: number | null = null;
 
   @state() workFilePaths: string[] = [];
+  @state() workOriginalFileNamesByPath: Record<string, string> = {};
   @state() workRunning = false;
   /** 执行中时循环展示的阶段 0=识别表 1=查价格与库存 2=填表 */
   @state() workProgressStage = 0;
@@ -347,6 +348,8 @@ export class OpenClawApp extends LitElement {
   @state() workError: string | null = null;
   @state() workCustomerLevel = "B_QUOTE";
   @state() workDoRegisterOos = true;
+  @state() workPendingQuotationDraft: import("./controllers/work.js").PendingQuotationDraft | null = null;
+  @state() workQuotationDraftSaveStatus: import("./controllers/work.js").WorkQuotationDraftSaveStatus | null = null;
 
   @state() cronLoading = false;
   @state() cronJobs: CronJob[] = [];
@@ -432,8 +435,8 @@ export class OpenClawApp extends LitElement {
   protected updated(changed: Map<PropertyKey, unknown>) {
     if (changed.has("workRunning")) {
       if (this.workRunning) {
-        // 执行中不循环阶段，固定为“执行中”（由 view 用 -1 表示）
-        this.workProgressStage = -1;
+        // 初次执行从「识别表数据」开始；人工选择后 resume 时仍处于「查价格与库存」阶段
+        this.workProgressStage = this.workRunStatus === "awaiting_choices" ? 1 : 0;
         if (this._workProgressInterval != null) {
           clearInterval(this._workProgressInterval);
           this._workProgressInterval = null;
@@ -443,7 +446,7 @@ export class OpenClawApp extends LitElement {
           clearInterval(this._workProgressInterval);
           this._workProgressInterval = null;
         }
-        this.workProgressStage = 0;
+        this.workProgressStage = 2; // 结束时停在「填表」
       }
     }
     handleUpdated(this as unknown as Parameters<typeof handleUpdated>[0], changed);

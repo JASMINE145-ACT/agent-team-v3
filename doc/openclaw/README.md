@@ -6,7 +6,7 @@
 
 | 文件 | 作用 |
 |------|------|
-| **AGENTS.md** | Agent 身份与职责：统一业务助手（Jagent）、单主 Agent、六类技能范围。OpenClaw 会将其作为 Agent 身份/上下文注入。 |
+| **AGENTS.md** | Agent 身份与职责：统一业务助手（PT Vansting Agent）、单主 Agent、六类技能范围。OpenClaw 会将其作为 Agent 身份/上下文注入。 |
 | **TOOLS.md** | 工具选用说明：何时用哪个工具、澄清/无货两种途径/全部价格 4 次等规则，与 `backend/agent/agent.py` 中 `_SKILL_*` 对齐。 |
 
 ## 使用方式

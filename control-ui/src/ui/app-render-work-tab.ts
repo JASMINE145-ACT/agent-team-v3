@@ -1,7 +1,11 @@
 import { nothing } from "lit";
 import type { AppViewState } from "./app-view-state.ts";
-import { runWork, resumeWork } from "./controllers/work.ts";
+import { runWork, resumeWork, saveQuotationDraft } from "./controllers/work.ts";
 import { renderWork } from "./views/work.ts";
+
+function normalizePathKey(p: string): string {
+  return (p || "").trim().replace(/\\/g, "/").toLowerCase();
+}
 
 export function renderWorkTab(state: AppViewState) {
   if (state.tab !== "work") {
@@ -21,13 +25,30 @@ export function renderWorkTab(state: AppViewState) {
     workError: state.workError,
     workCustomerLevel: state.workCustomerLevel,
     workDoRegisterOos: state.workDoRegisterOos,
-    onAddFile: (filePath, _fileName) => {
+    workOriginalFileNamesByPath: state.workOriginalFileNamesByPath,
+    workPendingQuotationDraft: state.workPendingQuotationDraft,
+    workQuotationDraftSaveStatus: state.workQuotationDraftSaveStatus,
+    onAddFile: (filePath, fileName) => {
       if (!state.workFilePaths.includes(filePath)) {
         state.workFilePaths = [...state.workFilePaths, filePath];
       }
+      const key = normalizePathKey(filePath);
+      if (key) {
+        state.workOriginalFileNamesByPath = {
+          ...state.workOriginalFileNamesByPath,
+          [key]: (fileName || "").trim() || filePath.split(/[/\\]/).pop() || filePath,
+        };
+      }
     },
     onRemoveFile: (index) => {
+      const removedPath = state.workFilePaths[index] ?? "";
       state.workFilePaths = state.workFilePaths.filter((_, i) => i !== index);
+      const key = normalizePathKey(removedPath);
+      if (key && state.workOriginalFileNamesByPath[key] !== undefined) {
+        const next = { ...state.workOriginalFileNamesByPath };
+        delete next[key];
+        state.workOriginalFileNamesByPath = next;
+      }
     },
     onCustomerLevelChange: (level) => {
       state.workCustomerLevel = level;
@@ -40,5 +61,37 @@ export function renderWorkTab(state: AppViewState) {
       state.workSelections = { ...state.workSelections, [itemId]: selectedCode };
     },
     onResume: () => void resumeWork(state),
+    onQuotationLineChange: (rowIndex, field, value) => {
+      const draft = state.workPendingQuotationDraft;
+      if (!draft?.lines?.length || rowIndex < 0 || rowIndex >= draft.lines.length) return;
+      const lines = draft.lines.slice();
+      const line = { ...lines[rowIndex] };
+      if (field === "qty") {
+        const n = Number(value);
+        line.qty = Number.isFinite(n) ? n : 0;
+      } else if (field === "unit_price") {
+        const s = String(value ?? "").trim();
+        if (!s) {
+          line.unit_price = null;
+        } else {
+          const n = Number(s);
+          line.unit_price = Number.isFinite(n) ? n : null;
+        }
+      } else {
+        (line as Record<string, unknown>)[field] = value;
+      }
+      if (field === "qty" || field === "unit_price") {
+        const qty = Number(line.qty ?? 0);
+        const unitPrice = line.unit_price == null ? NaN : Number(line.unit_price);
+        line.amount = Number.isFinite(qty) && Number.isFinite(unitPrice) ? qty * unitPrice : null;
+      }
+      lines[rowIndex] = line;
+      state.workPendingQuotationDraft = { ...draft, lines };
+    },
+    onQuotationDraftSave: () => void saveQuotationDraft(state),
+    onQuotationDraftDismiss: () => {
+      state.workPendingQuotationDraft = null;
+      state.workQuotationDraftSaveStatus = null;
+    },
   });
 }

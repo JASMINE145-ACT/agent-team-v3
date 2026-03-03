@@ -8,6 +8,8 @@ python-multipart>=0.0.6
 
 # LLM
 openai>=1.50.0
+# 可选：LangSmith 追踪（Work/Chat 的 token 消耗与调用历程）
+langsmith>=0.2.0
 
 # 环境与工具
 python-dotenv>=1.0.0

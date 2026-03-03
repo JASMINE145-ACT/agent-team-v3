@@ -218,6 +218,7 @@ export type AppViewState = {
   usageLogFilterHasTools: boolean;
   usageLogFilterQuery: string;
   workFilePaths: string[];
+  workOriginalFileNamesByPath: Record<string, string>;
   workRunning: boolean;
   /** 0=识别表 1=查价格与库存 2=填表，执行中循环 */
   workProgressStage: number;
@@ -229,6 +230,8 @@ export type AppViewState = {
   workError: string | null;
   workCustomerLevel: string;
   workDoRegisterOos: boolean;
+  workPendingQuotationDraft: import("./controllers/work.js").PendingQuotationDraft | null;
+  workQuotationDraftSaveStatus: import("./controllers/work.js").WorkQuotationDraftSaveStatus | null;
   cronLoading: boolean;
   cronJobs: CronJob[];
   cronStatus: CronStatus | null;

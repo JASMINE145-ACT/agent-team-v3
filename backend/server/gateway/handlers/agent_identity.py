@@ -7,7 +7,7 @@ def handle_agent_identity_get(params: dict) -> dict:
     agent_id = (params.get("agentId") or "version3").strip() or "version3"
     return {
         "agentId": agent_id,
-        "name": "Jagent",
+        "name": "PT Vansting Agent",
         "avatar": "🤖",
         "emoji": "🤖",
     }

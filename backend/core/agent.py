@@ -10,8 +10,9 @@ import time
 import types as _types
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from openai import OpenAI
+import openai
 
+from backend.core.llm_client import get_openai_client
 from backend.core.registry import ToolRegistry
 from backend.core.extension import AgentExtension, ExtensionContext
 from backend.config import Config
@@ -123,8 +124,20 @@ class CoreAgent:
         extensions: List[AgentExtension],
         session_store: Optional[SessionStore] = None,
     ):
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        # 主模型 client
+        self.client = get_openai_client(api_key=api_key, base_url=base_url)
         self.model = model
+
+        # 备用模型（可选）：例如 GLM 超时时 fallback 到 gpt-4o-mini
+        fb_api_key = getattr(Config, "FALLBACK_LLM_API_KEY", None)
+        fb_base_url = getattr(Config, "FALLBACK_LLM_BASE_URL", None)
+        self._fallback_model = getattr(Config, "FALLBACK_LLM_MODEL", None)
+        self._fallback_client = (
+            get_openai_client(api_key=fb_api_key, base_url=fb_base_url)
+            if fb_api_key and fb_base_url and self._fallback_model
+            else None
+        )
+
         self._extensions = extensions
 
         if session_store is None:
@@ -234,6 +247,7 @@ class CoreAgent:
 
             step_usage = None
             if on_token is not None:
+                # 流式调用：先用主模型，若因网络/超时失败且配置了 fallback，则自动切到 fallback 模型重试一次
                 llm_task = asyncio.create_task(
                     asyncio.to_thread(_call_llm_streaming_sync, self.client, kwargs, on_token)
                 )
@@ -246,9 +260,34 @@ class CoreAgent:
                     if not llm_task.done():
                         llm_task.cancel()
                     raise
+                except (openai.APITimeoutError, openai.APIConnectionError):
+                    if self._fallback_client and self._fallback_model:
+                        logger.warning("主模型调用超时，fallback 到备用模型: %s", self._fallback_model)
+                        fb_kwargs: Dict[str, Any] = {**kwargs, "model": self._fallback_model}
+                        fb_task = asyncio.create_task(
+                            asyncio.to_thread(_call_llm_streaming_sync, self._fallback_client, fb_kwargs, on_token)
+                        )
+                        while not fb_task.done():
+                            _raise_if_cancelled()
+                            await asyncio.sleep(0.05)
+                        content, tool_calls, step_usage = await fb_task
+                        trace.append({"step": step + 1, "type": "fallback", "model": self._fallback_model})
+                    else:
+                        logger.exception("主模型调用失败（无 fallback 配置）")
+                        raise
             else:
                 _raise_if_cancelled()
-                resp = self.client.chat.completions.create(**kwargs)
+                try:
+                    resp = self.client.chat.completions.create(**kwargs)
+                except (openai.APITimeoutError, openai.APIConnectionError):
+                    if self._fallback_client and self._fallback_model:
+                        logger.warning("主模型调用超时，fallback 到备用模型: %s", self._fallback_model)
+                        fb_kwargs: Dict[str, Any] = {**kwargs, "model": self._fallback_model}
+                        resp = self._fallback_client.chat.completions.create(**fb_kwargs)
+                        trace.append({"step": step + 1, "type": "fallback", "model": self._fallback_model})
+                    else:
+                        logger.exception("主模型调用失败（无 fallback 配置）")
+                        raise
                 msg = resp.choices[0].message if resp.choices else None
                 if not msg:
                     break

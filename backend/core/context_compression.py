@@ -5,6 +5,9 @@ import re
 import logging
 from typing import Callable, Dict, List, Optional
 
+# 多轮对话总上下文上限（字符数），超出时压缩历史 tool 结果
+CONTEXT_MAX_CHARS = 8_000
+
 logger = logging.getLogger(__name__)
 
 SUMMARY_MAX_CHARS = 800
@@ -135,3 +138,32 @@ def make_summarizer(
             tool_name, content, max_chars, api_key, base_url, model, timeout
         )
     return fn
+
+
+def _trim_context(
+    messages: List[dict],
+    max_chars: int = CONTEXT_MAX_CHARS,
+    tool_call_id_to_name: Optional[Dict[str, str]] = None,
+    summarizer: Optional[Callable[[str, str], str]] = None,
+) -> None:
+    """
+    压缩历史 tool 结果（从最旧开始）直到总字符数 ≤ max_chars。
+    summarizer 为 None 时降级为「[已压缩，原长 N 字符]」占位。
+    """
+    total = sum(len(str(m.get("content") or "")) for m in messages)
+    if total <= max_chars:
+        return
+    id_to_name = tool_call_id_to_name or {}
+    for m in messages:
+        if m.get("role") == "tool":
+            orig = str(m.get("content") or "")
+            if len(orig) <= 200:
+                continue
+            if summarizer is not None:
+                tool_name = id_to_name.get(m.get("tool_call_id") or "", "")
+                m["content"] = summarizer(tool_name, orig)
+            else:
+                m["content"] = f"[已压缩，原长 {len(orig)} 字符]"
+            total -= len(orig) - len(m["content"])
+            if total <= max_chars:
+                break

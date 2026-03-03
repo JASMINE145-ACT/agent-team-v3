@@ -14,6 +14,9 @@ from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# 候选来源优先级：共同 > 历史报价 > 字段匹配
+_SOURCE_PRIORITY = {"共同": 0, "历史报价": 1, "字段匹配": 2}
+
 _table_agent = None
 _table_agent_lock = threading.Lock()
 
@@ -223,7 +226,10 @@ def match_price_and_get_inventory(
             except Exception as e:
                 logger.debug("并行查询之一失败: %s", e)
 
-    candidates = _merge_candidates_by_code(mapping_candidates, wanding_candidates)
+    candidates = sorted(
+        _merge_candidates_by_code(mapping_candidates, wanding_candidates),
+        key=lambda c: _SOURCE_PRIORITY.get(c.get("source", "字段匹配"), 2),
+    )[:10]
     r: Optional[dict[str, Any]] = None
 
     if not candidates:

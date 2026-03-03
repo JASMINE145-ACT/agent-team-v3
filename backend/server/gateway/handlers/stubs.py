@@ -30,8 +30,8 @@ STUB_RESPONSES = {
         "agents": [
             {
                 "id": "version3",
-                "name": "Jagent",
-                "identity": {"emoji": "🤖", "name": "Jagent"},
+                "name": "PT Vansting Agent",
+                "identity": {"emoji": "🤖", "name": "PT Vansting Agent"},
             }
         ],
     },

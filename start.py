@@ -1,5 +1,5 @@
 """
-一键启动 Jagent 前后端：在新窗口启动后端（API + 静态 UI），并自动打开浏览器。
+一键启动 PT Vansting Agent 前后端：在新窗口启动后端（API + 静态 UI），并自动打开浏览器。
 双击运行或命令行：python start.py
 
 本地开发：会清空 DATABASE_URL，强制用 SQLite（避免依赖 psycopg2）。
@@ -26,18 +26,24 @@ def main():
     # 云端（Render/Heroku 等）会注入 PORT；此时保留 DATABASE_URL，否则每次部署无货数据会丢
     on_cloud = "PORT" in os.environ
 
-    if sys.platform == "win32":
-        # 新开一个 cmd 窗口跑后端
-        if on_cloud:
-            cmd_str = f'start "Jagent Backend" cmd /k "cd /d \"{root}\" && python run_backend.py"'
-        else:
-            cmd_str = f'start "Jagent Backend" cmd /k "cd /d \"{root}\" && set DATABASE_URL= && python run_backend.py"'
-        subprocess.Popen(cmd_str, cwd=root, shell=True)
+    # 统一用 Python 直接起后端，避免 Windows 下 cmd 引号问题
+    if on_cloud:
+        env = os.environ.copy()  # 云端：保留 DATABASE_URL
     else:
-        if on_cloud:
-            env = os.environ.copy()  # 云端：保留 DATABASE_URL
-        else:
-            env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
+        # 本地开发：清掉 DATABASE_URL，强制用 SQLite
+        env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
+
+    if sys.platform == "win32":
+        # Windows 下在新控制台窗口中启动后端
+        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
+        subprocess.Popen(
+            [sys.executable, "run_backend.py"],
+            cwd=root,
+            env=env,
+            creationflags=creationflags,
+        )
+    else:
+        # 非 Windows：后台运行即可
         subprocess.Popen(
             [sys.executable, "run_backend.py"],
             cwd=root,

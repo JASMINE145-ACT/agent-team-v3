@@ -86,6 +86,41 @@ class UploadSession(Base):
     error_message = Column(String(2000), nullable=True)
 
 
+class QuotationDraftDB(Base):
+    """报价单主表（待确认报价单落库，报价员确认后写入）"""
+    __tablename__ = "quotation_drafts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    draft_no = Column(String(50), nullable=False, unique=True, index=True)
+    name = Column(String(500), nullable=False, index=True)  # Excel 文件名或「自然语言-{时间}」
+    source = Column(String(20), nullable=False, default='file')  # 'file' / 'nl'
+    file_path = Column(String(1000), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    status = Column(String(20), nullable=False, default='confirmed')  # draft / confirmed（落库即已确认）
+    confirmed_at = Column(DateTime, nullable=True)
+
+
+class QuotationDraftLineDB(Base):
+    """报价产品明细（每行一条）"""
+    __tablename__ = "quotation_draft_lines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    draft_id = Column(Integer, nullable=False, index=True)  # FK quotation_drafts.id
+    row_index = Column(Integer, nullable=False, default=0)
+    product_name = Column(String(500), nullable=True)
+    specification = Column(String(500), nullable=True)
+    qty = Column(Float, nullable=False, default=0)
+    code = Column(String(100), nullable=True)
+    quote_name = Column(String(500), nullable=True)
+    unit_price = Column(Float, nullable=True)
+    amount = Column(Float, nullable=True)
+    available_qty = Column(Float, nullable=True, default=0)
+    shortfall = Column(Float, nullable=True, default=0)
+    is_shortage = Column(Integer, nullable=False, default=0)  # 0/1
+    match_source = Column(String(100), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
 class DataService:
     """数据服务"""
 
@@ -112,9 +147,19 @@ class DataService:
                 Base.metadata.create_all(self.engine)
                 self.using_postgres = True
                 logger.info("Connected to Postgres successfully (OOS/Shortage)")
-            except OperationalError as e:
+            except (OperationalError, ModuleNotFoundError) as e:
                 logger.error(
-                    "Postgres unreachable, falling back to SQLite: %s",
+                    "Postgres unavailable (%s), falling back to SQLite: %s",
+                    type(e).__name__,
+                    e,
+                    exc_info=False,
+                )
+                self.engine = self._create_sqlite_engine()
+                Base.metadata.create_all(self.engine)
+                self.using_postgres = False
+            except Exception as e:
+                logger.error(
+                    "Postgres init failed unexpectedly, falling back to SQLite: %s",
                     e,
                     exc_info=False,
                 )
@@ -481,6 +526,202 @@ class DataService:
             return False
         except Exception as e:
             logger.error("Restore record failed: %s", e)
+            session.rollback()
+            return False
+        finally:
+            session.close()
+
+    # ---------- 报价记录（待确认报价单落库，报价员确认后写入） ----------
+
+    def _generate_draft_no(self, session: Session) -> str:
+        """生成唯一报价单编号 QT-{YYYYMMDD}-{序号}"""
+        today = datetime.now().strftime("%Y%m%d")
+        prefix = f"QT-{today}-"
+        if self.engine.dialect.name == "sqlite":
+            row = session.execute(
+                text(
+                    "SELECT draft_no FROM quotation_drafts WHERE draft_no LIKE :p ORDER BY id DESC LIMIT 1"
+                ),
+                {"p": f"{prefix}%"},
+            ).fetchone()
+            r = row[0] if row else None
+        else:
+            stmt = select(QuotationDraftDB.draft_no).where(
+                QuotationDraftDB.draft_no.like(f"{prefix}%")
+            ).order_by(QuotationDraftDB.id.desc()).limit(1)
+            row = session.execute(stmt).first()
+            r = row[0] if row else None
+        if r is None:
+            seq = 1
+        else:
+            try:
+                seq = int(str(r).split("-")[-1]) + 1
+            except (ValueError, IndexError):
+                seq = 1
+        return f"{prefix}{seq:04d}"
+
+    def insert_quotation_draft(
+        self,
+        name: str,
+        source: str = "file",
+        file_path: Optional[str] = None,
+        lines: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """
+        报价员确认后落库：写入 quotation_drafts + quotation_draft_lines，返回 draft_id, draft_no, created_at。
+        lines 每项含 product_name, specification, qty, code, quote_name, unit_price, amount?, available_qty, shortfall, is_shortage, match_source?
+        """
+        lines = lines or []
+        session = self.SessionLocal()
+        try:
+            draft_no = self._generate_draft_no(session)
+            now = datetime.now()
+            draft = QuotationDraftDB(
+                draft_no=draft_no,
+                name=(name or "").strip() or "未命名",
+                source=source.strip() or "file",
+                file_path=file_path,
+                created_at=now,
+                status="confirmed",
+                confirmed_at=now,
+            )
+            session.add(draft)
+            session.flush()
+            draft_id = draft.id
+            for i, line in enumerate(lines):
+                unit_price = line.get("unit_price")
+                qty = float(line.get("qty", 0) or 0)
+                amount = line.get("amount")
+                if amount is None and unit_price is not None and qty:
+                    amount = float(unit_price) * qty
+                ln = QuotationDraftLineDB(
+                    draft_id=draft_id,
+                    row_index=int(line.get("row_index", i)),
+                    product_name=str(line.get("product_name", ""))[:500] if line.get("product_name") else None,
+                    specification=str(line.get("specification", ""))[:500] if line.get("specification") else None,
+                    qty=qty,
+                    code=str(line.get("code", ""))[:100] if line.get("code") else None,
+                    quote_name=str(line.get("quote_name", ""))[:500] if line.get("quote_name") else None,
+                    unit_price=float(unit_price) if unit_price is not None else None,
+                    amount=float(amount) if amount is not None else None,
+                    available_qty=float(line.get("available_qty", 0) or 0),
+                    shortfall=float(line.get("shortfall", 0) or 0),
+                    is_shortage=1 if line.get("is_shortage") else 0,
+                    match_source=str(line.get("match_source", ""))[:100] if line.get("match_source") else None,
+                    created_at=now,
+                )
+                session.add(ln)
+            session.commit()
+            return {"draft_id": draft_id, "draft_no": draft_no, "created_at": now.isoformat()}
+        except Exception as e:
+            logger.error("insert_quotation_draft failed: %s", e, exc_info=True)
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_quotation_drafts(
+        self,
+        name_contains: Optional[str] = None,
+        status: Optional[str] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
+        limit: Optional[int] = 20,
+    ) -> List[Dict]:
+        """列表，支持按 name 模糊、status、created_at 区间筛选"""
+        session = self.SessionLocal()
+        try:
+            q = session.query(QuotationDraftDB).order_by(QuotationDraftDB.created_at.desc())
+            if name_contains:
+                q = q.filter(QuotationDraftDB.name.contains(name_contains))
+            if status:
+                q = q.filter(QuotationDraftDB.status == status)
+            if created_after:
+                q = q.filter(QuotationDraftDB.created_at >= created_after)
+            if created_before:
+                q = q.filter(QuotationDraftDB.created_at <= created_before)
+            if limit:
+                q = q.limit(limit)
+            rows = q.all()
+            out = []
+            for r in rows:
+                out.append({
+                    "id": r.id,
+                    "draft_no": r.draft_no,
+                    "name": r.name,
+                    "source": r.source,
+                    "file_path": r.file_path,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "status": r.status,
+                    "confirmed_at": r.confirmed_at.isoformat() if r.confirmed_at else None,
+                })
+            return out
+        finally:
+            session.close()
+
+    def get_quotation_draft_by_id(self, draft_id: int) -> Optional[Dict]:
+        """详情：主表 + 全部 lines"""
+        session = self.SessionLocal()
+        try:
+            draft = session.query(QuotationDraftDB).filter_by(id=draft_id).first()
+            if not draft:
+                return None
+            lines = session.query(QuotationDraftLineDB).filter_by(draft_id=draft_id).order_by(QuotationDraftLineDB.row_index).all()
+            return {
+                "id": draft.id,
+                "draft_no": draft.draft_no,
+                "name": draft.name,
+                "source": draft.source,
+                "file_path": draft.file_path,
+                "created_at": draft.created_at.isoformat() if draft.created_at else None,
+                "status": draft.status,
+                "confirmed_at": draft.confirmed_at.isoformat() if draft.confirmed_at else None,
+                "lines": [
+                    {
+                        "id": ln.id,
+                        "row_index": ln.row_index,
+                        "product_name": ln.product_name,
+                        "specification": ln.specification,
+                        "qty": ln.qty,
+                        "code": ln.code,
+                        "quote_name": ln.quote_name,
+                        "unit_price": ln.unit_price,
+                        "amount": ln.amount,
+                        "available_qty": ln.available_qty,
+                        "shortfall": ln.shortfall,
+                        "is_shortage": bool(ln.is_shortage),
+                        "match_source": ln.match_source,
+                    }
+                    for ln in lines
+                ],
+            }
+        finally:
+            session.close()
+
+    def get_quotation_draft_by_no(self, draft_no: str) -> Optional[Dict]:
+        """按 draft_no 查详情"""
+        session = self.SessionLocal()
+        try:
+            draft = session.query(QuotationDraftDB).filter_by(draft_no=(draft_no or "").strip()).first()
+            if not draft:
+                return None
+            return self.get_quotation_draft_by_id(draft.id)
+        finally:
+            session.close()
+
+    def confirm_quotation_draft(self, draft_id: int) -> bool:
+        """将 status 更新为 confirmed，confirmed_at 设为当前时间"""
+        session = self.SessionLocal()
+        try:
+            draft = session.query(QuotationDraftDB).filter_by(id=draft_id).first()
+            if not draft:
+                return False
+            draft.status = "confirmed"
+            draft.confirmed_at = datetime.now()
+            session.commit()
+            return True
+        except Exception as e:
+            logger.error("confirm_quotation_draft failed: %s", e)
             session.rollback()
             return False
         finally:

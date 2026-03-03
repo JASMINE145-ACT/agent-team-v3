@@ -322,6 +322,61 @@ def merge_work_pending_choices(match_result: dict[str, Any], selections: list[di
     out["fill_items_merged"] = fill_items_merged
     out.pop("needs_human_choice", None)
     out["pending_choices"] = []
+    # 为人工选择合并后的结果也构建 pending_quotation_draft，供前端编辑与落库
+    try:
+        draft_file_path: str | None = None
+        for pc in pending:
+            pid = str(pc.get("id") or "").strip()
+            if not pid:
+                continue
+            # id 格式约定为 "{file_path}|{row}"，从右侧切一次避免路径里偶发包含 '|'
+            path_part = pid.rsplit("|", 1)[0].strip() if "|" in pid else pid
+            if path_part:
+                draft_file_path = path_part
+                break
+        draft_name = Path(draft_file_path).name if draft_file_path else "未命名报价单"
+        items_by_row = {(it.get("row")): it for it in (out.get("items") or [])}
+        lines = []
+        for i, fi in enumerate(out.get("fill_items_merged") or []):
+            row = fi.get("row")
+            item = items_by_row.get(row) or {}
+            unit_price = fi.get("unit_price")
+            qty = float(fi.get("qty", 0) or 0)
+            amount = (float(unit_price) * qty) if unit_price is not None else None
+            code = fi.get("code") or ""
+            is_shortage = 1 if (code == "无货" or "库存不足" in (fi.get("quote_name") or "")) else 0
+            shortfall = 0.0
+            available_qty = 0.0
+            for s in (out.get("shortage") or []):
+                if s.get("row") == row:
+                    shortfall = float(s.get("shortfall", 0) or 0)
+                    available_qty = float(s.get("available_qty", 0) or 0)
+                    break
+            if not is_shortage and shortfall == 0 and available_qty == 0 and code and code != "无货":
+                available_qty = qty
+            lines.append({
+                "row_index": i,
+                "row": row,
+                "product_name": item.get("product_name") or "",
+                "specification": fi.get("specification") or item.get("specification") or "",
+                "qty": qty,
+                "code": code,
+                "quote_name": (fi.get("quote_name") or "").strip(),
+                "unit_price": unit_price,
+                "amount": amount,
+                "available_qty": available_qty,
+                "shortfall": shortfall,
+                "is_shortage": is_shortage,
+                "match_source": None,
+            })
+        out["pending_quotation_draft"] = {
+            "name": draft_name,
+            "file_path": draft_file_path,
+            "source": "file",
+            "lines": lines,
+        }
+    except Exception:
+        pass
     return out
 
 
@@ -383,6 +438,48 @@ def execute_work_tool_sync(name: str, arguments: dict[str, Any]) -> str:
                         ds.mark_email_sent_shortage(alert.get("product_key", ""))
             except Exception as e:
                 logger.debug("缺货记录落库或发信跳过: %s", e)
+        # 待确认报价单：供前端可编辑表格与「确认并保存」落库（不在此落库）
+        if out.get("success") and not out.get("needs_human_choice"):
+            items_by_row = {(it.get("row")): it for it in (out.get("items") or [])}
+            lines = []
+            for i, fi in enumerate(out.get("fill_items_merged") or []):
+                row = fi.get("row")
+                item = items_by_row.get(row) or {}
+                unit_price = fi.get("unit_price")
+                qty = float(fi.get("qty", 0) or 0)
+                amount = (float(unit_price) * qty) if unit_price is not None else None
+                code = fi.get("code") or ""
+                is_shortage = 1 if (code == "无货" or "库存不足" in (fi.get("quote_name") or "")) else 0
+                shortfall = 0.0
+                available_qty = 0.0
+                for s in (out.get("shortage") or []):
+                    if s.get("row") == row:
+                        shortfall = float(s.get("shortfall", 0) or 0)
+                        available_qty = float(s.get("available_qty", 0) or 0)
+                        break
+                if not is_shortage and shortfall == 0 and available_qty == 0 and code and code != "无货":
+                    available_qty = qty
+                lines.append({
+                    "row_index": i,
+                    "row": row,
+                    "product_name": item.get("product_name") or "",
+                    "specification": fi.get("specification") or item.get("specification") or "",
+                    "qty": qty,
+                    "code": code,
+                    "quote_name": (fi.get("quote_name") or "").strip(),
+                    "unit_price": unit_price,
+                    "amount": amount,
+                    "available_qty": available_qty,
+                    "shortfall": shortfall,
+                    "is_shortage": is_shortage,
+                    "match_source": None,
+                })
+            out["pending_quotation_draft"] = {
+                "name": Path(file_path).name if file_path else "未命名",
+                "file_path": file_path or None,
+                "source": "file",
+                "lines": lines,
+            }
         return json.dumps(out, ensure_ascii=False)
     if name == "work_quotation_fill":
         fill_items = args.get("fill_items") or []

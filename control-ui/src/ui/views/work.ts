@@ -28,6 +28,9 @@ export type WorkProps = WorkState & {
   onRun: () => void;
   onSelectionChange: (itemId: string, selectedCode: string) => void;
   onResume: () => void;
+  onQuotationLineChange: (rowIndex: number, field: string, value: unknown) => void;
+  onQuotationDraftSave: () => void;
+  onQuotationDraftDismiss: () => void;
 };
 
 function apiUrl(basePath: string, path: string): string {
@@ -167,6 +170,8 @@ export function renderWork(props: WorkProps) {
     workError,
     workCustomerLevel,
     workDoRegisterOos,
+    workPendingQuotationDraft,
+    workQuotationDraftSaveStatus,
     onAddFile,
     onRemoveFile,
     onCustomerLevelChange,
@@ -174,12 +179,12 @@ export function renderWork(props: WorkProps) {
     onRun,
     onSelectionChange,
     onResume,
+    onQuotationLineChange,
+    onQuotationDraftSave,
+    onQuotationDraftDismiss,
   } = props;
 
-  const handleFileInput = (e: Event) => {
-    const input = e.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
+  const uploadFile = (file: File) => {
     const url = apiUrl(basePath, "/api/quotation/upload");
     const form = new FormData();
     form.append("file", file);
@@ -191,7 +196,31 @@ export function renderWork(props: WorkProps) {
         }
       })
       .catch((err) => console.error("Work upload", err));
+  };
+
+  const handleFileInput = (e: Event) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    uploadFile(file);
     input.value = "";
+  };
+
+  const handleDrop = (e: DragEvent) => {
+    e.preventDefault();
+    const files = e.dataTransfer?.files;
+    if (!files || !files.length) return;
+    for (let i = 0; i < files.length; i += 1) {
+      const f = files.item(i);
+      if (f) uploadFile(f);
+    }
+  };
+
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "copy";
+    }
   };
 
   return html`
@@ -199,7 +228,12 @@ export function renderWork(props: WorkProps) {
       <div class="card-title" style="margin-bottom: 8px;">${t("tabs.work")}</div>
       <p class="muted" style="margin-bottom: 12px;">${t("subtitles.work")}</p>
 
-      <div style="margin-bottom: 12px;">
+      <div
+        style="margin-bottom: 12px; padding: 8px; border-radius: 8px; border: 1px dashed var(--border); background: var(--bg-secondary, #fafafa);"
+        @dragover=${handleDragOver}
+        @dragenter=${handleDragOver}
+        @drop=${handleDrop}
+      >
         <label class="card-title" style="font-size: 13px;">报价单文件（可多选）</label>
         <input
           type="file"
@@ -329,7 +363,113 @@ export function renderWork(props: WorkProps) {
         `
       : nothing}
 
-    ${workResult
+    ${workQuotationDraftSaveStatus?.status === "ok"
+      ? html`
+          <section class="card" style="margin-bottom: 16px;">
+            <p style="color: var(--success, #2e7d32); margin: 0 0 8px 0;">报价单已保存，编号：${workQuotationDraftSaveStatus.draft_no}</p>
+            <button class="btn btn-sm" @click=${onQuotationDraftDismiss}>关闭</button>
+          </section>
+        `
+      : workPendingQuotationDraft?.lines?.length
+        ? html`
+            <section class="card" style="margin-bottom: 16px;">
+              <div class="card-title">待确认报价单</div>
+              <p class="muted" style="margin-bottom: 10px;">请核对并修改下表，确认无误后点击「确认并保存」落库并生成编号。</p>
+              <div style="overflow-x: auto; margin-bottom: 12px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                  <thead>
+                    <tr style="background: var(--bg-secondary, #eee);">
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">序号</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">产品名称</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">规格</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">需求数量</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">物料编号</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">报价名称</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">单价</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">金额</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">可用库存</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">缺口</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">缺货</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${workPendingQuotationDraft.lines.map(
+                      (line, i) => html`
+                        <tr>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${i + 1}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.product_name ?? ""}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.specification ?? ""}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              .value=${String(line.qty ?? "")}
+                              @change=${(e: Event) => onQuotationLineChange(i, "qty", (e.target as HTMLInputElement).value)}
+                              style="width: 70px; padding: 4px; box-sizing: border-box;"
+                            />
+                          </td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">
+                            <input
+                              type="text"
+                              .value=${line.code ?? ""}
+                              @change=${(e: Event) => onQuotationLineChange(i, "code", (e.target as HTMLInputElement).value)}
+                              style="width: 90px; padding: 4px; box-sizing: border-box;"
+                            />
+                          </td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">
+                            <input
+                              type="text"
+                              .value=${line.quote_name ?? ""}
+                              @change=${(e: Event) => onQuotationLineChange(i, "quote_name", (e.target as HTMLInputElement).value)}
+                              style="width: 120px; padding: 4px; box-sizing: border-box;"
+                            />
+                          </td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              .value=${line.unit_price != null ? String(line.unit_price) : ""}
+                              @change=${(e: Event) => onQuotationLineChange(i, "unit_price", (e.target as HTMLInputElement).value)}
+                              style="width: 80px; padding: 4px; box-sizing: border-box;"
+                            />
+                          </td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.amount != null ? line.amount : ""}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.available_qty ?? ""}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.shortfall ?? ""}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.is_shortage ? "是" : "否"}</td>
+                        </tr>
+                      `,
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              ${workQuotationDraftSaveStatus?.status === "error"
+                ? html`<p style="color: var(--danger, #c00); margin-bottom: 10px;">${workQuotationDraftSaveStatus.error}</p>`
+                : nothing}
+              <div style="display: flex; gap: 8px;">
+                <button
+                  class="btn"
+                  style="background: var(--accent); color: var(--bg);"
+                  ?disabled=${workQuotationDraftSaveStatus?.status === "saving"}
+                  @click=${onQuotationDraftSave}
+                >
+                  ${workQuotationDraftSaveStatus?.status === "saving" ? "保存中…" : "确认并保存"}
+                </button>
+                <button
+                  class="btn btn-sm"
+                  ?disabled=${workQuotationDraftSaveStatus?.status === "saving"}
+                  @click=${onQuotationDraftDismiss}
+                >
+                  取消
+                </button>
+              </div>
+            </section>
+          `
+        : nothing}
+
+    ${workResult && !workPendingQuotationDraft?.lines?.length
       ? html`
           <section class="card">
             <div class="card-title">执行结果</div>
@@ -360,7 +500,7 @@ export function renderWork(props: WorkProps) {
             ${workResult.error ? html`<p style="color: var(--danger, #e53935);">${workResult.error}</p>` : nothing}
             ${workResult.trace?.length
               ? html`
-                  <details style="margin-top: 12px;" open>
+                  <details style="margin-top: 12px;">
                     <summary>步骤记录（${workResult.trace.length} 条）</summary>
                     <div style="max-height: 420px; overflow: auto; margin-top: 8px;">
                       ${(workResult.trace as Record<string, unknown>[]).map((entry, i) => renderTraceStep(entry, i))}
