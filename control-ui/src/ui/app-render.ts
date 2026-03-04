@@ -61,7 +61,9 @@ import { renderChannels } from "./views/channels.ts";
 import { renderBusinessKnowledge } from "./views/business-knowledge.ts";
 import { renderChat } from "./views/chat.ts";
 import { renderConfig } from "./views/config.ts";
+import { loadFulfillDraftDetail, confirmFulfillDraft } from "./controllers/fulfill.ts";
 import { renderCron } from "./views/cron.ts";
+import { renderFulfill } from "./views/fulfill.ts";
 import { renderDebug } from "./views/debug.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
@@ -325,29 +327,23 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "cron"
-            ? renderCron({
+            ? renderFulfill({
                 basePath: state.basePath,
-                loading: state.cronLoading,
-                status: state.cronStatus,
-                jobs: state.cronJobs,
-                error: state.cronError,
-                busy: state.cronBusy,
-                form: state.cronForm,
-                channels: state.channelsSnapshot?.channelMeta?.length
-                  ? state.channelsSnapshot.channelMeta.map((entry) => entry.id)
-                  : (state.channelsSnapshot?.channelOrder ?? []),
-                channelLabels: state.channelsSnapshot?.channelLabels ?? {},
-                channelMeta: state.channelsSnapshot?.channelMeta ?? [],
-                runsJobId: state.cronRunsJobId,
-                runs: state.cronRuns,
-                onFormChange: (patch) =>
-                  (state.cronForm = normalizeCronFormState({ ...state.cronForm, ...patch })),
-                onRefresh: () => state.loadCron(),
-                onAdd: () => addCronJob(state),
-                onToggle: (job, enabled) => toggleCronJob(state, job, enabled),
-                onRun: (job) => runCronJob(state, job),
-                onRemove: (job) => removeCronJob(state, job),
-                onLoadRuns: (jobId) => loadCronRuns(state, jobId),
+                loading: state.fulfillDraftsLoading,
+                error: state.fulfillDraftsError,
+                drafts: state.fulfillDrafts,
+                detail: state.fulfillDetail,
+                detailId: state.fulfillDetailId,
+                confirmBusy: state.fulfillConfirmBusy,
+                confirmResult: state.fulfillConfirmResult,
+                onRefresh: () => state.loadFulfillDrafts(),
+                onSelectDraft: (draftId) => loadFulfillDraftDetail(state, draftId),
+                onConfirm: (draftId) => confirmFulfillDraft(state, draftId),
+                onClearDetail: () => {
+                  state.fulfillDetail = null;
+                  state.fulfillDetailId = null;
+                  state.fulfillConfirmResult = null;
+                },
               })
             : nothing
         }

@@ -336,6 +336,7 @@ async def run_work_flow_resume(
         else None
     )
     resolved_pending_draft: Optional[dict] = None
+    applied_human_choices = False
 
     for i in range(len(messages) - 1, -1, -1):
         if messages[i].get("role") == "tool":
@@ -357,9 +358,22 @@ async def run_work_flow_resume(
                             "content": json.dumps(resolved, ensure_ascii=False),
                         }
                     )
+                    applied_human_choices = True
             except (json.JSONDecodeError, KeyError):
                 pass
             break
+
+    if applied_human_choices:
+        # 明确要求后续基于人工选择继续，避免模型再次重跑 match 覆盖用户决策。
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "人工选择已提交并已合并到上一条 work_quotation_match 结果。"
+                    "后续必须基于该结果继续执行，不要重算该文件的 work_quotation_match。"
+                ),
+            }
+        )
 
     last_answer = ""
     step_count = len([t for t in trace if t.get("type") == "tool_call"])

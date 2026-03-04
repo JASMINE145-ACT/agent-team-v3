@@ -39,6 +39,7 @@ import {
 import {
   applySettings as applySettingsInternal,
   loadCron as loadCronInternal,
+  loadFulfillDrafts as loadFulfillDraftsInternal,
   loadOverview as loadOverviewInternal,
   setTab as setTabInternal,
   setTheme as setThemeInternal,
@@ -360,6 +361,14 @@ export class OpenClawApp extends LitElement {
   @state() cronRuns: CronRunLogEntry[] = [];
   @state() cronBusy = false;
 
+  @state() fulfillDraftsLoading = false;
+  @state() fulfillDraftsError: string | null = null;
+  @state() fulfillDrafts: import("./types.js").QuotationDraftListItem[] = [];
+  @state() fulfillDetail: import("./types.js").QuotationDraftDetail | null = null;
+  @state() fulfillDetailId: number | null = null;
+  @state() fulfillConfirmBusy = false;
+  @state() fulfillConfirmResult: { order_id?: string; message?: string } | null = null;
+
   @state() skillsLoading = false;
   @state() skillsReport: SkillStatusReport | null = null;
   @state() skillsError: string | null = null;
@@ -513,6 +522,10 @@ export class OpenClawApp extends LitElement {
 
   async loadCron() {
     await loadCronInternal(this as unknown as Parameters<typeof loadCronInternal>[0]);
+  }
+
+  async loadFulfillDrafts() {
+    await loadFulfillDraftsInternal(this as unknown as Parameters<typeof loadFulfillDraftsInternal>[0]);
   }
 
   async handleAbortChat() {

@@ -185,6 +185,7 @@ def persist_out_of_stock_records(
     file_name: str,
     records: list[dict[str, Any]],
     sheet_name: str = "",
+    file_path: str = "",
 ) -> dict[str, Any]:
     """
     将无货记录写入持久化数据库，落库后展示在「无货产品列表」表。
@@ -226,6 +227,8 @@ def persist_out_of_stock_records(
                 note_parts = [file_name]
                 if row_sheet:
                     note_parts.append(f"sheet={row_sheet}")
+                if (file_path or "").strip():
+                    note_parts.append(f"file_path={file_path.strip()}")
                 insert_oos_record(
                     issue_type="oos",
                     product_name=product_name,
@@ -298,6 +301,7 @@ def get_quotation_tools_openai_format() -> list[dict]:
                     "type": "object",
                     "properties": {
                         "file_name": {"type": "string", "description": "原始 Excel 文件名，入库后显示在无货产品列表的 file_name 列"},
+                        "file_path": {"type": "string", "description": "可选：原始 Excel 完整路径，用于云端记录溯源"},
                         "sheet_name": {"type": "string", "description": "工作表名称（如「询价单」），入库后显示在 sheet_name 列；不传则为空"},
                         "records": {
                             "type": "array",
@@ -348,6 +352,7 @@ def _execute_quotation_tool_impl(name: str, arguments: dict[str, Any]) -> dict[s
             arguments.get("file_name", ""),
             recs,
             sheet_name=arguments.get("sheet_name", ""),
+            file_path=arguments.get("file_path", ""),
         )
         if out.get("success"):
             return {"success": True, "result": out.get("result", out)}

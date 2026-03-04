@@ -394,6 +394,40 @@ export type ShortageByTimeRow = {
   count?: number;
 };
 
+/** 成单页：待确认报价单列表项（GET /api/quotation-drafts 单条） */
+export type QuotationDraftListItem = {
+  id: number;
+  draft_no: string;
+  name: string;
+  source?: string;
+  file_path?: string | null;
+  created_at?: string | null;
+  status: string;
+  confirmed_at?: string | null;
+};
+
+/** 成单页：报价单明细行 */
+export type QuotationDraftLine = {
+  id?: number;
+  row_index?: number;
+  product_name?: string | null;
+  specification?: string | null;
+  qty: number;
+  code?: string | null;
+  quote_name?: string | null;
+  unit_price?: number | null;
+  amount?: number | null;
+  available_qty?: number | null;
+  shortfall?: number | null;
+  is_shortage?: boolean;
+  match_source?: string | null;
+};
+
+/** 成单页：报价单详情（主表 + lines） */
+export type QuotationDraftDetail = QuotationDraftListItem & {
+  lines: QuotationDraftLine[];
+};
+
 export type GatewaySessionsDefaults = {
   model: string | null;
   contextTokens: number | null;

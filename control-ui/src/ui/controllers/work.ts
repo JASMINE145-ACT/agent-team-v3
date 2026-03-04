@@ -208,7 +208,8 @@ function applyWorkRunResponse(state: WorkState, res: Response, json: Record<stri
     state.workPendingChoices = (json.pending_choices as WorkPendingChoice[]) ?? [];
     const sel: Record<string, string> = {};
     for (const p of state.workPendingChoices) {
-      if (p.options?.length) sel[p.id] = p.options[0].code;
+      // Work 模式默认“未选即无货”，只有用户显式选择候选 code 才覆盖。
+      sel[p.id] = "__OOS__";
     }
     state.workSelections = sel;
   } else {
@@ -317,7 +318,7 @@ export async function resumeWork(state: WorkState): Promise<void> {
   // Submit every item; empty or __OOS__ will be treated as out-of-stock by backend.
   const selections = state.workPendingChoices.map((p) => ({
     item_id: p.id,
-    selected_code: state.workSelections[p.id] ?? p.options?.[0]?.code ?? "__OOS__",
+    selected_code: state.workSelections[p.id] ?? "__OOS__",
   }));
   state.workRunning = true;
   state.workError = null;

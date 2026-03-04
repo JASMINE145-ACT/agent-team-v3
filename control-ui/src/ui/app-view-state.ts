@@ -24,6 +24,8 @@ import type {
   LogLevel,
   NostrProfile,
   PresenceEntry,
+  QuotationDraftDetail,
+  QuotationDraftListItem,
   SessionsUsageResult,
   CostUsageSummary,
   SessionUsageTimeSeries,
@@ -240,6 +242,13 @@ export type AppViewState = {
   cronRunsJobId: string | null;
   cronRuns: CronRunLogEntry[];
   cronBusy: boolean;
+  fulfillDraftsLoading: boolean;
+  fulfillDraftsError: string | null;
+  fulfillDrafts: QuotationDraftListItem[];
+  fulfillDetail: QuotationDraftDetail | null;
+  fulfillDetailId: number | null;
+  fulfillConfirmBusy: boolean;
+  fulfillConfirmResult: { order_id?: string; message?: string } | null;
   skillsLoading: boolean;
   skillsReport: SkillStatusReport | null;
   skillsError: string | null;
@@ -278,6 +287,7 @@ export type AppViewState = {
   loadOverview: () => Promise<void>;
   loadAssistantIdentity: () => Promise<void>;
   loadCron: () => Promise<void>;
+  loadFulfillDrafts: () => Promise<void>;
   handleWhatsAppStart: (force: boolean) => Promise<void>;
   handleWhatsAppWait: () => Promise<void>;
   handleWhatsAppLogout: () => Promise<void>;

@@ -582,8 +582,8 @@ class DataService:
                 source=source.strip() or "file",
                 file_path=file_path,
                 created_at=now,
-                status="confirmed",
-                confirmed_at=now,
+                status="pending",
+                confirmed_at=None,
             )
             session.add(draft)
             session.flush()
@@ -948,7 +948,13 @@ class DataService:
 
     # ---------- 缺货记录（与无货记录同一逻辑：按产品聚合、按文件/按时间） ----------
 
-    def insert_shortage_records(self, file_name: str, shortage_items: List[Dict], max_rows: int = 5000) -> tuple:
+    def insert_shortage_records(
+        self,
+        file_name: str,
+        shortage_items: List[Dict],
+        max_rows: int = 5000,
+        file_path: Optional[str] = None,
+    ) -> tuple:
         """
         批量写入缺货记录。shortage_items 每项含 product_name, specification, quantity, available_qty, shortfall, code, quote_name, unit_price。
         返回 (inserted_count, email_alerts)，email_alerts 为需发「缺货两次」提醒的列表，每项含 product_name, specification, product_key, count, file_name。
@@ -1000,6 +1006,8 @@ class DataService:
                 # 同步缺货记录到 Supabase（best effort，不影响本地 DB）
                 try:
                     note_parts = [name]
+                    if (file_path or "").strip():
+                        note_parts.append(f"file_path={str(file_path).strip()}")
                     if quote_name:
                         note_parts.append(f"quote={quote_name}")
                     note_parts.append(f"need={quantity}, avail={available_qty}, shortfall={shortfall}")

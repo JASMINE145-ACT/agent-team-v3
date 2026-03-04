@@ -609,13 +609,17 @@ async def quotation_drafts_get(draft_id: int) -> Dict[str, Any]:
 
 @router.patch("/api/quotation-drafts/{draft_id}/confirm")
 async def quotation_drafts_confirm(draft_id: int) -> Dict[str, Any]:
-    """将报价单 status 更新为 confirmed（若落库时已视为确认可不用此接口）。"""
+    """将报价单 status 更新为 confirmed，并执行成单闭环（转订单/写 ACCURATE/锁库存，当前占位）。"""
     try:
         ds = _get_oos_data_service()
         ok = ds.confirm_quotation_draft(draft_id)
         if not ok:
             raise HTTPException(status_code=404, detail="未找到该报价单")
-        return {"success": True}
+        draft = ds.get_quotation_draft_by_id(draft_id)
+        draft_no = (draft or {}).get("draft_no") or ""
+        from backend.server.services.fulfill import run_fulfill_loop
+        result = run_fulfill_loop(draft_id, draft_no)
+        return {"success": True, "data": result}
     except HTTPException:
         raise
     except Exception as e:

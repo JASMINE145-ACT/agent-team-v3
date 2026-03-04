@@ -220,6 +220,8 @@ def run_quotation_agent(file_path: str, question: str, file_name: str | None = N
                 tc_list.append((tid, name, args_str, args))
 
             def run_one(tid: str, name: str, args: dict) -> tuple[str, str]:
+                if name == "persist_out_of_stock_records" and not (args.get("file_path") or "").strip():
+                    args = {**args, "file_path": file_path}
                 result = execute_quotation_tool(name or "analyze_quotation_excel", args)
                 result_str = result.get("result", result)
                 if isinstance(result_str, dict):
@@ -266,6 +268,7 @@ def run_quotation_agent(file_path: str, question: str, file_name: str | None = N
                     "persist_out_of_stock_records",
                     {
                         "file_name": persist_payload["file_name"],
+                        "file_path": file_path,
                         "sheet_name": persist_payload.get("sheet_name", ""),
                         "records": persist_payload["records"],
                     },

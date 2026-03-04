@@ -318,7 +318,7 @@ function renderAgentTabs(active: AgentsPanel, onSelect: (panel: AgentsPanel) => 
     { id: "tools", label: "Tools" },
     { id: "skills", label: "Skills" },
     { id: "channels", label: "Channels" },
-    { id: "cron", label: "Cron Jobs" },
+    { id: "cron", label: "成单" },
   ];
   return html`
     <div class="agent-tabs">

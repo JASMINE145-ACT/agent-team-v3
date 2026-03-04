@@ -241,7 +241,25 @@ def merge_work_pending_choices(match_result: dict[str, Any], selections: list[di
         out.pop("needs_human_choice", None)
         out["pending_choices"] = []
         return out
-    sel_map = {str(s.get("item_id", "")).strip(): str(s.get("selected_code", "")).strip() for s in (selections or []) if s.get("item_id") is not None}
+    # 兼容不同前端/调用方字段：item_id|id + selected_code|code|selected|value
+    sel_map: dict[str, str] = {}
+    for s in (selections or []):
+        if not isinstance(s, dict):
+            continue
+        item_id = s.get("item_id")
+        if item_id is None:
+            item_id = s.get("id")
+        if item_id is None:
+            continue
+        selected_code = s.get("selected_code")
+        if selected_code in (None, ""):
+            selected_code = s.get("code")
+        if selected_code in (None, ""):
+            selected_code = s.get("selected")
+        if selected_code in (None, ""):
+            selected_code = s.get("value")
+        sel_map[str(item_id).strip()] = str(selected_code or "").strip()
+    oos_tokens = {PENDING_AS_OOS_CODE.upper(), "无货", "OOS"}
     to_fill = list(match_result.get("to_fill", []))
     shortage = list(match_result.get("shortage", []))
     unmatched = list(match_result.get("unmatched", []))
@@ -264,7 +282,7 @@ def merge_work_pending_choices(match_result: dict[str, Any], selections: list[di
         specification = pc.get("specification", "")
         product_name = pc.get("product_name", "")
         # 选不出来就无货：未选、选 __OOS__、或选的 code 不在 options 里 → 按无货
-        if not code or code.upper() == PENDING_AS_OOS_CODE:
+        if not code or code.upper() in oos_tokens:
             unmatched.append({"row": row, "product_name": product_name, "specification": specification, "qty": qty})
             fill_items_merged.append({
                 "row": row,
@@ -426,6 +444,7 @@ def execute_work_tool_sync(name: str, arguments: dict[str, Any]) -> str:
                 inserted, email_alerts = ds.insert_shortage_records(
                     file_name,
                     [{"product_name": s.get("product_name"), "specification": s.get("specification"), "quantity": s.get("qty"), "available_qty": s.get("available_qty"), "shortfall": s.get("shortfall"), "code": s.get("code"), "quote_name": s.get("quote_name"), "unit_price": s.get("unit_price")} for s in shortage_list],
+                    file_path=file_path,
                 )
                 for alert in email_alerts:
                     if send_shortage_alert(

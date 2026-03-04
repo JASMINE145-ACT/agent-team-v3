@@ -241,18 +241,24 @@ def match_price_and_get_inventory(
         r = {"code": c.get("code", ""), "matched_name": c.get("matched_name", ""), "unit_price": float(c.get("unit_price", 0) or 0), "match_source": c.get("source", "共同")}
     else:
         best = llm_select_best(keywords, candidates)
-        if best is not None:
-            if best.get("_suggestions") and allow_suggestions_for_work:
+        if best is None:
+            # LLM 明确判定「无匹配」时，必须按无货处理，不能回退到第一候选。
+            return None
+        if best.get("_suggestions"):
+            if allow_suggestions_for_work:
                 options = best.get("options", [])
                 for opt in options:
                     opt["source"] = source_by_code.get(opt.get("code", ""), "共同")
                 return {"_needs_human_choice": True, "keywords": keywords, "options": options}
-            if not best.get("_suggestions"):
-                r = {"code": best.get("code", ""), "matched_name": best.get("matched_name", ""), "unit_price": best.get("unit_price", 0), "match_source": source_by_code.get(best.get("code", ""), "共同")}
-        if r is None:
-            c = candidates[0]
-            r = {"code": c.get("code", ""), "matched_name": c.get("matched_name", ""), "unit_price": float(c.get("unit_price", 0) or 0), "match_source": c.get("source", "共同")}
-    if not r:
+            # 非 Work 场景下也不要强行回退第一候选，避免误匹配。
+            return None
+        r = {
+            "code": best.get("code", ""),
+            "matched_name": best.get("matched_name", ""),
+            "unit_price": best.get("unit_price", 0),
+            "match_source": source_by_code.get(best.get("code", ""), "共同"),
+        }
+    if not r or not r.get("code"):
         return None
     # 历史匹配得到的 r 可能 unit_price=0（映射表无价格），用 code 去万鼎表补全
     if (r.get("unit_price") or 0) == 0 and r.get("code"):

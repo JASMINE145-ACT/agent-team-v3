@@ -338,7 +338,7 @@ export function renderWork(props: WorkProps) {
                     </div>
                     <select
                       style="width: 100%; max-width: 400px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 13px;"
-                      .value=${workSelections[item.id] ?? item.options?.[0]?.code ?? ""}
+                      .value=${workSelections[item.id] ?? "__OOS__"}
                       @change=${(e: Event) => onSelectionChange(item.id, (e.target as HTMLSelectElement).value)}
                     >
                       <option value="__OOS__">按无货</option>
