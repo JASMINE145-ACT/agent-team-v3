@@ -249,6 +249,12 @@ export type AppViewState = {
   fulfillDetailId: number | null;
   fulfillConfirmBusy: boolean;
   fulfillConfirmResult: { order_id?: string; message?: string } | null;
+  procurementLoading: boolean;
+  procurementError: string | null;
+  procurementSuggestions: import("./types.js").ShortageRecord[];
+  procurementApproveBusy: boolean;
+  procurementApproveResult: { approved_count?: number; message?: string } | null;
+  loadProcurementSuggestions: () => Promise<void>;
   skillsLoading: boolean;
   skillsReport: SkillStatusReport | null;
   skillsError: string | null;

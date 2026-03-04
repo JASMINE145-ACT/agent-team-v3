@@ -370,7 +370,11 @@ def merge_work_pending_choices(match_result: dict[str, Any], selections: list[di
                     shortfall = float(s.get("shortfall", 0) or 0)
                     available_qty = float(s.get("available_qty", 0) or 0)
                     break
-            if not is_shortage and shortfall == 0 and available_qty == 0 and code and code != "无货":
+            if code == "无货":
+                # 无货行：可用库存 0，缺口 = 需求数量，便于明细与无货登记一致
+                available_qty = 0.0
+                shortfall = qty
+            elif not is_shortage and shortfall == 0 and available_qty == 0 and code:
                 available_qty = qty
             lines.append({
                 "row_index": i,
@@ -476,7 +480,10 @@ def execute_work_tool_sync(name: str, arguments: dict[str, Any]) -> str:
                         shortfall = float(s.get("shortfall", 0) or 0)
                         available_qty = float(s.get("available_qty", 0) or 0)
                         break
-                if not is_shortage and shortfall == 0 and available_qty == 0 and code and code != "无货":
+                if code == "无货":
+                    available_qty = 0.0
+                    shortfall = qty
+                elif not is_shortage and shortfall == 0 and available_qty == 0 and code:
                     available_qty = qty
                 lines.append({
                     "row_index": i,

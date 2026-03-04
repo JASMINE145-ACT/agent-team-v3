@@ -62,8 +62,10 @@ import { renderBusinessKnowledge } from "./views/business-knowledge.ts";
 import { renderChat } from "./views/chat.ts";
 import { renderConfig } from "./views/config.ts";
 import { loadFulfillDraftDetail, confirmFulfillDraft } from "./controllers/fulfill.ts";
+import { loadProcurementSuggestions, approveProcurement } from "./controllers/procurement.ts";
 import { renderCron } from "./views/cron.ts";
 import { renderFulfill } from "./views/fulfill.ts";
+import { renderProcurement } from "./views/procurement.ts";
 import { renderDebug } from "./views/debug.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
@@ -301,24 +303,21 @@ export function renderApp(state: AppViewState) {
 
         ${
           state.tab === "sessions"
-            ? renderSessions({
-                loading: state.sessionsLoading,
-                result: state.sessionsResult,
-                error: state.sessionsError,
-                activeMinutes: state.sessionsFilterActive,
-                limit: state.sessionsFilterLimit,
-                includeGlobal: state.sessionsIncludeGlobal,
-                includeUnknown: state.sessionsIncludeUnknown,
+            ? renderProcurement({
                 basePath: state.basePath,
-                onFiltersChange: (next) => {
-                  state.sessionsFilterActive = next.activeMinutes;
-                  state.sessionsFilterLimit = next.limit;
-                  state.sessionsIncludeGlobal = next.includeGlobal;
-                  state.sessionsIncludeUnknown = next.includeUnknown;
-                },
-                onRefresh: () => loadSessions(state),
-                onPatch: (key, patch) => patchSession(state, key, patch),
-                onDelete: (key) => deleteSessionAndRefresh(state, key),
+                loading: state.procurementLoading,
+                error: state.procurementError,
+                suggestions: state.procurementSuggestions,
+                approveBusy: state.procurementApproveBusy,
+                approveResult: state.procurementApproveResult,
+                onRefresh: () => state.loadProcurementSuggestions(),
+                onApprove: (item) => approveProcurement(state, [{
+                  product_key: item.product_key,
+                  product_name: item.product_name,
+                  specification: item.specification,
+                  shortfall: item.shortfall,
+                  code: item.code,
+                }]),
               })
             : nothing
         }

@@ -15,6 +15,7 @@ import { loadChannels } from "./controllers/channels.ts";
 import { loadConfig, loadConfigSchema } from "./controllers/config.ts";
 import { loadCronJobs, loadCronStatus } from "./controllers/cron.ts";
 import { loadFulfillDrafts as loadFulfillDraftsFromController } from "./controllers/fulfill.ts";
+import { loadProcurementSuggestions as loadProcurementSuggestionsFromController } from "./controllers/procurement.ts";
 import { loadDebug } from "./controllers/debug.ts";
 import { loadDevices } from "./controllers/devices.ts";
 import { loadExecApprovals } from "./controllers/exec-approvals.ts";
@@ -212,7 +213,7 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadShortage(state);
   }
   if (host.tab === "sessions") {
-    await loadSessions(host as unknown as OpenClawApp);
+    await loadProcurementSuggestionsFromController(host as unknown as Parameters<typeof loadProcurementSuggestionsFromController>[0]);
   }
   if (host.tab === "cron") {
     await loadFulfillDraftsFromController(host as unknown as Parameters<typeof loadFulfillDraftsFromController>[0]);
@@ -453,4 +454,8 @@ export async function loadCron(host: SettingsHost) {
 
 export async function loadFulfillDrafts(host: SettingsHost) {
   await loadFulfillDraftsFromController(host as unknown as Parameters<typeof loadFulfillDraftsFromController>[0]);
+}
+
+export async function loadProcurementSuggestions(host: SettingsHost) {
+  await loadProcurementSuggestionsFromController(host as unknown as Parameters<typeof loadProcurementSuggestionsFromController>[0]);
 }

@@ -15,6 +15,7 @@ from typing import List, Optional
 
 from backend.tools.oos.config import (
     EMAIL_RECIPIENTS,
+    PROCUREMENT_EMAIL_RECIPIENTS,
     EMAIL_SMTP_HOST,
     EMAIL_SMTP_PORT,
     EMAIL_FROM,
@@ -26,6 +27,13 @@ from backend.tools.oos.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _recipients_for_procurement() -> List[str]:
+    """采购通知收件人：优先 PROCUREMENT_EMAIL_RECIPIENTS，否则 EMAIL_RECIPIENTS。"""
+    if PROCUREMENT_EMAIL_RECIPIENTS and any(r and r.strip() for r in PROCUREMENT_EMAIL_RECIPIENTS):
+        return [e.strip() for e in PROCUREMENT_EMAIL_RECIPIENTS if e and e.strip()]
+    return [e.strip() for e in (EMAIL_RECIPIENTS or []) if e and e.strip()]
 
 
 def _is_gmail_configured() -> bool:
@@ -181,4 +189,41 @@ def send_shortage_alert(
     ok = _send_mail(subject, body, EMAIL_RECIPIENTS)
     if ok:
         logger.info("Shortage alert email sent: product_key=%s count=%s", product_key, count)
+    return ok
+
+
+def send_procurement_approval_email(recipients: Optional[List[str]] = None, items: Optional[List[dict]] = None) -> bool:
+    """
+    发送采购批准通知邮件：列出批准项（品名、规格、建议数量、物料编号）。
+    收件人默认使用 PROCUREMENT_EMAIL_RECIPIENTS 或 EMAIL_RECIPIENTS。
+    未配置邮箱时返回 False，不抛错。
+    """
+    to_list = recipients or _recipients_for_procurement()
+    if not to_list:
+        logger.debug("No procurement email recipients configured, skip sending.")
+        return False
+    # 发信能力仍用原有 is_email_configured（基于 EMAIL_RECIPIENTS + Gmail/SMTP）
+    if not is_email_configured():
+        logger.debug("Email not configured, skip procurement approval email.")
+        return False
+    items = items or []
+    lines = []
+    for i, it in enumerate(items, 1):
+        name = (it.get("product_name") or "").strip() or "—"
+        spec = (it.get("specification") or "").strip() or "—"
+        qty = it.get("shortfall") or it.get("suggested_qty") or 0
+        code = (it.get("code") or "").strip() or "—"
+        lines.append(f"  {i}. {name} | 规格: {spec} | 建议数量: {qty} | 物料编号: {code}")
+    body_table = "\n".join(lines) if lines else "  （无明细）"
+    subject = "【采购批准通知】已批准采购建议，请跟进"
+    body = f"""您好，
+
+以下采购建议已批准并落库，请安排采购：
+
+{body_table}
+
+本邮件由采购闭环系统自动发送。"""
+    ok = _send_mail(subject, body, to_list)
+    if ok:
+        logger.info("Procurement approval email sent to %d recipient(s), %d item(s).", len(to_list), len(items))
     return ok

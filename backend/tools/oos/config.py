@@ -57,6 +57,10 @@ GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID", "").strip() or None
 GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET", "").strip() or None
 # 方式二：SMTP（任意邮箱，含 Gmail 需用应用专用密码）
 EMAIL_RECIPIENTS = os.getenv("EMAIL_RECIPIENTS", "").split(",") if os.getenv("EMAIL_RECIPIENTS") else []
+# 采购批准通知收件人（未配置时使用 EMAIL_RECIPIENTS）
+PROCUREMENT_EMAIL_RECIPIENTS = [
+    e.strip() for e in (os.getenv("PROCUREMENT_EMAIL_RECIPIENTS") or "").split(",") if e and e.strip()
+] or EMAIL_RECIPIENTS
 EMAIL_SMTP_HOST = os.getenv("EMAIL_SMTP_HOST")
 EMAIL_SMTP_PORT = os.getenv("EMAIL_SMTP_PORT", "587")
 EMAIL_FROM = os.getenv("EMAIL_FROM")

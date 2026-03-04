@@ -121,6 +121,59 @@ class QuotationDraftLineDB(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.now)
 
 
+class OrderDB(Base):
+    """成单主表（由报价单确认生成）"""
+    __tablename__ = "orders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    order_no = Column(String(50), nullable=False, unique=True, index=True)
+    draft_id = Column(Integer, nullable=False, index=True)  # FK quotation_drafts.id
+    name = Column(String(500), nullable=False, index=True)
+    source = Column(String(20), nullable=False, default="file")
+    file_path = Column(String(1000), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    confirmed_at = Column(DateTime, nullable=False, default=datetime.now)
+    status = Column(String(20), nullable=False, default="confirmed")
+    total_amount = Column(Float, nullable=True)
+
+
+class OrderLineDB(Base):
+    """成单产品明细（每行一条）"""
+    __tablename__ = "order_lines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    order_id = Column(Integer, nullable=False, index=True)  # FK orders.id
+    row_index = Column(Integer, nullable=False, default=0)
+    product_name = Column(String(500), nullable=True)
+    specification = Column(String(500), nullable=True)
+    qty = Column(Float, nullable=False, default=0)
+    code = Column(String(100), nullable=True)
+    quote_name = Column(String(500), nullable=True)
+    unit_price = Column(Float, nullable=True)
+    amount = Column(Float, nullable=True)
+    available_qty = Column(Float, nullable=True, default=0)
+    shortfall = Column(Float, nullable=True, default=0)
+    is_shortage = Column(Integer, nullable=False, default=0)  # 0/1
+    match_source = Column(String(100), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
+class ProcurementApprovalDB(Base):
+    """采购批准表（基于缺货生成采购建议，人工批准后落库并通知采购员）"""
+    __tablename__ = "procurement_approvals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_key = Column(String(1000), nullable=False, index=True)
+    product_name = Column(String(500), nullable=False)
+    specification = Column(String(500), nullable=True)
+    suggested_qty = Column(Float, nullable=False, default=0)  # shortfall 建议采购量
+    code = Column(String(100), nullable=True)
+    approved_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    status = Column(String(20), nullable=False, default="approved")
+    email_sent_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+
+
 class DataService:
     """数据服务"""
 
@@ -560,6 +613,33 @@ class DataService:
                 seq = 1
         return f"{prefix}{seq:04d}"
 
+    def _generate_order_no(self, session: Session) -> str:
+        """生成唯一订单编号 SO-{YYYYMMDD}-{序号}"""
+        today = datetime.now().strftime("%Y%m%d")
+        prefix = f"SO-{today}-"
+        if self.engine.dialect.name == "sqlite":
+            row = session.execute(
+                text(
+                    "SELECT order_no FROM orders WHERE order_no LIKE :p ORDER BY id DESC LIMIT 1"
+                ),
+                {"p": f"{prefix}%"},
+            ).fetchone()
+            r = row[0] if row else None
+        else:
+            stmt = select(OrderDB.order_no).where(
+                OrderDB.order_no.like(f"{prefix}%")
+            ).order_by(OrderDB.id.desc()).limit(1)
+            row = session.execute(stmt).first()
+            r = row[0] if row else None
+        if r is None:
+            seq = 1
+        else:
+            try:
+                seq = int(str(r).split("-")[-1]) + 1
+            except (ValueError, IndexError):
+                seq = 1
+        return f"{prefix}{seq:04d}"
+
     def insert_quotation_draft(
         self,
         name: str,
@@ -724,6 +804,78 @@ class DataService:
             logger.error("confirm_quotation_draft failed: %s", e)
             session.rollback()
             return False
+        finally:
+            session.close()
+
+    def create_order_from_draft(self, draft_id: int) -> Optional[Dict]:
+        """
+        根据报价单生成成单记录：写入 orders + order_lines。
+
+        Returns:
+            dict: { "order_id": int, "order_no": str, "total_amount": float } 或 None（未找到报价单）
+        """
+        session = self.SessionLocal()
+        try:
+            draft = session.query(QuotationDraftDB).filter_by(id=draft_id).first()
+            if not draft:
+                return None
+            lines = (
+                session.query(QuotationDraftLineDB)
+                .filter_by(draft_id=draft_id)
+                .order_by(QuotationDraftLineDB.row_index)
+                .all()
+            )
+            order_no = self._generate_order_no(session)
+            now = datetime.now()
+            total_amount = 0.0
+            for ln in lines:
+                if ln.amount is not None:
+                    try:
+                        total_amount += float(ln.amount)
+                    except (TypeError, ValueError):
+                        continue
+            order = OrderDB(
+                order_no=order_no,
+                draft_id=draft.id,
+                name=draft.name,
+                source=draft.source,
+                file_path=draft.file_path,
+                created_at=now,
+                confirmed_at=now,
+                status="confirmed",
+                total_amount=total_amount or None,
+            )
+            session.add(order)
+            session.flush()
+            order_id = order.id
+            for ln in lines:
+                ol = OrderLineDB(
+                    order_id=order_id,
+                    row_index=ln.row_index,
+                    product_name=ln.product_name,
+                    specification=ln.specification,
+                    qty=ln.qty,
+                    code=ln.code,
+                    quote_name=ln.quote_name,
+                    unit_price=ln.unit_price,
+                    amount=ln.amount,
+                    available_qty=ln.available_qty,
+                    shortfall=ln.shortfall,
+                    is_shortage=ln.is_shortage,
+                    match_source=ln.match_source,
+                    created_at=now,
+                )
+                session.add(ol)
+            session.commit()
+            return {
+                "order_id": order_id,
+                "order_no": order_no,
+                "total_amount": total_amount,
+            }
+        except Exception as e:
+            logger.error("create_order_from_draft failed: %s", e, exc_info=True)
+            session.rollback()
+            return None
         finally:
             session.close()
 
@@ -1186,3 +1338,97 @@ class DataService:
             "email_status": getattr(record, "email_status", "pending"),
             "email_sent_count": getattr(record, "email_sent_count", 0),
         }
+
+    # ---------- 采购批准（基于缺货生成采购建议，批准后落库并通知采购员） ----------
+
+    def insert_procurement_approvals(self, items: List[Dict]) -> tuple:
+        """
+        批量写入采购批准记录。items 每项含 product_key, product_name, specification, shortfall, code。
+        返回 (写入条数, 新插入的 id 列表)。
+        """
+        if not items:
+            return (0, [])
+        session = self.SessionLocal()
+        inserted_ids: List[int] = []
+        try:
+            now = datetime.now()
+            for item in items:
+                product_key = (item.get("product_key") or "").strip()
+                product_name = (item.get("product_name") or "").strip()
+                if not product_key and not product_name:
+                    continue
+                if not product_key and product_name:
+                    product_key = self._generate_product_key(
+                        product_name,
+                        (item.get("specification") or "").strip() or None,
+                    )
+                suggested_qty = float(item.get("shortfall", 0) or 0)
+                code = (item.get("code") or "").strip() or None
+                specification = (item.get("specification") or "").strip() or None
+                record = ProcurementApprovalDB(
+                    product_key=product_key,
+                    product_name=product_name,
+                    specification=specification,
+                    suggested_qty=suggested_qty,
+                    code=code,
+                    approved_at=now,
+                    status="approved",
+                    email_sent_at=None,
+                    created_at=now,
+                )
+                session.add(record)
+                session.flush()
+                inserted_ids.append(record.id)
+            session.commit()
+            return (len(inserted_ids), inserted_ids)
+        except Exception as e:
+            logger.exception("insert_procurement_approvals failed: %s", e)
+            session.rollback()
+            return (0, [])
+        finally:
+            session.close()
+
+    def mark_procurement_email_sent(self, record_ids: List[int]) -> None:
+        """标记指定采购批准记录已发邮件。"""
+        if not record_ids:
+            return
+        session = self.SessionLocal()
+        try:
+            now = datetime.now()
+            session.query(ProcurementApprovalDB).filter(
+                ProcurementApprovalDB.id.in_(record_ids)
+            ).update({"email_sent_at": now}, synchronize_session=False)
+            session.commit()
+        except Exception as e:
+            logger.warning("mark_procurement_email_sent failed: %s", e)
+            session.rollback()
+        finally:
+            session.close()
+
+    def get_procurement_approved(self, limit: Optional[int] = 20) -> List[Dict]:
+        """已批准采购列表，按批准时间倒序。"""
+        session = self.SessionLocal()
+        try:
+            q = session.query(ProcurementApprovalDB).order_by(
+                ProcurementApprovalDB.approved_at.desc()
+            )
+            if limit:
+                q = q.limit(limit)
+            rows = q.all()
+            return [
+                {
+                    "id": r.id,
+                    "product_key": r.product_key,
+                    "product_name": r.product_name,
+                    "specification": r.specification,
+                    "suggested_qty": r.suggested_qty,
+                    "code": r.code,
+                    "approved_at": r.approved_at.isoformat() if r.approved_at else None,
+                    "status": r.status,
+                    "email_sent_at": r.email_sent_at.isoformat() if r.email_sent_at else None,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
+        finally:
+            session.close()

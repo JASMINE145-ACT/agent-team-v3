@@ -40,6 +40,7 @@ import {
   applySettings as applySettingsInternal,
   loadCron as loadCronInternal,
   loadFulfillDrafts as loadFulfillDraftsInternal,
+  loadProcurementSuggestions as loadProcurementSuggestionsInternal,
   loadOverview as loadOverviewInternal,
   setTab as setTabInternal,
   setTheme as setThemeInternal,
@@ -369,6 +370,12 @@ export class OpenClawApp extends LitElement {
   @state() fulfillConfirmBusy = false;
   @state() fulfillConfirmResult: { order_id?: string; message?: string } | null = null;
 
+  @state() procurementLoading = false;
+  @state() procurementError: string | null = null;
+  @state() procurementSuggestions: import("./types.js").ShortageRecord[] = [];
+  @state() procurementApproveBusy = false;
+  @state() procurementApproveResult: { approved_count?: number; message?: string } | null = null;
+
   @state() skillsLoading = false;
   @state() skillsReport: SkillStatusReport | null = null;
   @state() skillsError: string | null = null;
@@ -526,6 +533,10 @@ export class OpenClawApp extends LitElement {
 
   async loadFulfillDrafts() {
     await loadFulfillDraftsInternal(this as unknown as Parameters<typeof loadFulfillDraftsInternal>[0]);
+  }
+
+  async loadProcurementSuggestions() {
+    await loadProcurementSuggestionsInternal(this as unknown as Parameters<typeof loadProcurementSuggestionsInternal>[0]);
   }
 
   async handleAbortChat() {
