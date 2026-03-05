@@ -2,7 +2,7 @@ import { html, nothing } from "lit";
 import { t } from "../../i18n/index.ts";
 import type { WorkState, WorkPendingChoice } from "../controllers/work.ts";
 
-/** 价格档位：value 与后端一致，label 与价格库表头全名一致 */
+/** 价格档位：value 与后端一致，label 与价格库表头/业务一致（中文） */
 const PRICE_LEVEL_OPTIONS: { value: string; label: string }[] = [
   { value: "FACTORY_INC_TAX", label: "出厂价_含税" },
   { value: "FACTORY_EXC_TAX", label: "出厂价_不含税" },
@@ -12,7 +12,7 @@ const PRICE_LEVEL_OPTIONS: { value: string; label: string }[] = [
   { value: "B_MARGIN", label: "（一级代理）B级别 利润率" },
   { value: "B_QUOTE", label: "（一级代理）B级别 报单价格" },
   { value: "C_MARGIN", label: "（聚万大客户）C级别 利润率" },
-  { value: "C_QUOTE", label: "（聚万大客户）C级别报单价格" },
+  { value: "C_QUOTE", label: "（聚万大客户）C级别 报单价格" },
   { value: "D_MARGIN", label: "（青山大客户）D级别 利润率" },
   { value: "D_QUOTE", label: "（青山大客户）D级别 报单价格" },
   { value: "D_LOW", label: "（青山大客户）D级别 降低利润率" },
@@ -26,6 +26,8 @@ export type WorkProps = WorkState & {
   onCustomerLevelChange: (level: string) => void;
   onDoRegisterOosChange: (v: boolean) => void;
   onRun: () => void;
+  onCancel: () => void;
+  onRetry: () => void;
   onSelectionChange: (itemId: string, selectedCode: string) => void;
   onResume: () => void;
   onQuotationLineChange: (rowIndex: number, field: string, value: unknown) => void;
@@ -51,93 +53,6 @@ function tryParseJson(s: string): unknown {
   }
 }
 
-function renderObservationContent(content: string): ReturnType<typeof html> {
-  const obj = tryParseJson(content) as Record<string, unknown> | null;
-  if (!obj || typeof obj !== "object") {
-    const short = content.length > 800 ? content.slice(0, 800) + "\n…（已截断）" : content;
-    return html`<pre style="font-size: 11px; margin: 0; white-space: pre-wrap; word-break: break-all;">${short}</pre>`;
-  }
-  const success = obj.success === true;
-  const toFill = Array.isArray(obj.to_fill) ? obj.to_fill : [];
-  const shortage = Array.isArray(obj.shortage) ? obj.shortage : [];
-  const unmatched = Array.isArray(obj.unmatched) ? obj.unmatched : [];
-  const items = Array.isArray(obj.items) ? obj.items : [];
-  const fillMerged = Array.isArray(obj.fill_items_merged) ? obj.fill_items_merged : [];
-  if (toFill.length || shortage.length || unmatched.length || items.length || fillMerged.length) {
-    return html`
-      <div style="font-size: 12px;">
-        ${success === false && obj.error
-          ? html`<p style="color: var(--danger, #c00); margin: 0 0 8px 0;">${String(obj.error)}</p>`
-          : nothing}
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-bottom: 8px;">
-          ${items.length ? html`<span class="muted">提取行数: ${items.length}</span>` : nothing}
-          ${toFill.length ? html`<span style="color: var(--success, #2e7d32);">填充: ${toFill.length}</span>` : nothing}
-          ${shortage.length ? html`<span style="color: var(--warning, #ed6c02);">缺货: ${shortage.length}</span>` : nothing}
-          ${unmatched.length ? html`<span style="color: var(--muted);">未匹配: ${unmatched.length}</span>` : nothing}
-        </div>
-        ${unmatched.length
-          ? html`
-              <details style="margin-top: 6px;">
-                <summary>未匹配项 (${unmatched.length})</summary>
-                <ul style="margin: 4px 0 0 0; padding-left: 18px; font-size: 11px;">
-                  ${unmatched.slice(0, 10).map(
-                    (u: Record<string, unknown>) =>
-                      html`<li>${[u.product_name, u.specification].filter(Boolean).join(" · ") || u.keywords || "-"}</li>`,
-                  )}
-                  ${unmatched.length > 10 ? html`<li class="muted">…共 ${unmatched.length} 项</li>` : nothing}
-                </ul>
-              </details>
-            `
-          : nothing}
-      </div>
-    `;
-  }
-  const extItems = Array.isArray((obj as Record<string, unknown>).items) ? (obj as Record<string, unknown>).items : [];
-  if (extItems.length && typeof (obj as Record<string, unknown>).success !== "undefined") {
-    return html`
-      <div style="font-size: 12px;">
-        <span class="muted">提取询价行: ${extItems.length} 条</span>
-      </div>
-    `;
-  }
-  const short = content.length > 600 ? content.slice(0, 600) + "\n…" : content;
-  return html`<pre style="font-size: 11px; margin: 0; white-space: pre-wrap;">${short}</pre>`;
-}
-
-function renderTraceStep(entry: Record<string, unknown>, index: number): ReturnType<typeof html> {
-  const type = entry.type as string;
-  const step = entry.step as number | undefined;
-  const name = entry.name as string | undefined;
-  const content = (entry.content as string) ?? "";
-  if (type === "response" && content) {
-    return html`
-      <div style="margin-bottom: 8px; padding: 8px; background: var(--bg-secondary, #f5f5f5); border-radius: 6px;">
-        <span class="muted" style="font-size: 11px;">步骤 ${step ?? index + 1} · 回复</span>
-        <div style="white-space: pre-wrap; font-size: 12px; margin-top: 4px;">${content}</div>
-      </div>
-    `;
-  }
-  if (type === "tool_call" && name) {
-    return html`
-      <div style="margin-bottom: 4px;">
-        <span class="muted" style="font-size: 11px;">步骤 ${step ?? index + 1} · 调用 ${name}</span>
-      </div>
-    `;
-  }
-  if (type === "observation" && content) {
-    return html`
-      <div style="margin-bottom: 12px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);">
-        <span class="muted" style="font-size: 11px;">观察结果</span>
-        <div style="margin-top: 6px;">${renderObservationContent(content)}</div>
-      </div>
-    `;
-  }
-  return nothing;
-}
-
-const WORK_STAGES = ["识别表数据", "查价格与库存", "填表"] as const;
-
-/** 从 trace 中解析 work_quotation_fill 的 observation，收集产出文件 basename 列表（供云端下载到本地） */
 function getOutputFileBasenamesFromTrace(trace: unknown[] | undefined): string[] {
   if (!Array.isArray(trace)) return [];
   const basenames: string[] = [];
@@ -156,6 +71,29 @@ function getOutputFileBasenamesFromTrace(trace: unknown[] | undefined): string[]
   return basenames;
 }
 
+function renderPendingChoice(item: WorkPendingChoice, selectedCode: string, onChange: (value: string) => void) {
+  return html`
+    <li style="margin-bottom: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px;">
+      <div style="font-size: 13px; margin-bottom: 8px;">
+        ${item.product_name ?? item.keywords ?? ""}
+        ${item.specification ? html`<span class="muted"> · ${item.specification}</span>` : nothing}
+        ${item.qty != null ? html`<span class="muted"> · ${t("work.qty")}: ${item.qty}</span>` : nothing}
+      </div>
+      <select
+        .value=${selectedCode}
+        @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
+        aria-label=${t("work.choiceSelect")}
+        style="width: 100%; max-width: 460px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border);"
+      >
+        <option value="__OOS__">${t("work.choiceOos")}</option>
+        ${(item.options ?? []).map(
+          (opt) => html`<option value=${opt.code}>${opt.code}${opt.matched_name ? ` · ${opt.matched_name}` : ""}${opt.unit_price != null ? ` · ${opt.unit_price}` : ""}</option>`,
+        )}
+      </select>
+    </li>
+  `;
+}
+
 export function renderWork(props: WorkProps) {
   const {
     basePath,
@@ -163,7 +101,6 @@ export function renderWork(props: WorkProps) {
     workRunning,
     workProgressStage,
     workRunStatus,
-    workRunId,
     workPendingChoices,
     workSelections,
     workResult,
@@ -177,12 +114,15 @@ export function renderWork(props: WorkProps) {
     onCustomerLevelChange,
     onDoRegisterOosChange,
     onRun,
+    onCancel,
+    onRetry,
     onSelectionChange,
     onResume,
     onQuotationLineChange,
     onQuotationDraftSave,
     onQuotationDraftDismiss,
   } = props;
+  const workStages = [t("work.stageExtract"), t("work.stageMatch"), t("work.stageFill")];
 
   const uploadFile = (file: File) => {
     const url = apiUrl(basePath, "/api/quotation/upload");
@@ -195,7 +135,9 @@ export function renderWork(props: WorkProps) {
           onAddFile(data.file_path, data.file_name ?? file.name);
         }
       })
-      .catch((err) => console.error("Work upload", err));
+      .catch(() => {
+        // ignore upload error in view layer
+      });
   };
 
   const handleFileInput = (e: Event) => {
@@ -224,22 +166,23 @@ export function renderWork(props: WorkProps) {
   };
 
   return html`
-    <section class="card" style="margin-bottom: 16px;">
+    <section class="card" style="margin-bottom: 16px;" aria-label=${t("tabs.work")}>
       <div class="card-title" style="margin-bottom: 8px;">${t("tabs.work")}</div>
       <p class="muted" style="margin-bottom: 12px;">${t("subtitles.work")}</p>
 
       <div
-        style="margin-bottom: 12px; padding: 8px; border-radius: 8px; border: 1px dashed var(--border); background: var(--bg-secondary, #fafafa);"
+        style="margin-bottom: 12px; padding: 10px; border-radius: 8px; border: 1px dashed var(--border); background: var(--bg-secondary, #fafafa);"
         @dragover=${handleDragOver}
         @dragenter=${handleDragOver}
         @drop=${handleDrop}
       >
-        <label class="card-title" style="font-size: 13px;">报价单文件（可多选）</label>
+        <label class="card-title" style="font-size: 13px;">${t("work.uploadTitle")}</label>
         <input
           type="file"
           accept=".xlsx,.xls,.xlsm"
           @change=${handleFileInput}
           style="margin-top: 6px;"
+          aria-label=${t("work.uploadTitle")}
         />
         ${workFilePaths.length
           ? html`
@@ -253,33 +196,38 @@ export function renderWork(props: WorkProps) {
                         class="btn btn-sm"
                         style="padding: 2px 8px;"
                         @click=${() => onRemoveFile(i)}
+                        aria-label=${t("work.removeFile")}
                       >
-                        移除
+                        ${t("work.removeFile")}
                       </button>
                     </li>
                   `,
                 )}
               </ul>
             `
-          : html`<p class="muted" style="margin-top: 6px;">暂无文件，请上传 .xlsx / .xls / .xlsm</p>`}
+          : html`<p class="muted" style="margin-top: 6px;">${t("work.noFiles")}</p>`}
       </div>
 
       <div style="display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px;">
         <div>
-          <label style="font-size: 12px; color: var(--muted);">客户档位</label>
+          <label style="font-size: 12px; color: var(--muted);">${t("work.customerLevel")}</label>
           <select
             .value=${workCustomerLevel}
             @change=${(e: Event) => onCustomerLevelChange((e.target as HTMLSelectElement).value)}
-            style="margin-left: 8px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); min-width: 140px;"
+            style="margin-left: 8px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 160px;"
+            aria-label=${t("work.customerLevel")}
           >
-            ${PRICE_LEVEL_OPTIONS.map(
-              (opt) => html`<option value=${opt.value}>${opt.label}</option>`,
-            )}
+            ${PRICE_LEVEL_OPTIONS.map((opt) => html`<option value=${opt.value}>${opt.label}</option>`)}
           </select>
         </div>
         <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
-          <input type="checkbox" ?checked=${workDoRegisterOos} @change=${(e: Event) => onDoRegisterOosChange((e.target as HTMLInputElement).checked)} />
-          执行无货登记
+          <input
+            type="checkbox"
+            ?checked=${workDoRegisterOos}
+            @change=${(e: Event) => onDoRegisterOosChange((e.target as HTMLInputElement).checked)}
+            aria-label=${t("work.registerOos")}
+          />
+          ${t("work.registerOos")}
         </label>
       </div>
 
@@ -287,7 +235,7 @@ export function renderWork(props: WorkProps) {
         ${workRunning
           ? html`
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                ${WORK_STAGES.map(
+                ${workStages.map(
                   (label, i) => html`
                     <span
                       style="
@@ -296,7 +244,6 @@ export function renderWork(props: WorkProps) {
                         font-size: 13px;
                         background: ${workProgressStage >= 0 && i === workProgressStage ? "var(--accent)" : "var(--bg-secondary, #eee)"};
                         color: ${workProgressStage >= 0 && i === workProgressStage ? "var(--bg)" : "var(--muted)"};
-                        transition: background 0.2s, color 0.2s;
                       "
                     >
                       ${i + 1}. ${label}
@@ -304,92 +251,90 @@ export function renderWork(props: WorkProps) {
                   `,
                 )}
               </div>
-              <p class="muted" style="font-size: 12px; margin: 0;">当前阶段：${workProgressStage >= 0 && workProgressStage < WORK_STAGES.length ? WORK_STAGES[workProgressStage] : "执行中"}</p>
+              <p class="muted" style="font-size: 12px; margin: 0;">
+                ${t("work.currentStage")}: ${workProgressStage >= 0 && workProgressStage < workStages.length ? workStages[workProgressStage] : t("work.running")}
+              </p>
             `
           : nothing}
-        <div style="display: flex; gap: 8px;">
+
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
           <button
             class="btn"
             style="background: var(--accent); color: var(--bg);"
             ?disabled=${workFilePaths.length === 0 || workRunning}
             @click=${onRun}
+            aria-label=${t("work.run")}
           >
-            ${workRunning ? "执行中…" : "执行"}
+            ${workRunning ? t("work.running") : t("work.run")}
           </button>
+          ${workRunning
+            ? html`<button class="btn btn-sm" @click=${onCancel} aria-label=${t("work.cancel")}>${t("work.cancel")}</button>`
+            : nothing}
+          ${workRunStatus === "error"
+            ? html`<button class="btn btn-sm" @click=${onRetry} aria-label=${t("common.retry")}>${t("common.retry")}</button>`
+            : nothing}
+          ${workFilePaths.length === 0 ? html`<span class="muted" style="font-size: 12px;">${t("work.runHint")}</span>` : nothing}
+          <span class="muted" style="font-size: 12px;">${t("work.statusLabel")}: ${workRunStatus}</span>
         </div>
       </div>
 
-      ${workError ? html`<p style="margin-top: 12px; color: var(--danger, #e53935); font-size: 13px;">${workError}</p>` : nothing}
+      ${workError
+        ? html`
+            <div style="margin-top: 12px; padding: 10px; border: 1px solid var(--danger, #e53935); border-radius: 8px;" role="alert" aria-live="assertive">
+              <p style="margin: 0; color: var(--danger, #e53935); font-size: 13px;">${workError}</p>
+            </div>
+          `
+        : nothing}
     </section>
 
     ${workRunStatus === "awaiting_choices" && workPendingChoices.length
       ? html`
-          <section class="card" style="margin-bottom: 16px;">
-            <div class="card-title">需要您选择</div>
-            <p class="muted" style="margin-bottom: 12px;">以下项无法自动确定唯一型号，请为每项选择一个选项后点击「确认并继续」。</p>
+          <section class="card" style="margin-bottom: 16px;" aria-live="polite">
+            <div class="card-title">${t("work.awaitingTitle")}</div>
+            <p class="muted" style="margin-bottom: 12px;">${t("work.awaitingHint")}</p>
             <ul style="list-style: none; padding: 0; margin: 0;">
-              ${workPendingChoices.map(
-                (item: WorkPendingChoice) => html`
-                  <li style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary, #f5f5f5);">
-                    <div style="font-size: 13px; margin-bottom: 8px;">
-                      ${item.product_name ?? item.keywords ?? ""}
-                      ${item.specification ? html`<span class="muted"> · ${item.specification}</span>` : nothing}
-                      ${item.qty != null ? html`<span class="muted"> · 数量 ${item.qty}</span>` : nothing}
-                    </div>
-                    <select
-                      style="width: 100%; max-width: 400px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 13px;"
-                      .value=${workSelections[item.id] ?? "__OOS__"}
-                      @change=${(e: Event) => onSelectionChange(item.id, (e.target as HTMLSelectElement).value)}
-                    >
-                      <option value="__OOS__">按无货</option>
-                      ${(item.options ?? []).map(
-                        (opt) =>
-                          html`<option value=${opt.code}>${opt.code}${opt.matched_name ? ` · ${opt.matched_name}` : ""}${opt.unit_price != null ? ` · ¥${opt.unit_price}` : ""}</option>`,
-                      )}
-                    </select>
-                  </li>
-                `,
+              ${workPendingChoices.map((item) =>
+                renderPendingChoice(item, workSelections[item.id] ?? "__OOS__", (value) => onSelectionChange(item.id, value))
               )}
             </ul>
-            <button
-              class="btn"
-              style="margin-top: 12px; background: var(--accent); color: var(--bg);"
-              ?disabled=${workRunning}
-              @click=${onResume}
-            >
-              ${workRunning ? "继续中…" : "确认并继续"}
-            </button>
+            <div style="display: flex; gap: 8px; margin-top: 12px;">
+              <button class="btn" style="background: var(--accent); color: var(--bg);" ?disabled=${workRunning} @click=${onResume}>
+                ${workRunning || workRunStatus === "resuming" ? t("work.resuming") : t("work.resume")}
+              </button>
+              ${workRunStatus === "error" ? html`<button class="btn btn-sm" @click=${onRetry}>${t("common.retry")}</button>` : nothing}
+            </div>
           </section>
         `
       : nothing}
 
     ${workQuotationDraftSaveStatus?.status === "ok"
       ? html`
-          <section class="card" style="margin-bottom: 16px;">
-            <p style="color: var(--success, #2e7d32); margin: 0 0 8px 0;">报价单已保存，编号：${workQuotationDraftSaveStatus.draft_no}</p>
-            <button class="btn btn-sm" @click=${onQuotationDraftDismiss}>关闭</button>
+          <section class="card" style="margin-bottom: 16px;" role="status" aria-live="polite">
+            <p style="color: var(--success, #2e7d32); margin: 0 0 4px 0;">${t("work.savedDraftNo", { no: workQuotationDraftSaveStatus.draft_no })}</p>
+            <p class="muted" style="margin: 0 0 8px 0; font-size: 12px;">${t("work.saveSuccessHint")}</p>
+            <button class="btn btn-sm" @click=${onQuotationDraftDismiss}>${t("common.close")}</button>
           </section>
         `
       : workPendingQuotationDraft?.lines?.length
         ? html`
             <section class="card" style="margin-bottom: 16px;">
-              <div class="card-title">待确认报价单</div>
-              <p class="muted" style="margin-bottom: 10px;">请核对并修改下表，确认无误后点击「确认并保存」落库并生成编号。</p>
+              <div class="card-title">${t("work.pendingDraftTitle")}</div>
+              <p class="muted" style="margin-bottom: 10px;">${t("work.pendingDraftHint")}</p>
               <div style="overflow-x: auto; margin-bottom: 12px;">
                 <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                   <thead>
                     <tr style="background: var(--bg-secondary, #eee);">
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">序号</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">产品名称</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">规格</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">需求数量</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">物料编号</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">报价名称</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">单价</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">金额</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">可用库存</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">缺口</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">缺货</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">#</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineProduct")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineSpec")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineQty")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineCode")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineQuoteName")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.linePrice")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineAmount")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineAvailable")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineShortfall")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineIsShortage")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -400,69 +345,38 @@ export function renderWork(props: WorkProps) {
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.product_name ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.specification ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              .value=${String(line.qty ?? "")}
-                              @change=${(e: Event) => onQuotationLineChange(i, "qty", (e.target as HTMLInputElement).value)}
-                              style="width: 70px; padding: 4px; box-sizing: border-box;"
-                            />
+                            <input type="number" min="0" step="1" .value=${String(line.qty ?? "")} @change=${(e: Event) => onQuotationLineChange(i, "qty", (e.target as HTMLInputElement).value)} style="width: 72px;" aria-label=${t("work.lineQty")} />
                           </td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">
-                            <input
-                              type="text"
-                              .value=${line.code ?? ""}
-                              @change=${(e: Event) => onQuotationLineChange(i, "code", (e.target as HTMLInputElement).value)}
-                              style="width: 90px; padding: 4px; box-sizing: border-box;"
-                            />
+                            <input type="text" .value=${line.code ?? ""} @change=${(e: Event) => onQuotationLineChange(i, "code", (e.target as HTMLInputElement).value)} style="width: 90px;" aria-label=${t("work.lineCode")} />
                           </td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">
-                            <input
-                              type="text"
-                              .value=${line.quote_name ?? ""}
-                              @change=${(e: Event) => onQuotationLineChange(i, "quote_name", (e.target as HTMLInputElement).value)}
-                              style="width: 120px; padding: 4px; box-sizing: border-box;"
-                            />
+                            <input type="text" .value=${line.quote_name ?? ""} @change=${(e: Event) => onQuotationLineChange(i, "quote_name", (e.target as HTMLInputElement).value)} style="width: 120px;" aria-label=${t("work.lineQuoteName")} />
                           </td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              .value=${line.unit_price != null ? String(line.unit_price) : ""}
-                              @change=${(e: Event) => onQuotationLineChange(i, "unit_price", (e.target as HTMLInputElement).value)}
-                              style="width: 80px; padding: 4px; box-sizing: border-box;"
-                            />
+                            <input type="number" min="0" step="0.01" .value=${line.unit_price != null ? String(line.unit_price) : ""} @change=${(e: Event) => onQuotationLineChange(i, "unit_price", (e.target as HTMLInputElement).value)} style="width: 90px;" aria-label=${t("work.linePrice")} />
                           </td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.amount != null ? line.amount : ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.available_qty ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.shortfall ?? ""}</td>
-                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.is_shortage ? "是" : "否"}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.is_shortage ? t("common.yes") : t("common.no")}</td>
                         </tr>
                       `,
                     )}
                   </tbody>
                 </table>
               </div>
+
               ${workQuotationDraftSaveStatus?.status === "error"
                 ? html`<p style="color: var(--danger, #c00); margin-bottom: 10px;">${workQuotationDraftSaveStatus.error}</p>`
                 : nothing}
+
               <div style="display: flex; gap: 8px;">
-                <button
-                  class="btn"
-                  style="background: var(--accent); color: var(--bg);"
-                  ?disabled=${workQuotationDraftSaveStatus?.status === "saving"}
-                  @click=${onQuotationDraftSave}
-                >
-                  ${workQuotationDraftSaveStatus?.status === "saving" ? "保存中…" : "确认并保存"}
+                <button class="btn" style="background: var(--accent); color: var(--bg);" ?disabled=${workQuotationDraftSaveStatus?.status === "saving"} @click=${onQuotationDraftSave}>
+                  ${workQuotationDraftSaveStatus?.status === "saving" ? t("work.saving") : t("work.saveDraft")}
                 </button>
-                <button
-                  class="btn btn-sm"
-                  ?disabled=${workQuotationDraftSaveStatus?.status === "saving"}
-                  @click=${onQuotationDraftDismiss}
-                >
-                  取消
+                <button class="btn btn-sm" ?disabled=${workQuotationDraftSaveStatus?.status === "saving"} @click=${onQuotationDraftDismiss}>
+                  ${t("common.cancel")}
                 </button>
               </div>
             </section>
@@ -472,8 +386,7 @@ export function renderWork(props: WorkProps) {
     ${workResult && !workPendingQuotationDraft?.lines?.length
       ? html`
           <section class="card">
-            <div class="card-title">执行结果</div>
-            ${workFilePaths.length > 1 ? html`<p class="muted" style="font-size: 12px; margin-bottom: 8px;">多文件时为汇总结果，输出文件见下方总结。</p>` : nothing}
+            <div class="card-title">${t("work.resultTitle")}</div>
             ${((): ReturnType<typeof html> => {
               const basenames = getOutputFileBasenamesFromTrace(workResult.trace as unknown[] | undefined);
               return basenames.length
@@ -481,30 +394,24 @@ export function renderWork(props: WorkProps) {
                     <div style="margin-bottom: 12px;">
                       ${basenames.map(
                         (name) => html`
-                          <a
-                            href=${apiUrl(basePath, `/api/quotation/download?path=${encodeURIComponent(name)}`)}
-                            download=${name}
-                            class="btn btn-sm"
-                            style="margin-right: 8px; margin-bottom: 6px; text-decoration: none;"
-                          >
-                            下载 ${name}
+                          <a href=${apiUrl(basePath, `/api/quotation/download?path=${encodeURIComponent(name)}`)} download=${name} class="btn btn-sm" style="margin-right: 8px; margin-bottom: 6px; text-decoration: none;">
+                            ${t("work.download", { name })}
                           </a>
                         `,
                       )}
-                      <p class="muted" style="font-size: 11px; margin: 4px 0 0 0;">云端部署时请及时下载到本地保存，服务器重启后文件会丢失。</p>
                     </div>
                   `
                 : nothing;
             })()}
+
             ${workResult.answer ? html`<div style="white-space: pre-wrap; margin-bottom: 12px;">${workResult.answer}</div>` : nothing}
             ${workResult.error ? html`<p style="color: var(--danger, #e53935);">${workResult.error}</p>` : nothing}
+
             ${workResult.trace?.length
               ? html`
                   <details style="margin-top: 12px;">
-                    <summary>步骤记录（${workResult.trace.length} 条）</summary>
-                    <div style="max-height: 420px; overflow: auto; margin-top: 8px;">
-                      ${(workResult.trace as Record<string, unknown>[]).map((entry, i) => renderTraceStep(entry, i))}
-                    </div>
+                    <summary>${t("work.trace", { count: String(workResult.trace.length) })}</summary>
+                    <pre style="max-height: 420px; overflow: auto; margin-top: 8px; font-size: 11px; white-space: pre-wrap;">${JSON.stringify(workResult.trace, null, 2)}</pre>
                   </details>
                 `
               : nothing}

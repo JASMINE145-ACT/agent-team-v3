@@ -62,7 +62,7 @@ import { renderBusinessKnowledge } from "./views/business-knowledge.ts";
 import { renderChat } from "./views/chat.ts";
 import { renderConfig } from "./views/config.ts";
 import { loadFulfillDraftDetail, confirmFulfillDraft } from "./controllers/fulfill.ts";
-import { loadProcurementSuggestions, approveProcurement } from "./controllers/procurement.ts";
+import { loadProcurementSuggestions, approveProcurement, procurementItemKey } from "./controllers/procurement.ts";
 import { renderCron } from "./views/cron.ts";
 import { renderFulfill } from "./views/fulfill.ts";
 import { renderProcurement } from "./views/procurement.ts";
@@ -308,16 +308,81 @@ export function renderApp(state: AppViewState) {
                 loading: state.procurementLoading,
                 error: state.procurementError,
                 suggestions: state.procurementSuggestions,
+                selectedKeys: state.procurementSelectedKeys,
+                approvedKeys: state.procurementApprovedKeys,
                 approveBusy: state.procurementApproveBusy,
                 approveResult: state.procurementApproveResult,
-                onRefresh: () => state.loadProcurementSuggestions(),
-                onApprove: (item) => approveProcurement(state, [{
-                  product_key: item.product_key,
-                  product_name: item.product_name,
-                  specification: item.specification,
-                  shortfall: item.shortfall,
-                  code: item.code,
-                }]),
+                filterQuery: state.procurementFilterQuery,
+                sortBy: state.procurementSortBy,
+                sortDir: state.procurementSortDir,
+                page: state.procurementPage,
+                pageSize: state.procurementPageSize,
+                onRefresh: () => {
+                  state.procurementPage = 1;
+                  return state.loadProcurementSuggestions();
+                },
+                onToggleSelect: (key) => {
+                  if (state.procurementSelectedKeys.includes(key)) {
+                    state.procurementSelectedKeys = state.procurementSelectedKeys.filter((k) => k !== key);
+                  } else {
+                    state.procurementSelectedKeys = [...state.procurementSelectedKeys, key];
+                  }
+                },
+                onApprove: (item) => {
+                  if (typeof window !== "undefined" && !window.confirm(t("procurement.approveConfirm"))) return;
+                  const payload = [{
+                    product_key: item.product_key,
+                    product_name: item.product_name,
+                    specification: item.specification,
+                    shortfall: item.shortfall,
+                    code: item.code,
+                  }];
+                  void approveProcurement(state, payload).then((res) => {
+                    if (res && (res.approved_count ?? 0) > 0) {
+                      state.procurementApprovedKeys = [...state.procurementApprovedKeys, procurementItemKey(item)];
+                    }
+                  });
+                },
+                onApproveBatch: () => {
+                  const selected = state.procurementSuggestions.filter((s) =>
+                    state.procurementSelectedKeys.includes(procurementItemKey(s)),
+                  );
+                  if (selected.length === 0) return;
+                  if (typeof window !== "undefined" && !window.confirm(t("procurement.approveBatchConfirm", { count: String(selected.length) }))) return;
+                  const payload = selected.map((s) => ({
+                    product_key: s.product_key,
+                    product_name: s.product_name,
+                    specification: s.specification,
+                    shortfall: s.shortfall,
+                    code: s.code,
+                  }));
+                  void approveProcurement(state, payload).then((res) => {
+                    if (res && (res.approved_count ?? 0) > 0) {
+                      const keys = selected.map((s) => procurementItemKey(s));
+                      state.procurementApprovedKeys = [...state.procurementApprovedKeys, ...keys];
+                      state.procurementSelectedKeys = state.procurementSelectedKeys.filter((k) => !keys.includes(k));
+                    }
+                  });
+                },
+                onFilterQueryChange: (value) => {
+                  state.procurementFilterQuery = value;
+                  state.procurementPage = 1;
+                },
+                onSortByChange: (value) => {
+                  state.procurementSortBy = value;
+                  state.procurementPage = 1;
+                },
+                onSortDirChange: (value) => {
+                  state.procurementSortDir = value;
+                  state.procurementPage = 1;
+                },
+                onPageChange: (value) => {
+                  state.procurementPage = Math.max(1, value);
+                },
+                onPageSizeChange: (value) => {
+                  state.procurementPageSize = Math.max(1, value);
+                  state.procurementPage = 1;
+                },
               })
             : nothing
         }
@@ -335,13 +400,61 @@ export function renderApp(state: AppViewState) {
                 detailId: state.fulfillDetailId,
                 confirmBusy: state.fulfillConfirmBusy,
                 confirmResult: state.fulfillConfirmResult,
-                onRefresh: () => state.loadFulfillDrafts(),
+                filterQuery: state.fulfillFilterQuery,
+                sortBy: state.fulfillSortBy,
+                sortDir: state.fulfillSortDir,
+                page: state.fulfillPage,
+                pageSize: state.fulfillPageSize,
+                onRefresh: () => {
+                  state.fulfillPage = 1;
+                  return state.loadFulfillDrafts();
+                },
                 onSelectDraft: (draftId) => loadFulfillDraftDetail(state, draftId),
-                onConfirm: (draftId) => confirmFulfillDraft(state, draftId),
+                onConfirm: (draftId) => {
+                  const detail = state.fulfillDetailId === draftId ? state.fulfillDetail : null;
+                  const lineCount = detail?.lines?.length ?? 0;
+                  const totalAmount = (detail?.lines ?? []).reduce(
+                    (sum, l) => sum + Number(l.amount ?? 0),
+                    0,
+                  );
+                  const msg =
+                    lineCount > 0
+                      ? t("fulfill.confirmPrompt", {
+                          count: String(lineCount),
+                          amount: totalAmount.toFixed(2),
+                        })
+                      : t("fulfill.confirmPromptSimple");
+                  if (typeof window !== "undefined" && window.confirm(msg)) {
+                    void confirmFulfillDraft(state, draftId).then((res) => {
+                      if (res?.order_id) {
+                        void state.loadProcurementSuggestions();
+                      }
+                    });
+                  }
+                },
                 onClearDetail: () => {
                   state.fulfillDetail = null;
                   state.fulfillDetailId = null;
                   state.fulfillConfirmResult = null;
+                },
+                onFilterQueryChange: (value) => {
+                  state.fulfillFilterQuery = value;
+                  state.fulfillPage = 1;
+                },
+                onSortByChange: (value) => {
+                  state.fulfillSortBy = value;
+                  state.fulfillPage = 1;
+                },
+                onSortDirChange: (value) => {
+                  state.fulfillSortDir = value;
+                  state.fulfillPage = 1;
+                },
+                onPageChange: (value) => {
+                  state.fulfillPage = Math.max(1, value);
+                },
+                onPageSizeChange: (value) => {
+                  state.fulfillPageSize = Math.max(1, value);
+                  state.fulfillPage = 1;
                 },
               })
             : nothing

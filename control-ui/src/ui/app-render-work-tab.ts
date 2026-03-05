@@ -1,6 +1,7 @@
 import { nothing } from "lit";
+import { t } from "../i18n/index.ts";
 import type { AppViewState } from "./app-view-state.ts";
-import { runWork, resumeWork, saveQuotationDraft } from "./controllers/work.ts";
+import { cancelWork, retryWork, runWork, resumeWork, saveQuotationDraft } from "./controllers/work.ts";
 import { renderWork } from "./views/work.ts";
 
 function normalizePathKey(p: string): string {
@@ -57,6 +58,8 @@ export function renderWorkTab(state: AppViewState) {
       state.workDoRegisterOos = v;
     },
     onRun: () => void runWork(state),
+    onCancel: () => cancelWork(state),
+    onRetry: () => void retryWork(state),
     onSelectionChange: (itemId, selectedCode) => {
       state.workSelections = { ...state.workSelections, [itemId]: selectedCode };
     },
@@ -88,7 +91,15 @@ export function renderWorkTab(state: AppViewState) {
       lines[rowIndex] = line;
       state.workPendingQuotationDraft = { ...draft, lines };
     },
-    onQuotationDraftSave: () => void saveQuotationDraft(state),
+    onQuotationDraftSave: () => {
+      if (typeof window !== "undefined" && window.confirm(t("work.saveConfirm"))) {
+        void saveQuotationDraft(state).then((saved) => {
+          if (saved) {
+            void state.loadFulfillDrafts();
+          }
+        });
+      }
+    },
     onQuotationDraftDismiss: () => {
       state.workPendingQuotationDraft = null;
       state.workQuotationDraftSaveStatus = null;

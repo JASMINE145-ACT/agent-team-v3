@@ -1,4 +1,5 @@
 import { html, nothing } from "lit";
+import { t } from "../../i18n/index.ts";
 import type { QuotationDraftListItem, QuotationDraftDetail } from "../types.ts";
 
 export type FulfillProps = {
@@ -10,26 +11,48 @@ export type FulfillProps = {
   detailId: number | null;
   confirmBusy: boolean;
   confirmResult: { order_id?: string; message?: string } | null;
+  filterQuery: string;
+  sortBy: "created_at" | "draft_no" | "name";
+  sortDir: "asc" | "desc";
+  page: number;
+  pageSize: number;
   onRefresh: () => void;
   onSelectDraft: (draftId: number) => void;
   onConfirm: (draftId: number) => void;
   onClearDetail: () => void;
+  onFilterQueryChange: (value: string) => void;
+  onSortByChange: (value: "created_at" | "draft_no" | "name") => void;
+  onSortDirChange: (value: "asc" | "desc") => void;
+  onPageChange: (value: number) => void;
+  onPageSizeChange: (value: number) => void;
 };
 
 function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   try {
     const d = new Date(iso);
-    return d.toLocaleString("zh-CN", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    return d.toLocaleString();
   } catch {
-    return iso ?? "—";
+    return iso ?? "-";
   }
+}
+
+function compareDrafts(
+  a: QuotationDraftListItem,
+  b: QuotationDraftListItem,
+  sortBy: "created_at" | "draft_no" | "name",
+  sortDir: "asc" | "desc",
+): number {
+  const dir = sortDir === "asc" ? 1 : -1;
+  if (sortBy === "created_at") {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return (ta - tb) * dir;
+  }
+  if (sortBy === "name") {
+    return (a.name ?? "").localeCompare(b.name ?? "") * dir;
+  }
+  return (a.draft_no ?? "").localeCompare(b.draft_no ?? "") * dir;
 }
 
 export function renderFulfill(props: FulfillProps) {
@@ -41,66 +64,152 @@ export function renderFulfill(props: FulfillProps) {
     detailId,
     confirmBusy,
     confirmResult,
+    filterQuery,
+    sortBy,
+    sortDir,
+    page,
+    pageSize,
     onRefresh,
     onSelectDraft,
     onConfirm,
     onClearDetail,
+    onFilterQueryChange,
+    onSortByChange,
+    onSortDirChange,
+    onPageChange,
+    onPageSizeChange,
   } = props;
 
+  const q = filterQuery.trim().toLowerCase();
+  const filtered = q
+    ? drafts.filter((d) => {
+        const haystack = `${d.draft_no ?? ""}\n${d.name ?? ""}\n${d.source ?? ""}`.toLowerCase();
+        return haystack.includes(q);
+      })
+    : drafts;
+
+  const sorted = [...filtered].sort((a, b) => compareDrafts(a, b, sortBy, sortDir));
+  const total = sorted.length;
+  const safePageSize = Math.max(1, pageSize || 10);
+  const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+  const start = (currentPage - 1) * safePageSize;
+  const paged = sorted.slice(start, start + safePageSize);
+
   return html`
-    <section class="grid grid-cols-2">
+    <section class="grid grid-cols-2" aria-label=${t("tabs.cron")}>
       <div class="card" style="grid-column: 1 / -1;">
-        <div class="card-title">待确认报价单</div>
-        <div class="card-sub">从云端拉取已落库的待确认报价单，确认成单后转订单与锁库。</div>
-        <div style="margin-top: 12px;">
-          <button class="btn" ?disabled=${loading} @click=${onRefresh}>
-            ${loading ? "加载中…" : "刷新列表"}
+        <div class="card-title">${t("fulfill.title")}</div>
+        <div class="card-sub">${t("fulfill.subtitle")}</div>
+        <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <button class="btn" ?disabled=${loading} @click=${onRefresh} aria-label=${t("fulfill.refreshList")}>
+            ${loading ? t("fulfill.loading") : t("fulfill.refreshList")}
           </button>
-          ${error ? html`<span class="muted" style="margin-left: 8px;">${error}</span>` : nothing}
+          <input
+            type="search"
+            .value=${filterQuery}
+            placeholder=${t("fulfill.filterPlaceholder")}
+            @input=${(e: Event) => onFilterQueryChange((e.target as HTMLInputElement).value)}
+            aria-label=${t("fulfill.filterPlaceholder")}
+            style="min-width: 220px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border);"
+          />
+          <label>
+            <span class="muted" style="font-size: 12px; margin-right: 6px;">${t("fulfill.sortBy")}</span>
+            <select
+              .value=${sortBy}
+              @change=${(e: Event) => onSortByChange((e.target as HTMLSelectElement).value as "created_at" | "draft_no" | "name")}
+              aria-label=${t("fulfill.sortBy")}
+            >
+              <option value="created_at">${t("fulfill.sortCreatedAt")}</option>
+              <option value="draft_no">${t("fulfill.sortDraftNo")}</option>
+              <option value="name">${t("fulfill.sortName")}</option>
+            </select>
+          </label>
+          <label>
+            <span class="muted" style="font-size: 12px; margin-right: 6px;">${t("fulfill.sortDir")}</span>
+            <select
+              .value=${sortDir}
+              @change=${(e: Event) => onSortDirChange((e.target as HTMLSelectElement).value as "asc" | "desc")}
+              aria-label=${t("fulfill.sortDir")}
+            >
+              <option value="desc">${t("fulfill.sortDesc")}</option>
+              <option value="asc">${t("fulfill.sortAsc")}</option>
+            </select>
+          </label>
+          <label>
+            <span class="muted" style="font-size: 12px; margin-right: 6px;">${t("fulfill.pageSize")}</span>
+            <select
+              .value=${String(safePageSize)}
+              @change=${(e: Event) => onPageSizeChange(Number((e.target as HTMLSelectElement).value) || 10)}
+              aria-label=${t("fulfill.pageSize")}
+            >
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </label>
         </div>
       </div>
 
+      ${error
+        ? html`
+            <div class="card" style="grid-column: 1 / -1; border-color: var(--danger, #c62828);" role="alert" aria-live="assertive">
+              <div class="card-title" style="color: var(--danger, #c62828);">${t("common.errorTitle")}</div>
+              <div class="card-sub">${error}</div>
+              <div style="margin-top: 10px;">
+                <button class="btn" @click=${onRefresh}>${t("common.retry")}</button>
+              </div>
+            </div>
+          `
+        : nothing}
+
       <div class="card" style="grid-column: 1 / -1;">
-        <div class="card-title">列表</div>
-        <div class="card-sub">点击一行查看明细，再点击「确认成单」完成闭环。</div>
+        <div class="card-title">${t("fulfill.listTitle")}</div>
+        <div class="card-sub">${t("fulfill.listSubtitle")}</div>
+
         ${loading && drafts.length === 0
-          ? html`<p class="muted" style="margin-top: 12px;">加载中…</p>`
-          : drafts.length === 0
-            ? html`<p class="muted" style="margin-top: 12px;">暂无待确认报价单。</p>`
+          ? html`<p class="muted" style="margin-top: 12px;">${t("fulfill.loading")}</p>`
+          : total === 0
+            ? html`<p class="muted" style="margin-top: 12px;">${t("fulfill.noDrafts")}</p>`
             : html`
-                <div style="overflow-x: auto; margin-top: 12px;">
+                <div class="muted" style="font-size: 12px; margin-top: 10px;">
+                  ${t("fulfill.total", { total: String(total) })}
+                </div>
+                <div style="overflow-x: auto; margin-top: 8px;">
                   <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                     <thead>
                       <tr style="background: var(--bg-secondary, #eee);">
-                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">编号</th>
-                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">名称</th>
-                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">来源</th>
-                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">创建时间</th>
-                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">操作</th>
+                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.colDraftNo")}</th>
+                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.colName")}</th>
+                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.colSource")}</th>
+                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.colCreatedAt")}</th>
+                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.colActions")}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      ${drafts.map(
+                      ${paged.map(
                         (d) => html`
-                          <tr
-                            style="cursor: pointer; ${detailId === d.id ? "background: var(--bg-secondary, #f5f5f5);" : ""}"
-                            @click=${() => onSelectDraft(d.id)}
-                          >
+                          <tr style=${detailId === d.id ? "background: var(--bg-secondary, #f5f5f5);" : ""}>
                             <td style="padding: 6px 8px; border: 1px solid var(--border);">${d.draft_no}</td>
                             <td style="padding: 6px 8px; border: 1px solid var(--border);">${d.name}</td>
-                            <td style="padding: 6px 8px; border: 1px solid var(--border);">${d.source ?? "—"}</td>
+                            <td style="padding: 6px 8px; border: 1px solid var(--border);">${d.source ?? "-"}</td>
                             <td style="padding: 6px 8px; border: 1px solid var(--border);">${formatDate(d.created_at)}</td>
-                            <td style="padding: 6px 8px; border: 1px solid var(--border);">
+                            <td style="padding: 6px 8px; border: 1px solid var(--border); display: flex; gap: 6px; flex-wrap: wrap;">
+                              <button
+                                class="btn btn-sm"
+                                @click=${() => onSelectDraft(d.id)}
+                                aria-label=${t("fulfill.viewDetail")}
+                              >
+                                ${t("fulfill.viewDetail")}
+                              </button>
                               <button
                                 class="btn"
                                 style="font-size: 12px; padding: 4px 8px;"
                                 ?disabled=${confirmBusy}
-                                @click=${(e: Event) => {
-                                  e.stopPropagation();
-                                  onConfirm(d.id);
-                                }}
+                                @click=${() => onConfirm(d.id)}
+                                aria-label=${t("fulfill.confirmAction")}
                               >
-                                ${confirmBusy && detailId === d.id ? "确认中…" : "确认成单"}
+                                ${confirmBusy && detailId === d.id ? t("fulfill.confirming") : t("fulfill.confirmAction")}
                               </button>
                             </td>
                           </tr>
@@ -109,32 +218,60 @@ export function renderFulfill(props: FulfillProps) {
                     </tbody>
                   </table>
                 </div>
+
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 10px;">
+                  <button
+                    class="btn btn-sm"
+                    ?disabled=${currentPage <= 1}
+                    @click=${() => onPageChange(currentPage - 1)}
+                    aria-label=${t("common.prev")}
+                  >
+                    ${t("common.prev")}
+                  </button>
+                  <span class="muted" style="font-size: 12px;">${t("fulfill.page", { current: String(currentPage), total: String(totalPages) })}</span>
+                  <button
+                    class="btn btn-sm"
+                    ?disabled=${currentPage >= totalPages}
+                    @click=${() => onPageChange(currentPage + 1)}
+                    aria-label=${t("common.next")}
+                  >
+                    ${t("common.next")}
+                  </button>
+                </div>
               `}
       </div>
 
       ${detail
         ? html`
-            <div class="card" style="grid-column: 1 / -1;">
-              <div class="card-title">报价单明细 · ${detail.draft_no}</div>
+            <div class="card" style="grid-column: 1 / -1;" tabindex="-1">
+              <div class="card-title">${t("fulfill.detailTitle", { draftNo: detail.draft_no })}</div>
               <div class="card-sub">${detail.name}</div>
-              <div style="margin-top: 8px;">
-                <button class="btn" style="font-size: 12px;" @click=${onClearDetail}>关闭明细</button>
+              <div style="margin-top: 8px; display: flex; gap: 8px;">
+                <button class="btn btn-sm" @click=${onClearDetail}>${t("fulfill.closeDetail")}</button>
+                <button
+                  class="btn"
+                  style="background: var(--accent); color: var(--bg);"
+                  ?disabled=${confirmBusy}
+                  @click=${() => onConfirm(detail.id)}
+                >
+                  ${confirmBusy ? t("fulfill.confirming") : t("fulfill.confirmAction")}
+                </button>
               </div>
               <div style="overflow-x: auto; margin-top: 12px;">
                 <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
                   <thead>
                     <tr style="background: var(--bg-secondary, #eee);">
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">序号</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">产品名称</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">规格</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">数量</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">物料编号</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">报价名称</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">单价</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">金额</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">可用库存</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">缺口</th>
-                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">缺货</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">#</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.lineProduct")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.lineSpec")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.lineQty")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.lineCode")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.lineQuoteName")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.linePrice")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.lineAmount")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.lineAvailable")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.lineShortfall")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("fulfill.lineIsShortage")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -151,22 +288,12 @@ export function renderFulfill(props: FulfillProps) {
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.amount ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.available_qty ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.shortfall ?? ""}</td>
-                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.is_shortage ? "是" : "否"}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.is_shortage ? t("common.yes") : t("common.no")}</td>
                         </tr>
                       `,
                     )}
                   </tbody>
                 </table>
-              </div>
-              <div style="margin-top: 12px;">
-                <button
-                  class="btn"
-                  style="background: var(--accent); color: var(--bg);"
-                  ?disabled=${confirmBusy}
-                  @click=${() => onConfirm(detail.id)}
-                >
-                  ${confirmBusy ? "确认中…" : "确认成单"}
-                </button>
               </div>
             </div>
           `
@@ -174,8 +301,10 @@ export function renderFulfill(props: FulfillProps) {
 
       ${confirmResult
         ? html`
-            <div class="card" style="grid-column: 1 / -1;">
-              <div class="card-sub">${confirmResult.order_id ? `订单号：${confirmResult.order_id}` : ""} ${confirmResult.message ?? ""}</div>
+            <div class="card" style="grid-column: 1 / -1; border-color: var(--success, #2e7d32);" role="status" aria-live="polite">
+              <div class="card-title" style="color: var(--success, #2e7d32);">${t("fulfill.confirmTitle")}</div>
+              ${confirmResult.order_id ? html`<p style="margin: 0 0 4px 0; font-weight: 600;">${t("fulfill.orderId")}: ${confirmResult.order_id}</p>` : nothing}
+              <div class="card-sub">${confirmResult.message ?? ""}</div>
             </div>
           `
         : nothing}

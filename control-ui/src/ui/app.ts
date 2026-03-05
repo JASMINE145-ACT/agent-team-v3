@@ -1,4 +1,4 @@
-import { LitElement } from "lit";
+﻿import { LitElement } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { i18n, I18nController, isSupportedLocale } from "../i18n/index.ts";
 import {
@@ -206,7 +206,7 @@ export class OpenClawApp extends LitElement {
   @state() channelsError: string | null = null;
   @state() channelsLastSuccess: number | null = null;
 
-  /** 业务知识页（原 Channels 位）：wanding_business_knowledge.md 内容与加载/保存状态 */
+  /** 涓氬姟鐭ヨ瘑椤碉紙鍘?Channels 浣嶏級锛歸anding_business_knowledge.md 鍐呭涓庡姞杞?淇濆瓨鐘舵€?*/
   @state() bkContent = "";
   @state() bkLoading = false;
   @state() bkError: string | null = null;
@@ -243,7 +243,7 @@ export class OpenClawApp extends LitElement {
   @state() shortageShowAddForm = false;
   @state() shortageDb: "postgres" | "sqlite" | null = null;
 
-  /** Overview 页用：快速展示无货/缺货统计 */
+  /** Overview 椤电敤锛氬揩閫熷睍绀烘棤璐?缂鸿揣缁熻 */
   @state() overviewOosStats: import("./types.js").OosStats | null = null;
   @state() overviewOosError: string | null = null;
   @state() overviewShortageStats: import("./types.js").ShortageStats | null = null;
@@ -333,16 +333,16 @@ export class OpenClawApp extends LitElement {
   @state() usageLogFilterHasTools = false;
   @state() usageLogFilterQuery = "";
 
-  // Non-reactive (don’t trigger renders just for timer bookkeeping).
+  // Non-reactive (don鈥檛 trigger renders just for timer bookkeeping).
   usageQueryDebounceTimer: number | null = null;
 
   @state() workFilePaths: string[] = [];
   @state() workOriginalFileNamesByPath: Record<string, string> = {};
   @state() workRunning = false;
-  /** 执行中时循环展示的阶段 0=识别表 1=查价格与库存 2=填表 */
+  /** 鎵ц涓椂寰幆灞曠ず鐨勯樁娈?0=璇嗗埆琛?1=鏌ヤ环鏍间笌搴撳瓨 2=濉〃 */
   @state() workProgressStage = 0;
   private _workProgressInterval: ReturnType<typeof setInterval> | null = null;
-  @state() workRunStatus: "idle" | "running" | "awaiting_choices" | "done" = "idle";
+  @state() workRunStatus: import("./controllers/work.js").WorkRunStatus = "idle";
   @state() workRunId: string | null = null;
   @state() workPendingChoices: import("./controllers/work.js").WorkPendingChoice[] = [];
   @state() workSelections: Record<string, string> = {};
@@ -369,12 +369,24 @@ export class OpenClawApp extends LitElement {
   @state() fulfillDetailId: number | null = null;
   @state() fulfillConfirmBusy = false;
   @state() fulfillConfirmResult: { order_id?: string; message?: string } | null = null;
+  @state() fulfillFilterQuery = "";
+  @state() fulfillSortBy: "created_at" | "draft_no" | "name" = "created_at";
+  @state() fulfillSortDir: "asc" | "desc" = "desc";
+  @state() fulfillPage = 1;
+  @state() fulfillPageSize = 10;
 
   @state() procurementLoading = false;
   @state() procurementError: string | null = null;
   @state() procurementSuggestions: import("./types.js").ShortageRecord[] = [];
+  @state() procurementSelectedKeys: string[] = [];
+  @state() procurementApprovedKeys: string[] = [];
   @state() procurementApproveBusy = false;
   @state() procurementApproveResult: { approved_count?: number; message?: string } | null = null;
+  @state() procurementFilterQuery = "";
+  @state() procurementSortBy: "uploaded_at" | "shortfall" | "count" | "product_name" = "uploaded_at";
+  @state() procurementSortDir: "asc" | "desc" = "desc";
+  @state() procurementPage = 1;
+  @state() procurementPageSize = 10;
 
   @state() skillsLoading = false;
   @state() skillsReport: SkillStatusReport | null = null;
@@ -451,8 +463,8 @@ export class OpenClawApp extends LitElement {
   protected updated(changed: Map<PropertyKey, unknown>) {
     if (changed.has("workRunning")) {
       if (this.workRunning) {
-        // 初次执行从「识别表数据」开始；人工选择后 resume 时仍处于「查价格与库存」阶段
-        this.workProgressStage = this.workRunStatus === "awaiting_choices" ? 1 : 0;
+        // 首次 run 显示阶段 0；resume 显示阶段 1。
+        this.workProgressStage = this.workRunStatus === "resuming" ? 1 : 0;
         if (this._workProgressInterval != null) {
           clearInterval(this._workProgressInterval);
           this._workProgressInterval = null;
@@ -462,7 +474,9 @@ export class OpenClawApp extends LitElement {
           clearInterval(this._workProgressInterval);
           this._workProgressInterval = null;
         }
-        this.workProgressStage = 2; // 结束时停在「填表」
+        if (this.workRunStatus === "done") {
+          this.workProgressStage = 2;
+        }
       }
     }
     handleUpdated(this as unknown as Parameters<typeof handleUpdated>[0], changed);
@@ -702,3 +716,4 @@ export class OpenClawApp extends LitElement {
     return renderApp(this as unknown as AppViewState);
   }
 }
+
