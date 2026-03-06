@@ -89,7 +89,13 @@ cd ..</pre>
 
 
 def _warmup_sync(agent=None) -> None:
-    """同步预热：加载工具列表、Resolver（slim 表 + 向量缓存）、TableAgent。在后台线程中执行。"""
+    """
+    同步预热（后台线程）：
+    - 工具列表
+    - 库存：Resolver（slim 表 + 向量缓存）、TableAgent
+    - 业务数据：无货/缺货云端数据库连接（DataService）
+    - 询价数据：映射表 Excel、万鼎价格库 Excel、业务知识缓存
+    """
     try:
         if agent is not None:
             agent._registry.get_definitions()
@@ -104,14 +110,45 @@ def _warmup_sync(agent=None) -> None:
         _get_table_agent()  # 初始化 ACCURATE API 客户端
     except Exception as e:
         logger.debug("预热库存组件失败: %s", e)
+    try:
+        # 预热无货/缺货数据库连接（Postgres 不可达会回退 SQLite；只做一次，避免首次点击时卡顿）
+        from backend.server.api import routes as api_routes
+        api_routes._get_oos_data_service()
+    except Exception as e:
+        logger.debug("预热无货/缺货数据库失败: %s", e)
+    try:
+        from backend.tools.inventory.services.llm_selector import _load_business_knowledge
+        _load_business_knowledge()
+    except Exception as e:
+        logger.debug("预热万鼎业务知识失败: %s", e)
+    try:
+        from backend.tools.inventory.config import config as inv_config
+        from backend.tools.inventory.services.mapping_table_matcher import load_mapping_df
+        mapping_path = getattr(inv_config, "MAPPING_TABLE_PATH", None)
+        if mapping_path:
+            load_mapping_df(mapping_path)
+    except Exception as e:
+        logger.debug("预热历史报价映射表失败: %s", e)
+    try:
+        from backend.tools.inventory.config import config as inv_config
+        from backend.tools.inventory.services.wanding_fuzzy_matcher import (
+            _get_cached_df,
+            _load_field_matching_rules_from_knowledge,
+        )
+        _load_field_matching_rules_from_knowledge()
+        price_path = getattr(inv_config, "PRICE_LIBRARY_PATH", None)
+        if price_path:
+            _get_cached_df(price_path, "B_QUOTE")
+    except Exception as e:
+        logger.debug("预热万鼎价格库失败: %s", e)
 
 
 async def _warmup(agent=None) -> None:
     try:
         await asyncio.to_thread(_warmup_sync, agent)
-        logger.info("库存组件预热完成（Resolver + TableAgent 已就绪）")
+        logger.info("启动预热完成（库存/报价/无货数据库已开始加载）")
     except Exception as e:
-        logger.warning("库存组件预热失败（不影响启动）: %s", e)
+        logger.warning("启动预热失败（不影响启动）: %s", e)
 
 
 @app.on_event("startup")
