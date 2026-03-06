@@ -317,6 +317,25 @@ export function renderApp(state: AppViewState) {
                 sortDir: state.procurementSortDir,
                 page: state.procurementPage,
                 pageSize: state.procurementPageSize,
+                replenishmentDrafts: state.replenishmentDrafts,
+                replenishmentDetail: state.replenishmentDetail,
+                replenishmentDetailId: state.replenishmentDetailId,
+                replenishmentLoading: state.replenishmentLoading,
+                replenishmentError: state.replenishmentError,
+                replenishmentConfirmBusy: state.replenishmentConfirmBusy,
+                replenishmentConfirmResult: state.replenishmentConfirmResult,
+                onReplenishmentRefresh: () => state.loadProcurementReplenishment(),
+                onSelectReplenishmentDraft: (draftId) => {
+                  void state.loadProcurementReplenishmentDetail(draftId);
+                },
+                onConfirmReplenishment: (draftId) => {
+                  if (typeof window !== "undefined" && !window.confirm(t("replenishment.confirmPrompt"))) return;
+                  void state.confirmProcurementReplenishment(draftId);
+                },
+                onClearReplenishmentDetail: () => {
+                  state.replenishmentDetail = null;
+                  state.replenishmentDetailId = null;
+                },
                 onRefresh: () => {
                   state.procurementPage = 1;
                   return state.loadProcurementSuggestions();

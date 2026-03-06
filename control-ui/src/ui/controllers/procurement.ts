@@ -1,4 +1,4 @@
-import type { ShortageRecord } from "../types.ts";
+import type { ShortageRecord, ReplenishmentDraftListItem, ReplenishmentDraftDetail } from "../types.ts";
 import {
   asArray,
   asNumber,
@@ -21,10 +21,18 @@ export type ProcurementState = {
   procurementSuggestions: ShortageRecord[];
   procurementApproveBusy: boolean;
   procurementApproveResult: { approved_count?: number; message?: string } | null;
+  replenishmentDrafts: ReplenishmentDraftListItem[];
+  replenishmentDetail: ReplenishmentDraftDetail | null;
+  replenishmentDetailId: number | null;
+  replenishmentLoading: boolean;
+  replenishmentError: string | null;
+  replenishmentConfirmBusy: boolean;
+  replenishmentConfirmResult: { executed?: number; message?: string } | null;
 };
 
 const ENDPOINT_SHORTAGE_LIST = "/api/shortage/list";
 const ENDPOINT_APPROVE = "/api/procurement/approve";
+const ENDPOINT_REPLENISHMENT_DRAFTS = "/api/replenishment-drafts";
 
 const approveInflightByState = new WeakMap<
   object,
@@ -237,4 +245,161 @@ export async function approveProcurement(
 
   inflight.set(signature, task);
   return task;
+}
+
+export async function loadReplenishmentDrafts(state: ProcurementState): Promise<void> {
+  state.replenishmentLoading = true;
+  state.replenishmentError = null;
+  try {
+    const base = state.basePath?.trim() ? state.basePath.replace(/\/$/, "") : "";
+    const url = base ? `${base}${ENDPOINT_REPLENISHMENT_DRAFTS}` : ENDPOINT_REPLENISHMENT_DRAFTS;
+    const res = await fetch(url);
+    const json = await res.json().catch(() => ({} as unknown));
+    if (!res.ok) {
+      state.replenishmentError = buildStandardError(
+        "加载补货单列表",
+        extractErrorDetail(json, `HTTP ${res.status}`),
+        "无法查看补货单列表",
+        "点击“重试”重新加载列表",
+      );
+      state.replenishmentDrafts = [];
+      return;
+    }
+    const root = asRecord(json, ENDPOINT_REPLENISHMENT_DRAFTS);
+    const rows = asArray(root.data, ENDPOINT_REPLENISHMENT_DRAFTS, "data");
+    state.replenishmentDrafts = rows.map((row) => {
+      const item = asRecord(row, ENDPOINT_REPLENISHMENT_DRAFTS, "data[]");
+      return {
+        id: asNumber(item.id, ENDPOINT_REPLENISHMENT_DRAFTS, "id"),
+        draft_no: optionalString(item.draft_no) ?? "",
+        name: optionalString(item.name) ?? "",
+        source: optionalString(item.source) ?? undefined,
+        created_at: optionalString(item.created_at),
+        status: optionalString(item.status) ?? "",
+        confirmed_at: optionalString(item.confirmed_at),
+      } as ReplenishmentDraftListItem;
+    });
+  } catch (e) {
+    const detail = e instanceof ResponseSchemaError ? e.message : (e instanceof Error ? e.message : String(e));
+    state.replenishmentError = buildStandardError(
+      "加载补货单列表",
+      detail,
+      "补货单列表可能为空或字段错位",
+      "检查后端返回字段后重试",
+    );
+    state.replenishmentDrafts = [];
+  } finally {
+    state.replenishmentLoading = false;
+  }
+}
+
+export async function loadReplenishmentDraftDetail(
+  state: ProcurementState,
+  draftId: number,
+): Promise<void> {
+  state.replenishmentLoading = true;
+  state.replenishmentError = null;
+  try {
+    const base = state.basePath?.trim() ? state.basePath.replace(/\/$/, "") : "";
+    const url = base ? `${base}${ENDPOINT_REPLENISHMENT_DRAFTS}/${draftId}` : `${ENDPOINT_REPLENISHMENT_DRAFTS}/${draftId}`;
+    const res = await fetch(url);
+    const json = await res.json().catch(() => ({} as unknown));
+    if (!res.ok) {
+      state.replenishmentError = buildStandardError(
+        "加载补货单详情",
+        extractErrorDetail(json, `HTTP ${res.status}`),
+        "无法查看补货单详情",
+        "稍后重试",
+      );
+      state.replenishmentDetail = null;
+      state.replenishmentDetailId = null;
+      return;
+    }
+    const root = asRecord(json, ENDPOINT_REPLENISHMENT_DRAFTS, "detail");
+    const data = asRecord(root.data, ENDPOINT_REPLENISHMENT_DRAFTS, "data");
+    const linesRaw = asArray(data.lines, ENDPOINT_REPLENISHMENT_DRAFTS, "data.lines");
+    const lines: ReplenishmentDraftDetail["lines"] = linesRaw.map((row) => {
+      const item = asRecord(row, ENDPOINT_REPLENISHMENT_DRAFTS, "data.lines[]");
+      return {
+        id: toFiniteNumberOrUndefined(item.id),
+        row_index: toFiniteNumberOrUndefined(item.row_index),
+        code: optionalString(item.code),
+        product_name: optionalString(item.product_name),
+        specification: optionalString(item.specification),
+        quantity: toFiniteNumberOrUndefined(item.quantity) ?? 0,
+        current_qty: toFiniteNumberOrUndefined(item.current_qty),
+        memo: optionalString(item.memo),
+      };
+    });
+    state.replenishmentDetail = {
+      id: asNumber(data.id, ENDPOINT_REPLENISHMENT_DRAFTS, "id"),
+      draft_no: optionalString(data.draft_no) ?? "",
+      name: optionalString(data.name) ?? "",
+      source: optionalString(data.source) ?? undefined,
+      created_at: optionalString(data.created_at),
+      status: optionalString(data.status) ?? "",
+      confirmed_at: optionalString(data.confirmed_at),
+      lines,
+    };
+    state.replenishmentDetailId = state.replenishmentDetail.id;
+  } catch (e) {
+    const detail = e instanceof ResponseSchemaError ? e.message : (e instanceof Error ? e.message : String(e));
+    state.replenishmentError = buildStandardError(
+      "加载补货单详情",
+      detail,
+      "无法查看补货单详情",
+      "稍后重试",
+    );
+    state.replenishmentDetail = null;
+    state.replenishmentDetailId = null;
+  } finally {
+    state.replenishmentLoading = false;
+  }
+}
+
+export async function confirmReplenishmentDraft(
+  state: ProcurementState,
+  draftId: number,
+): Promise<void> {
+  state.replenishmentConfirmBusy = true;
+  state.replenishmentConfirmResult = null;
+  try {
+    const base = state.basePath?.trim() ? state.basePath.replace(/\/$/, "") : "";
+    const url = base
+      ? `${base}${ENDPOINT_REPLENISHMENT_DRAFTS}/${draftId}/confirm`
+      : `${ENDPOINT_REPLENISHMENT_DRAFTS}/${draftId}/confirm`;
+    const res = await fetch(url, { method: "PATCH" });
+    const json = await res.json().catch(() => ({} as unknown));
+    if (!res.ok) {
+      state.replenishmentConfirmResult = {
+        message: buildStandardError(
+          "确认补货单",
+          extractErrorDetail(json, `HTTP ${res.status}`),
+          "补货未执行",
+          "稍后重试",
+        ),
+      };
+      return;
+    }
+    const root = asRecord(json, ENDPOINT_REPLENISHMENT_DRAFTS, "confirm");
+    const data = asRecord(root.data, ENDPOINT_REPLENISHMENT_DRAFTS, "data");
+    const executed = optionalNumber(data.executed);
+    state.replenishmentConfirmResult = {
+      executed: executed ?? undefined,
+      message: `已执行 ${executed ?? 0} 条补货操作。`,
+    };
+    await loadReplenishmentDrafts(state);
+  } catch (e) {
+    const detail = e instanceof ResponseSchemaError ? e.message : (e instanceof Error ? e.message : String(e));
+    state.replenishmentConfirmResult = {
+      message: buildStandardError(
+        "确认补货单",
+        detail,
+        "补货未执行",
+        "稍后重试",
+      ),
+    };
+  } finally {
+    state.replenishmentConfirmBusy = false;
+  }
 }

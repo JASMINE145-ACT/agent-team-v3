@@ -158,6 +158,35 @@ class OrderLineDB(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.now)
 
 
+class ReplenishmentDraftDB(Base):
+    """补货单主表（待确认补货单落库，确认后执行 modify_inventory）"""
+    __tablename__ = "replenishment_drafts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    draft_no = Column(String(50), nullable=False, unique=True, index=True)
+    name = Column(String(500), nullable=False, index=True)
+    source = Column(String(20), nullable=False, default="replenishment")  # 'replenishment'
+    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    confirmed_at = Column(DateTime, nullable=True)
+    status = Column(String(20), nullable=False, default="draft")  # draft / confirmed
+
+
+class ReplenishmentDraftLineDB(Base):
+    """补货单明细（每行一条）"""
+    __tablename__ = "replenishment_draft_lines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    draft_id = Column(Integer, nullable=False, index=True)  # FK replenishment_drafts.id
+    row_index = Column(Integer, nullable=False, default=0)
+    code = Column(String(100), nullable=True)
+    product_name = Column(String(500), nullable=True)
+    specification = Column(String(500), nullable=True)
+    quantity = Column(Float, nullable=False, default=0)  # 拟补数量
+    current_qty = Column(Float, nullable=True)  # 预览时查到的当前库存/可售
+    memo = Column(String(1000), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+
 class ProcurementApprovalDB(Base):
     """采购批准表（基于缺货生成采购建议，人工批准后落库并通知采购员）"""
     __tablename__ = "procurement_approvals"
@@ -634,6 +663,33 @@ class DataService:
                 seq = 1
         return f"{prefix}{seq:04d}"
 
+    def _generate_replenishment_no(self, session: Session) -> str:
+        """生成唯一补货单编号 RP-{YYYYMMDD}-{序号}"""
+        today = datetime.now().strftime("%Y%m%d")
+        prefix = f"RP-{today}-"
+        if self.engine.dialect.name == "sqlite":
+            row = session.execute(
+                text(
+                    "SELECT draft_no FROM replenishment_drafts WHERE draft_no LIKE :p ORDER BY id DESC LIMIT 1"
+                ),
+                {"p": f"{prefix}%"},
+            ).fetchone()
+            r = row[0] if row else None
+        else:
+            stmt = select(ReplenishmentDraftDB.draft_no).where(
+                ReplenishmentDraftDB.draft_no.like(f"{prefix}%")
+            ).order_by(ReplenishmentDraftDB.id.desc()).limit(1)
+            row = session.execute(stmt).first()
+            r = row[0] if row else None
+        if r is None:
+            seq = 1
+        else:
+            try:
+                seq = int(str(r).split("-")[-1]) + 1
+            except (ValueError, IndexError):
+                seq = 1
+        return f"{prefix}{seq:04d}"
+
     def _generate_order_no(self, session: Session) -> str:
         """生成唯一订单编号 SO-{YYYYMMDD}-{序号}"""
         today = datetime.now().strftime("%Y%m%d")
@@ -899,6 +955,196 @@ class DataService:
             return None
         finally:
             session.close()
+
+    # ---------- 补货单（待确认补货单落库，确认后执行库存修改） ----------
+
+    def insert_replenishment_draft(
+        self,
+        name: str,
+        source: str = "replenishment",
+        lines: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """
+        写入 replenishment_drafts + replenishment_draft_lines，返回 draft_id, draft_no, created_at。
+        lines 每项含 code, product_name, specification, quantity, current_qty?, memo?
+        """
+        lines = lines or []
+        session = self.SessionLocal()
+        try:
+            draft_no = self._generate_replenishment_no(session)
+            now = datetime.now()
+            draft = ReplenishmentDraftDB(
+                draft_no=draft_no,
+                name=(name or "").strip() or "补货单",
+                source=source.strip() or "replenishment",
+                created_at=now,
+                confirmed_at=None,
+                status="draft",
+            )
+            session.add(draft)
+            session.flush()
+            draft_id = draft.id
+            for i, line in enumerate(lines):
+                ln = ReplenishmentDraftLineDB(
+                    draft_id=draft_id,
+                    row_index=int(line.get("row_index", i)),
+                    code=str(line.get("code", ""))[:100] if line.get("code") else None,
+                    product_name=str(line.get("product_name", ""))[:500] if line.get("product_name") else None,
+                    specification=str(line.get("specification", ""))[:500] if line.get("specification") else None,
+                    quantity=float(line.get("quantity", 0) or 0),
+                    current_qty=float(line.get("current_qty")) if line.get("current_qty") is not None else None,
+                    memo=str(line.get("memo", ""))[:1000] if line.get("memo") else None,
+                    created_at=now,
+                )
+                session.add(ln)
+            session.commit()
+            return {"draft_id": draft_id, "draft_no": draft_no, "created_at": now.isoformat()}
+        except Exception as e:
+            logger.error("insert_replenishment_draft failed: %s", e, exc_info=True)
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_replenishment_drafts(
+        self,
+        name_contains: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: Optional[int] = 20,
+    ) -> List[Dict]:
+        """补货单列表，支持按 name 模糊、status 筛选"""
+        session = self.SessionLocal()
+        try:
+            q = session.query(ReplenishmentDraftDB).order_by(ReplenishmentDraftDB.created_at.desc())
+            if name_contains:
+                q = q.filter(ReplenishmentDraftDB.name.contains(name_contains))
+            if status:
+                q = q.filter(ReplenishmentDraftDB.status == status)
+            if limit:
+                q = q.limit(limit)
+            rows = q.all()
+            out: List[Dict] = []
+            for r in rows:
+                out.append(
+                    {
+                        "id": r.id,
+                        "draft_no": r.draft_no,
+                        "name": r.name,
+                        "source": r.source,
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                        "status": r.status,
+                        "confirmed_at": r.confirmed_at.isoformat() if r.confirmed_at else None,
+                    }
+                )
+            return out
+        finally:
+            session.close()
+
+    def get_replenishment_draft_by_id(self, draft_id: int) -> Optional[Dict]:
+        """补货单详情：主表 + 全部 lines"""
+        session = self.SessionLocal()
+        try:
+            draft = session.query(ReplenishmentDraftDB).filter_by(id=draft_id).first()
+            if not draft:
+                return None
+            lines = (
+                session.query(ReplenishmentDraftLineDB)
+                .filter_by(draft_id=draft_id)
+                .order_by(ReplenishmentDraftLineDB.row_index)
+                .all()
+            )
+            return {
+                "id": draft.id,
+                "draft_no": draft.draft_no,
+                "name": draft.name,
+                "source": draft.source,
+                "created_at": draft.created_at.isoformat() if draft.created_at else None,
+                "status": draft.status,
+                "confirmed_at": draft.confirmed_at.isoformat() if draft.confirmed_at else None,
+                "lines": [
+                    {
+                        "id": ln.id,
+                        "row_index": ln.row_index,
+                        "code": ln.code,
+                        "product_name": ln.product_name,
+                        "specification": ln.specification,
+                        "quantity": ln.quantity,
+                        "current_qty": ln.current_qty,
+                        "memo": ln.memo,
+                    }
+                    for ln in lines
+                ],
+            }
+        finally:
+            session.close()
+
+    def get_replenishment_draft_by_no(self, draft_no: str) -> Optional[Dict]:
+        """按 draft_no 查补货单详情"""
+        session = self.SessionLocal()
+        try:
+            draft = (
+                session.query(ReplenishmentDraftDB)
+                .filter_by(draft_no=(draft_no or "").strip())
+                .first()
+            )
+            if not draft:
+                return None
+            return self.get_replenishment_draft_by_id(draft.id)
+        finally:
+            session.close()
+
+    def update_replenishment_draft_lines(self, draft_id: int, lines: List[Dict]) -> bool:
+        """覆盖更新补货单的全部行"""
+        session = self.SessionLocal()
+        try:
+            draft = session.query(ReplenishmentDraftDB).filter_by(id=draft_id).first()
+            if not draft:
+                return False
+            session.query(ReplenishmentDraftLineDB).filter_by(draft_id=draft_id).delete()
+            now = datetime.now()
+            for i, line in enumerate(lines or []):
+                ln = ReplenishmentDraftLineDB(
+                    draft_id=draft_id,
+                    row_index=int(line.get("row_index", i)),
+                    code=str(line.get("code", ""))[:100] if line.get("code") else None,
+                    product_name=str(line.get("product_name", ""))[:500] if line.get("product_name") else None,
+                    specification=str(line.get("specification", ""))[:500] if line.get("specification") else None,
+                    quantity=float(line.get("quantity", 0) or 0),
+                    current_qty=float(line.get("current_qty")) if line.get("current_qty") is not None else None,
+                    memo=str(line.get("memo", ""))[:1000] if line.get("memo") else None,
+                    created_at=now,
+                )
+                session.add(ln)
+            session.commit()
+            return True
+        except Exception as e:
+            logger.error("update_replenishment_draft_lines failed: %s", e, exc_info=True)
+            session.rollback()
+            return False
+        finally:
+            session.close()
+
+    def confirm_replenishment_draft(self, draft_id: int) -> Optional[Dict]:
+        """
+        将补货单标记为 confirmed，返回主表和全部行。
+        实际执行 modify_inventory 由调用方完成。
+        """
+        session = self.SessionLocal()
+        try:
+            draft = session.query(ReplenishmentDraftDB).filter_by(id=draft_id).first()
+            if not draft:
+                return None
+            draft.status = "confirmed"
+            draft.confirmed_at = datetime.now()
+            session.commit()
+        except Exception as e:
+            logger.error("confirm_replenishment_draft failed: %s", e, exc_info=True)
+            session.rollback()
+            return None
+        finally:
+            session.close()
+        # 重新读取完整详情
+        return self.get_replenishment_draft_by_id(draft_id)
 
     def get_all_records(self, limit: Optional[int] = None, include_deleted: bool = False) -> List[Dict]:
         """

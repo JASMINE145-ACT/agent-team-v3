@@ -741,6 +741,169 @@ async def quotation_drafts_confirm(draft_id: int) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------- 补货单（补货预览 + 落库 + 确认后执行库存修改）----------
+
+
+@router.post("/api/replenishment-drafts")
+async def replenishment_drafts_create(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """
+    补货预览并落库：根据用户输入的产品/编码与数量生成补货单草稿。
+    Body: { "lines": [ { "product_or_code": string, "quantity": number } ] }
+    """
+    raw_lines = body.get("lines")
+    if not isinstance(raw_lines, list) or not raw_lines:
+        raise HTTPException(status_code=400, detail="请提供非空的 lines 数组")
+    try:
+        from backend.tools.inventory.services.replenishment_preview import preview_replenishment_lines
+    except ImportError as e:
+        logger.exception("replenishment_preview 加载失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    preview = preview_replenishment_lines(raw_lines)
+    if not preview.get("lines"):
+        detail = "; ".join(preview.get("errors") or []) or "补货预览失败"
+        raise HTTPException(status_code=400, detail=detail)
+
+    name = (body.get("name") or "").strip() or "补货-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+    try:
+        ds = _get_oos_data_service()
+        result = ds.insert_replenishment_draft(name=name, source="replenishment", lines=preview["lines"])
+        return {"success": True, "data": {**result, "lines": preview["lines"], "errors": preview.get("errors") or []}}
+    except Exception as e:
+        logger.exception("replenishment-drafts POST 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/replenishment-drafts")
+async def replenishment_drafts_list(
+    name: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: Optional[int] = 20,
+) -> Dict[str, Any]:
+    """补货单列表，支持按 name 模糊、status 筛选。"""
+    try:
+        ds = _get_oos_data_service()
+        rows = ds.get_replenishment_drafts(
+            name_contains=name.strip() if name else None,
+            status=status.strip() if status else None,
+            limit=min(100, limit) if limit else 20,
+        )
+        return {"success": True, "data": rows}
+    except Exception as e:
+        logger.exception("replenishment-drafts GET 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/replenishment-drafts/by-no/{draft_no}")
+async def replenishment_drafts_get_by_no(draft_no: str) -> Dict[str, Any]:
+    """按 draft_no 查补货单详情。"""
+    try:
+        ds = _get_oos_data_service()
+        draft = ds.get_replenishment_draft_by_no(draft_no)
+        if not draft:
+            raise HTTPException(status_code=404, detail="未找到该补货单")
+        return {"success": True, "data": draft}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("replenishment-drafts GET by no 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/replenishment-drafts/{draft_id}")
+async def replenishment_drafts_get(draft_id: int) -> Dict[str, Any]:
+    """补货单详情（主表 + 全部 lines）。"""
+    try:
+        ds = _get_oos_data_service()
+        draft = ds.get_replenishment_draft_by_id(draft_id)
+        if not draft:
+            raise HTTPException(status_code=404, detail="未找到该补货单")
+        return {"success": True, "data": draft}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("replenishment-drafts GET by id 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/api/replenishment-drafts/{draft_id}")
+async def replenishment_drafts_update(draft_id: int, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """
+    覆盖更新补货单行。Body: { "lines": [ { code, product_name, specification, quantity, current_qty?, memo? } ] }
+    """
+    lines = body.get("lines")
+    if not isinstance(lines, list):
+        lines = []
+    try:
+        ds = _get_oos_data_service()
+        ok = ds.update_replenishment_draft_lines(draft_id, lines)
+        if not ok:
+            raise HTTPException(status_code=404, detail="未找到该补货单")
+        draft = ds.get_replenishment_draft_by_id(draft_id)
+        return {"success": True, "data": draft}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("replenishment-drafts PATCH 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/api/replenishment-drafts/{draft_id}/confirm")
+async def replenishment_drafts_confirm(draft_id: int) -> Dict[str, Any]:
+    """
+    将补货单标记为 confirmed，并并行调用 modify_inventory 执行真实补货。
+    """
+    try:
+        ds = _get_oos_data_service()
+        draft = ds.get_replenishment_draft_by_id(draft_id)
+        if not draft:
+            raise HTTPException(status_code=404, detail="未找到该补货单")
+        lines = draft.get("lines") or []
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from backend.tools.inventory.services.inventory_agent_tools import execute_inventory_tool
+
+        results = []
+        with ThreadPoolExecutor(max_workers=min(len(lines) or 1, 8)) as ex:
+            futures = []
+            for ln in lines:
+                code = (ln.get("code") or "").strip()
+                qty = ln.get("quantity") or 0
+                if not code:
+                    results.append({"code": None, "success": False, "error": "缺少 code"})
+                    continue
+
+                def _run_one(payload: Dict[str, Any]) -> Dict[str, Any]:
+                    out = execute_inventory_tool("modify_inventory", payload)
+                    return {
+                        "code": payload.get("code"),
+                        "success": bool(out.get("success")),
+                        "result": out.get("result"),
+                        "error": out.get("error"),
+                    }
+
+                payload = {
+                    "code": code,
+                    "action": "supplement",
+                    "quantity": qty,
+                    "memo": f"Replenishment draft #{draft.get('draft_no')}",
+                }
+                futures.append(ex.submit(_run_one, payload))
+
+            for fut in as_completed(futures):
+                results.append(fut.result())
+
+        confirmed = ds.confirm_replenishment_draft(draft_id)
+        if not confirmed:
+            raise HTTPException(status_code=500, detail="补货单状态更新失败")
+        executed = sum(1 for r in results if r.get("success"))
+        return {"success": True, "data": {"executed": executed, "results": results}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("replenishment-drafts PATCH confirm 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ---------- Work Mode（报价批量，固定流程 + ReAct，与 Chat 独立）----------
 
 _WORK_ALLOWED_LEVELS = {

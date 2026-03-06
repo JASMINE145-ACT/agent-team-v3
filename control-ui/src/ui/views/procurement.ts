@@ -1,6 +1,6 @@
 import { html, nothing } from "lit";
 import { t } from "../../i18n/index.ts";
-import type { ShortageRecord } from "../types.ts";
+import type { ShortageRecord, ReplenishmentDraftListItem, ReplenishmentDraftDetail } from "../types.ts";
 import { procurementItemKey } from "../controllers/procurement.ts";
 
 export type ProcurementProps = {
@@ -17,6 +17,17 @@ export type ProcurementProps = {
   sortDir: "asc" | "desc";
   page: number;
   pageSize: number;
+  replenishmentDrafts: ReplenishmentDraftListItem[];
+  replenishmentDetail: ReplenishmentDraftDetail | null;
+  replenishmentDetailId: number | null;
+  replenishmentLoading: boolean;
+  replenishmentError: string | null;
+  replenishmentConfirmBusy: boolean;
+  replenishmentConfirmResult: { executed?: number; message?: string } | null;
+  onReplenishmentRefresh: () => void;
+  onSelectReplenishmentDraft: (draftId: number) => void;
+  onConfirmReplenishment: (draftId: number) => void;
+  onClearReplenishmentDetail: () => void;
   onRefresh: () => void;
   onToggleSelect: (key: string) => void;
   onApprove: (item: ShortageRecord) => void;
@@ -280,7 +291,169 @@ export function renderProcurement(props: ProcurementProps) {
       ${approveResult
         ? html`
             <div class="card" style="grid-column: 1 / -1;" role="status" aria-live="polite">
-              <div class="card-sub">${approveResult.approved_count != null ? `${t("procurement.approvedCount", { count: String(approveResult.approved_count) })} ` : ""}${approveResult.message ?? ""}</div>
+              <div class="card-sub">
+                ${approveResult.approved_count != null
+                  ? `${t("procurement.approvedCount", { count: String(approveResult.approved_count) })} `
+                  : ""}${approveResult.message ?? ""}
+              </div>
+            </div>
+          `
+        : nothing}
+
+      <div class="card" style="grid-column: 1 / -1; margin-top: 16px;">
+        <div class="card-title">${t("replenishment.title")}</div>
+        <div class="card-sub">${t("replenishment.subtitle")}</div>
+        <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <button
+            class="btn"
+            ?disabled=${props.replenishmentLoading}
+            @click=${props.onReplenishmentRefresh}
+            aria-label=${t("replenishment.refreshList")}
+          >
+            ${props.replenishmentLoading ? t("replenishment.loading") : t("replenishment.refreshList")}
+          </button>
+        </div>
+      </div>
+
+      ${props.replenishmentError
+        ? html`
+            <div class="card" style="grid-column: 1 / -1; border-color: var(--danger, #c62828);" role="alert" aria-live="assertive">
+              <div class="card-title" style="color: var(--danger, #c62828);">${t("common.errorTitle")}</div>
+              <div class="card-sub">${props.replenishmentError}</div>
+            </div>
+          `
+        : nothing}
+
+      <div class="card" style="grid-column: 1 / -1;">
+        <div class="card-title">${t("replenishment.listTitle")}</div>
+        <div class="card-sub">${t("replenishment.listHint")}</div>
+
+        ${props.replenishmentLoading && props.replenishmentDrafts.length === 0
+          ? html`<p class="muted" style="margin-top: 12px;">${t("replenishment.loading")}</p>`
+          : props.replenishmentDrafts.length === 0
+            ? html`<p class="muted" style="margin-top: 12px;">${t("replenishment.noDrafts")}</p>`
+            : html`
+                <div style="overflow-x: auto; margin-top: 8px;">
+                  <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                    <thead>
+                      <tr style="background: var(--bg-secondary, #eee);">
+                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">
+                          ${t("replenishment.colDraftNo")}
+                        </th>
+                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">
+                          ${t("replenishment.colName")}
+                        </th>
+                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">
+                          ${t("replenishment.colCreatedAt")}
+                        </th>
+                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">
+                          ${t("replenishment.colStatus")}
+                        </th>
+                        <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">
+                          ${t("replenishment.colActions")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${props.replenishmentDrafts.map(
+                        (d) => html`
+                          <tr>
+                            <td style="padding: 6px 8px; border: 1px solid var(--border);">${d.draft_no}</td>
+                            <td style="padding: 6px 8px; border: 1px solid var(--border);">${d.name}</td>
+                            <td style="padding: 6px 8px; border: 1px solid var(--border);">
+                              ${d.created_at ? new Date(d.created_at).toLocaleString() : "-"}
+                            </td>
+                            <td style="padding: 6px 8px; border: 1px solid var(--border);">${d.status}</td>
+                            <td style="padding: 6px 8px; border: 1px solid var(--border);">
+                              <button
+                                class="btn btn-sm"
+                                style="font-size: 12px; padding: 4px 8px; margin-right: 6px;"
+                                @click=${() => props.onSelectReplenishmentDraft(d.id)}
+                              >
+                                ${t("replenishment.viewDetail")}
+                              </button>
+                              <button
+                                class="btn btn-sm"
+                                style="font-size: 12px; padding: 4px 8px;"
+                                ?disabled=${props.replenishmentConfirmBusy || d.status === "confirmed"}
+                                @click=${() => props.onConfirmReplenishment(d.id)}
+                              >
+                                ${props.replenishmentConfirmBusy
+                                  ? t("replenishment.confirming")
+                                  : t("replenishment.confirm")}
+                              </button>
+                            </td>
+                          </tr>
+                        `,
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              `}
+      </div>
+
+      ${props.replenishmentDetail && props.replenishmentDetailId != null
+        ? html`
+            <div class="card" style="grid-column: 1 / -1;">
+              <div class="card-title">
+                ${t("replenishment.detailTitle", { no: props.replenishmentDetail.draft_no })}
+              </div>
+              <div class="card-sub">
+                ${t("replenishment.detailSubtitle")}
+              </div>
+              <div style="overflow-x: auto; margin-top: 8px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                  <thead>
+                    <tr style="background: var(--bg-secondary, #eee);">
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">
+                        ${t("replenishment.colCode")}
+                      </th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">
+                        ${t("replenishment.colProduct")}
+                      </th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">
+                        ${t("replenishment.colSpec")}
+                      </th>
+                      <th style="padding: 6px 8px; text-align: right; border: 1px solid var(--border);">
+                        ${t("replenishment.colCurrentQty")}
+                      </th>
+                      <th style="padding: 6px 8px; text-align: right; border: 1px solid var(--border);">
+                        ${t("replenishment.colQuantity")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${props.replenishmentDetail.lines.map(
+                      (ln) => html`
+                        <tr>
+                          <td style="padding: 6px 8px; border: 1px solid var(--border);">${ln.code ?? "-"}</td>
+                          <td style="padding: 6px 8px; border: 1px solid var(--border);">${ln.product_name ?? "-"}</td>
+                          <td style="padding: 6px 8px; border: 1px solid var(--border);">${ln.specification ?? "-"}</td>
+                          <td style="padding: 6px 8px; text-align: right; border: 1px solid var(--border);">
+                            ${ln.current_qty ?? "-"}
+                          </td>
+                          <td style="padding: 6px 8px; text-align: right; border: 1px solid var(--border);">
+                            ${ln.quantity}
+                          </td>
+                        </tr>
+                      `,
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div style="margin-top: 10px; display: flex; gap: 8px;">
+                <button class="btn btn-sm" @click=${props.onClearReplenishmentDetail}>
+                  ${t("common.close")}
+                </button>
+              </div>
+            </div>
+          `
+        : nothing}
+
+      ${props.replenishmentConfirmResult
+        ? html`
+            <div class="card" style="grid-column: 1 / -1;" role="status" aria-live="polite">
+              <div class="card-sub">${props.replenishmentConfirmResult.message ?? ""}</div>
             </div>
           `
         : nothing}

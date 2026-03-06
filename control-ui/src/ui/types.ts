@@ -428,6 +428,34 @@ export type QuotationDraftDetail = QuotationDraftListItem & {
   lines: QuotationDraftLine[];
 };
 
+/** 补货页：补货单列表项（GET /api/replenishment-drafts 单条） */
+export type ReplenishmentDraftListItem = {
+  id: number;
+  draft_no: string;
+  name: string;
+  source?: string;
+  created_at?: string | null;
+  status: string;
+  confirmed_at?: string | null;
+};
+
+/** 补货页：补货单明细行 */
+export type ReplenishmentDraftLine = {
+  id?: number;
+  row_index?: number;
+  code?: string | null;
+  product_name?: string | null;
+  specification?: string | null;
+  quantity: number;
+  current_qty?: number | null;
+  memo?: string | null;
+};
+
+/** 补货页：补货单详情（主表 + lines） */
+export type ReplenishmentDraftDetail = ReplenishmentDraftListItem & {
+  lines: ReplenishmentDraftLine[];
+};
+
 export type GatewaySessionsDefaults = {
   model: string | null;
   contextTokens: number | null;
