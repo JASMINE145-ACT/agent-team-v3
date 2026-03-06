@@ -1,7 +1,7 @@
 import { nothing } from "lit";
 import { t } from "../i18n/index.ts";
 import type { AppViewState } from "./app-view-state.ts";
-import { cancelWork, retryWork, runWork, resumeWork, saveQuotationDraft } from "./controllers/work.ts";
+import { cancelWork, generateWorkFileFromText, retryWork, runWork, resumeWork, saveQuotationDraft } from "./controllers/work.ts";
 import { renderWork } from "./views/work.ts";
 
 function normalizePathKey(p: string): string {
@@ -29,6 +29,15 @@ export function renderWorkTab(state: AppViewState) {
     workOriginalFileNamesByPath: state.workOriginalFileNamesByPath,
     workPendingQuotationDraft: state.workPendingQuotationDraft,
     workQuotationDraftSaveStatus: state.workQuotationDraftSaveStatus,
+    workTextInput: state.workTextInput,
+    workTextGenerating: state.workTextGenerating,
+    workTextError: state.workTextError,
+    onWorkTextChange: (v) => {
+      state.workTextInput = v;
+    },
+    onGenerateFromText: () => {
+      void generateWorkFileFromText(state);
+    },
     onAddFile: (filePath, fileName) => {
       if (!state.workFilePaths.includes(filePath)) {
         state.workFilePaths = [...state.workFilePaths, filePath];

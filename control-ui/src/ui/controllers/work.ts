@@ -70,6 +70,12 @@ export type WorkState = {
   workDoRegisterOos: boolean;
   workPendingQuotationDraft: PendingQuotationDraft | null;
   workQuotationDraftSaveStatus: WorkQuotationDraftSaveStatus | null;
+  /** 文字报价输入内容 */
+  workTextInput: string;
+  /** 是否正在从文字生成报价单 */
+  workTextGenerating: boolean;
+  /** 文字生成报价单错误信息 */
+  workTextError: string | null;
 };
 
 type WorkRuntime = {
@@ -748,6 +754,58 @@ export async function retryWork(state: WorkState): Promise<void> {
     return;
   }
   await runWork(state);
+}
+
+/** 从文字生成报价单 Excel，加入 workFilePaths，与上传文件同等走 Work 流程 */
+export async function generateWorkFileFromText(state: WorkState): Promise<boolean> {
+  const text = (state.workTextInput || "").trim();
+  if (!text) {
+    state.workTextError = "请输入产品描述文字";
+    return false;
+  }
+  state.workTextGenerating = true;
+  state.workTextError = null;
+  try {
+    const res = await fetch(apiUrl(state.basePath, "/api/quotation/from-text"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      credentials: "same-origin",
+    });
+    const json = await res.json().catch(() => ({} as Record<string, unknown>));
+    if (!res.ok) {
+      let detail = typeof json.detail === "string" ? json.detail : extractErrorDetail(json, `HTTP ${res.status}`);
+      if (res.status === 405) {
+        detail = "Method Not Allowed：该接口需 POST。请确认使用 python start.py 或 run_backend.py 启动前后端一体服务，且未通过仅支持 GET 的静态托管访问页面。";
+      }
+      state.workTextError = detail;
+      return false;
+    }
+    const filePath = typeof json.file_path === "string" ? json.file_path : "";
+    const fileName = typeof json.file_name === "string" ? json.file_name : "文字报价.xlsx";
+    if (!filePath) {
+      state.workTextError = "接口未返回 file_path";
+      return false;
+    }
+    if (!state.workFilePaths.includes(filePath)) {
+      state.workFilePaths = [...state.workFilePaths, filePath];
+    }
+    const key = normalizePathKey(filePath);
+    if (key) {
+      state.workOriginalFileNamesByPath = {
+        ...state.workOriginalFileNamesByPath,
+        [key]: (fileName || "").trim() || filePath.split(/[/\\]/).pop() || filePath,
+      };
+    }
+    state.workTextError = null;
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    state.workTextError = buildStandardError("从文字生成报价单", msg, "未生成文件", "请检查网络或后端后重试");
+    return false;
+  } finally {
+    state.workTextGenerating = false;
+  }
 }
 
 /** 报价员确认并保存：将待确认报价单 POST 到 /api/quotation-drafts，落库后返回 draft_no */

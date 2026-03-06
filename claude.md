@@ -104,6 +104,7 @@ Agent Team version3/
 - **一键启动**：双击 `启动 Jagent.bat` 或执行 `python start.py`，会在新窗口启动后端并自动打开浏览器。
 - **后端**：`cd "Agent Team version3"` → `python run_backend.py`（默认 8000）。
 - **CLI**：`python cli_agent.py`。
+- **调试日志（本次会话）**：为配合 Cursor debug mode，在 `start.py` 中插入了少量调试日志，运行一键启动时会将环境与启动信息写入项目根目录 `debug-9e751f.log`，问题确认后可随时删除对应代码。
 - **环境变量**：与 version2 一致（OPENAI_API_KEY/ZHIPU_API_KEY、OPENAI_BASE_URL、LLM_MODEL、AOL_* 等），.env 可放在 version3 根或 quotation_tracker（version2 下）。
 - **数据库（可选 Postgres 支持）**：`requirements.txt` 默认使用 SQLite；如需接入 Postgres，可使用新增的 `psycopg2-binary`（同步驱动）与 `asyncpg`（异步驱动），并在配置中切换对应的 SQLAlchemy 数据库 URL。当前实现中，无货登记仍写本地 out_of_stock_records（SQLite/本地 DB），同时经 `backend/tools/oos/services/oos_repository.py` 以 best effort 方式同步一份到 Supabase Postgres 表 `oos_records`（仅当 `DATABASE_URL` 配置为 Supabase 时启用）；缺货登记同样先写本地 `shortage_records` 表，再由 `DataService.insert_shortage_records` 调用 `insert_oos_record(...)` 将缺货信息（需求/可用/缺口等）镜像到同一张 `oos_records` 表中，便于在 Supabase 统一查询无货+缺货记录。
 - **万鼎价格库**：**version3 不依赖 version2**，数据已放在 version3/data/。优先使用环境变量 `PRICE_LIBRARY_PATH`；未设置时先找 version3/data/ 下 `万鼎价格库_管材与国标管件_标准格式.xlsx`，不存在则用同目录下 `Copy of 万鼎...20250814.xlsx`。**新价格库整理**：若使用新版 `NEW PRICE(T) 万鼎...20251106.xlsx`，在 version3 下运行 `python scripts/build_wanding_standard_price_library.py`（脚本读 version2/data/ 下的源文件），**直接输出到 version3/data/万鼎价格库_管材与国标管件_标准格式.xlsx**；加 `--verify` 可生成后自动核对内容。管材 sheet 含 A–X 列，其中 U=相关体积、V=%、W=EXC TAX（LOCAL 不含税）、X=INC TAX（LOCAL 含税 Rp），仅管材有 U–X，国标管件仍为 A–T。
@@ -118,6 +119,7 @@ Agent Team version3/
 
 - `GET /health`：健康检查。
 - `POST /api/quotation/upload`：上传报价单，返回 file_path、file_name。
+- **Work 批量报价 HTTP**：`POST /api/work/run`（一次性执行：识别表数据→匹配+选型→填表→缺货报告→无货登记）、`POST /api/work/run-stream`（SSE 流式返回阶段进度与最终 result）、`POST /api/work/resume`（处理多候选时的人工选型，Body `{ run_id, selections }`）。后端默认走**管道式执行器**（不再由 LLM 选工具，只在匹配内部用 LLM 做选型），可通过 `WORK_USE_PIPELINE=false` 回退旧 ReAct 实现；`WORK_RUN_ID_TTL_SECONDS` 控制 run_id 有效期（默认 1 小时），`WORK_SINGLE_CAND_USE_LLM` 控制「单候选是否仍走一次 LLM 兜底」，`WORK_MATCH_MAX_WORKERS` 控制单文件匹配阶段的行级并发度。Work trace 中附带 `type=metrics` 的阶段耗时与 to_fill/shortage/unmatched/pending_choices 统计，便于回归评估。
 - **无货看板 HTTP**：`GET /api/oos/stats`、`GET /api/oos/list`、`GET /api/oos/by-file`、`GET /api/oos/by-time`；`POST /api/oos/delete`（Body `{ "product_key": "..." }` 软删除该产品所有记录）、`POST /api/oos/add`（Body `{ "product_name", "specification?", "quantity?", "unit?" }` 手动新增一条），供 control-ui 无货看板删除/手动新增，与 Agent 工具共用 DataService。
 - **缺货记录 HTTP**：`GET /api/shortage/stats`、`GET /api/shortage/list`、`GET /api/shortage/by-file`、`GET /api/shortage/by-time`；`POST /api/shortage/delete`（Body `{ "product_key": "..." }` 软删除）、`POST /api/shortage/add`（Body `{ "product_name", "specification?", "quantity?", "available_qty?" }` 手动新增，差异 shortfall 自动计算为 max(0, quantity - available_qty)）。缺货由 Work 匹配后库存不足写入或看板手动添加，供 control-ui「实例」页缺货区块展示（含手动新增）。
 - **业务知识 HTTP**：`GET /api/business-knowledge`（读取 wanding_business_knowledge.md 内容）、`PUT /api/business-knowledge`（Body `{ "content": "..." }` 保存，保存后会使 LLM selector 缓存失效）、`GET /api/business-knowledge/dependent-files`（返回选型与历史报价依赖的 Excel 路径：mapping_table、price_library），供 control-ui「业务知识」页编辑及「相关数据文件」指引（复制路径后可在资源管理器中打开或用 Excel 编辑）。

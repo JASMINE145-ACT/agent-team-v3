@@ -157,6 +157,11 @@ export const en: TranslationMap = {
     lineAvailable: "Available",
     lineShortfall: "Shortfall",
     lineIsShortage: "Shortage",
+    textInputTitle: "Text input (quotation)",
+    textInputHint: "Enter product list (multi-line or semicolon/comma separated); generated file will run with uploaded files.",
+    textInputPlaceholder: "e.g. Cable 3*2.5 100m; Switch 20 pcs",
+    generateFromText: "Generate from text",
+    textGenerating: "Generating…",
   },
   fulfill: {
     title: "Pending quotation drafts",

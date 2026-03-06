@@ -1,4 +1,4 @@
-﻿import { LitElement } from "lit";
+import { LitElement } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { i18n, I18nController, isSupportedLocale } from "../i18n/index.ts";
 import {
@@ -352,6 +352,9 @@ export class OpenClawApp extends LitElement {
   @state() workDoRegisterOos = true;
   @state() workPendingQuotationDraft: import("./controllers/work.js").PendingQuotationDraft | null = null;
   @state() workQuotationDraftSaveStatus: import("./controllers/work.js").WorkQuotationDraftSaveStatus | null = null;
+  @state() workTextInput = "";
+  @state() workTextGenerating = false;
+  @state() workTextError: string | null = null;
 
   @state() cronLoading = false;
   @state() cronJobs: CronJob[] = [];

@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
 
+from backend.tools.inventory.config import config as inventory_config
 logger = logging.getLogger(__name__)
 
 WORK_TOOLS_OPENAI_FORMAT = [
@@ -132,7 +133,12 @@ def _run_work_quotation_match(
             logger.debug("match_price_and_get_inventory 失败: %s", e)
             return None
 
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    max_workers = getattr(inventory_config, "WORK_MATCH_MAX_WORKERS", 5) or 5
+    try:
+        max_workers = max(1, min(int(max_workers), 20))
+    except Exception:
+        max_workers = 5
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
         match_results = list(pool.map(_match_one, items))
 
     for it, result in zip(items, match_results):

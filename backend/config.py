@@ -5,12 +5,17 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# base_dir = Agent Team version3 根目录；repo_root = 上一级（如 agent-jk 根）
 base_dir = Path(__file__).parent.parent
-for env_path in [base_dir / ".env", base_dir / "backend" / "tools" / "oos" / ".env"]:
+repo_root = base_dir.parent
+# 先加载 version3 / oos，最后加载项目根 .env 并 override，保证项目根的 LLM_MODEL/ZHIPU 等优先生效
+for env_path in [base_dir / "backend" / "tools" / "oos" / ".env", base_dir / ".env"]:
     if env_path.exists():
         load_dotenv(env_path)
         print(f"[Config] Loaded from: {env_path}")
-        break
+if (repo_root / ".env").exists():
+    load_dotenv(repo_root / ".env", override=True)
+    print(f"[Config] Loaded from (override): {repo_root / '.env'}")
 
 class Config:
     _OPENAI_BASE_URL_RAW = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_BASE_URL_ZHIPU") or "https://open.bigmodel.cn/api/paas/v4"
@@ -48,6 +53,9 @@ class Config:
         or (str(_v3_standard) if _v3_standard.exists() else str(_v3_old) if _v3_old.exists() else str(_v3_standard))
     )
     SESSION_STORE_DIR = Path(os.getenv("SESSION_STORE_DIR", "/tmp/sessions" if _is_vercel else str(base_dir / "data" / "sessions")))
+    # 文字报价：用案例报价单模板生成 Excel 的模板路径（供 /api/quotation/from-text）
+    _quotation_tpl = base_dir / "报价单" / "案例报价单.xlsx"
+    QUOTATION_TEMPLATE_PATH = Path(os.getenv("QUOTATION_TEMPLATE_PATH", str(_quotation_tpl)))
 
     # LangSmith：Work/Chat 模式下 LLM 调用与 token 消耗追踪（可选）
     LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "").lower() in ("1", "true", "yes")
@@ -58,6 +66,10 @@ class Config:
     FALLBACK_LLM_BASE_URL = (os.getenv("FALLBACK_BASE_URL") or "").strip() or None
     FALLBACK_LLM_API_KEY = (os.getenv("FALLBACK_API_KEY") or "").strip() or None
     FALLBACK_LLM_MODEL = (os.getenv("FALLBACK_MODEL") or "").strip() or None
+
+    # Work 模式：管道/ReAct 开关与 run_id TTL（秒）
+    WORK_USE_PIPELINE = (os.getenv("WORK_USE_PIPELINE", "true") or "").strip().lower() in ("1", "true", "yes")
+    WORK_RUN_ID_TTL_SECONDS = int(os.getenv("WORK_RUN_ID_TTL_SECONDS", str(60 * 60)))
 
     @classmethod
     def validate(cls):

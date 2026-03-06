@@ -189,6 +189,7 @@ def match_price_and_get_inventory(
     allow_suggestions_for_work: 若 True 且 LLM 返回无把握（_suggestions），则返回
     {_needs_human_choice: True, keywords, options: [...]}，供 Work 人工介入。
     """
+    from backend.tools.inventory.config import config
     from backend.tools.inventory.services.mapping_table_matcher import match_mapping_top_candidates
     from backend.tools.inventory.services.llm_selector import llm_select_best
 
@@ -236,9 +237,14 @@ def match_price_and_get_inventory(
         return None
     # 候选表：code -> source，用于最终结果和 options 标明来源
     source_by_code = {c.get("code", ""): c.get("source", "共同") for c in candidates}
-    if len(candidates) == 1:
+    if len(candidates) == 1 and not getattr(config, "WORK_SINGLE_CAND_USE_LLM", False):
         c = candidates[0]
-        r = {"code": c.get("code", ""), "matched_name": c.get("matched_name", ""), "unit_price": float(c.get("unit_price", 0) or 0), "match_source": c.get("source", "共同")}
+        r = {
+            "code": c.get("code", ""),
+            "matched_name": c.get("matched_name", ""),
+            "unit_price": float(c.get("unit_price", 0) or 0),
+            "match_source": c.get("source", "共同"),
+        }
     else:
         best = llm_select_best(keywords, candidates)
         if best is None:

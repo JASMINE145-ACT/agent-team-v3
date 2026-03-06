@@ -328,6 +328,23 @@ def get_inventory_tools_openai_format() -> list[dict]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "modify_inventory",
+                "description": "修改库存：锁定可售（lock，占位）或增补/归零（supplement）。需物料编号（code）；建议先 get_inventory_by_code 确认再调用。supplement 时 quantity>0 为增补，quantity=0 为将用户仓/可售归零。需 INVENTORY_MODIFY_ENABLED=1 才真实写 ACCURATE。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string", "description": "物料编号 Item Code，如 8030020580"},
+                        "action": {"type": "string", "description": "lock=锁定可售（占位）；supplement=增补库存或归零（quantity=0 时归零）"},
+                        "quantity": {"type": "number", "description": "数量：>0 增补，=0 将用户仓/可售归零"},
+                        "memo": {"type": "string", "description": "可选备注，如原因/单号"},
+                    },
+                    "required": ["code", "action", "quantity"],
+                },
+            },
+        },
     ]
 
 
@@ -342,6 +359,18 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any]) -> dict[s
         return _execute_match_wanding_price(arguments)
     if name == "select_wanding_match":
         return _execute_select_wanding_match(arguments)
+    if name == "modify_inventory":
+        try:
+            from backend.tools.inventory.services.inventory_modify_service import modify_inventory as do_modify
+            return do_modify(
+                code=(arguments.get("code") or "").strip(),
+                action=(arguments.get("action") or "").strip().lower(),
+                quantity=arguments.get("quantity"),
+                memo=(arguments.get("memo") or "").strip(),
+            )
+        except Exception as e:
+            logger.exception("modify_inventory 失败")
+            return {"success": False, "error": str(e), "result": f"修改库存失败: {e}"}
 
     try:
         table = _get_table_agent()

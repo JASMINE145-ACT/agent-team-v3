@@ -268,6 +268,27 @@ class DataService:
                 except Exception as e:
                     logger.debug("创建 upload_batch_id 索引: %s", e)
 
+            # shortage_records 表补充邮件相关列（与无货对齐，旧库可能缺这些列）
+            try:
+                r = conn.execute(text("PRAGMA table_info(shortage_records)"))
+                shortage_existing = {row[1] for row in r.fetchall()}
+            except Exception:
+                shortage_existing = set()
+            shortage_alters = [
+                ("last_email_sent_at", "ALTER TABLE shortage_records ADD COLUMN last_email_sent_at DATETIME"),
+                ("email_status", "ALTER TABLE shortage_records ADD COLUMN email_status VARCHAR(20) DEFAULT 'pending'"),
+                ("email_sent_by", "ALTER TABLE shortage_records ADD COLUMN email_sent_by VARCHAR(100)"),
+                ("email_sent_count", "ALTER TABLE shortage_records ADD COLUMN email_sent_count INTEGER NOT NULL DEFAULT 0"),
+            ]
+            for col, sql in shortage_alters:
+                if col not in shortage_existing:
+                    try:
+                        conn.execute(text(sql))
+                        conn.commit()
+                        logger.info("迁移: 已添加列 shortage_records.%s", col)
+                    except Exception as e:
+                        logger.warning("迁移添加列 shortage_records.%s 失败: %s", col, e)
+
     def _generate_product_key(self, product_name: str, specification: Optional[str]) -> str:
         """生成 product_key（规格标准化：统一小写、去除规格内部空格，使 DN40/DN 40 视为同一产品）"""
         name = product_name.strip().lower()

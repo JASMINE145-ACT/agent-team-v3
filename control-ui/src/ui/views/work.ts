@@ -23,6 +23,8 @@ const PRICE_LEVEL_OPTIONS: { value: string; label: string }[] = [
 export type WorkProps = WorkState & {
   onAddFile: (filePath: string, fileName: string) => void;
   onRemoveFile: (index: number) => void;
+  onWorkTextChange: (value: string) => void;
+  onGenerateFromText: () => void;
   onCustomerLevelChange: (level: string) => void;
   onDoRegisterOosChange: (v: boolean) => void;
   onRun: () => void;
@@ -109,8 +111,13 @@ export function renderWork(props: WorkProps) {
     workDoRegisterOos,
     workPendingQuotationDraft,
     workQuotationDraftSaveStatus,
+    workTextInput,
+    workTextGenerating,
+    workTextError,
     onAddFile,
     onRemoveFile,
+    onWorkTextChange,
+    onGenerateFromText,
     onCustomerLevelChange,
     onDoRegisterOosChange,
     onRun,
@@ -206,6 +213,33 @@ export function renderWork(props: WorkProps) {
               </ul>
             `
           : html`<p class="muted" style="margin-top: 6px;">${t("work.noFiles")}</p>`}
+      </div>
+
+      <div style="margin-bottom: 12px; padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary, #fafafa);">
+        <label class="card-title" style="font-size: 13px;">${t("work.textInputTitle")}</label>
+        <p class="muted" style="font-size: 12px; margin: 4px 0 8px 0;">${t("work.textInputHint")}</p>
+        <textarea
+          .value=${workTextInput}
+          @input=${(e: Event) => onWorkTextChange((e.target as HTMLTextAreaElement).value)}
+          placeholder=${t("work.textInputPlaceholder")}
+          rows="4"
+          style="width: 100%; max-width: 560px; padding: 8px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; resize: vertical;"
+          ?disabled=${workTextGenerating}
+          aria-label=${t("work.textInputTitle")}
+       ></textarea>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+          <button
+            type="button"
+            class="btn"
+            style="background: var(--accent); color: var(--bg);"
+            ?disabled=${!workTextInput.trim() || workTextGenerating}
+            @click=${onGenerateFromText}
+            aria-label=${t("work.generateFromText")}
+          >
+            ${workTextGenerating ? t("work.textGenerating") : t("work.generateFromText")}
+          </button>
+          ${workTextError ? html`<span style="color: var(--danger, #c00); font-size: 13px;" role="alert">${workTextError}</span>` : nothing}
+        </div>
       </div>
 
       <div style="display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px;">

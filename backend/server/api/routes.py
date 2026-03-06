@@ -112,6 +112,45 @@ async def quotation_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/api/quotation/from-text")
+async def quotation_from_text(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """
+    从文字生成报价单 Excel：解析用户输入为询价行，填入案例报价单模板，写入 uploads/。
+    返回与上传接口一致的 { file_path, file_name }，前端可加入 workFilePaths 后走同一套 Work 流程。
+    """
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="请提供 text（产品描述文字）")
+    try:
+        from backend.tools.quotation.text_to_inquiry import text_to_inquiry_items
+        from backend.tools.quotation.quote_tools import fill_template_with_inquiry_items
+    except ImportError as e:
+        logger.exception("quotation/from-text 依赖加载失败")
+        raise HTTPException(status_code=500, detail=str(e))
+    template_path = (body.get("template_path") or "").strip() or str(Config.QUOTATION_TEMPLATE_PATH)
+    if not Path(template_path).exists():
+        raise HTTPException(status_code=500, detail=f"报价单模板不存在: {template_path}")
+    Config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = f"{uuid.uuid4().hex[:12]}_文字报价.xlsx"
+    output_path = (Config.UPLOAD_DIR / safe_name).resolve()
+    try:
+        output_path.relative_to(Config.UPLOAD_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="非法输出路径")
+    items = text_to_inquiry_items(text)
+    if not items:
+        raise HTTPException(status_code=400, detail="未能从文字中解析出任何产品行，请检查输入格式")
+    out = fill_template_with_inquiry_items(
+        template_path=template_path,
+        items=items,
+        output_path=str(output_path),
+        sheet_name="询价单",
+    )
+    if not out.get("success"):
+        raise HTTPException(status_code=500, detail=out.get("error", "填写模板失败"))
+    return {"file_path": str(output_path), "file_name": "文字报价.xlsx"}
+
+
 @router.get("/api/quotation/download")
 async def quotation_download(path: str = "") -> FileResponse:
     """

@@ -156,6 +156,11 @@ export const zh_CN: TranslationMap = {
     lineAvailable: "可用库存",
     lineShortfall: "缺口",
     lineIsShortage: "缺货",
+    textInputTitle: "文字输入报价",
+    textInputHint: "输入产品描述（多行或分号/逗号分隔），生成报价单后与上传文件一起执行。",
+    textInputPlaceholder: "例如：电缆 3*2.5 100米；开关 20个",
+    generateFromText: "从文字生成报价单",
+    textGenerating: "生成中…",
   },
   fulfill: {
     refreshList: "刷新列表",

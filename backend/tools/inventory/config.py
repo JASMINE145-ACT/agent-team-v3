@@ -123,6 +123,12 @@ class InventoryConfig:
     TOOL_EXEC_TIMEOUT: int = int(os.environ.get("TOOL_EXEC_TIMEOUT", "90"))  # AOL 多 code 时需多次 API 调用，35s 易超时
     INVENTORY_DEMO_MODE: bool = os.environ.get("INVENTORY_DEMO_MODE", "").strip().lower() in ("1", "true", "yes")  # 演示模式：src 不可用时返回模拟库存
 
+    # Work/询价：选型质量与并发配置
+    # - WORK_SINGLE_CAND_USE_LLM: len(candidates)==1 时是否仍走一次 LLM 选型以兜底（默认 0=否）
+    # - WORK_MATCH_MAX_WORKERS: Work 匹配阶段每文件并行行数上限（默认 5）
+    WORK_SINGLE_CAND_USE_LLM: bool = os.environ.get("WORK_SINGLE_CAND_USE_LLM", "0").strip().lower() in ("1", "true", "yes")
+    WORK_MATCH_MAX_WORKERS: int = int(os.environ.get("WORK_MATCH_MAX_WORKERS", "5"))
+
 
 # 全局配置实例
 config = InventoryConfig()

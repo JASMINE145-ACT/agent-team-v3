@@ -234,6 +234,9 @@ export type AppViewState = {
   workDoRegisterOos: boolean;
   workPendingQuotationDraft: import("./controllers/work.js").PendingQuotationDraft | null;
   workQuotationDraftSaveStatus: import("./controllers/work.js").WorkQuotationDraftSaveStatus | null;
+  workTextInput: string;
+  workTextGenerating: boolean;
+  workTextError: string | null;
   cronLoading: boolean;
   cronJobs: CronJob[];
   cronStatus: CronStatus | null;

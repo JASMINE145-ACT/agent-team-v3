@@ -13,11 +13,38 @@ import time
 import webbrowser
 from pathlib import Path
 
+# region agent log
+import json as _agent_json
+
+
+def _agent_debug_log(run_id, hypothesis_id, location, message, data):
+    try:
+        log_path = Path(__file__).resolve().parents[1] / "debug-9e751f.log"
+        payload = {
+            "sessionId": "9e751f",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(_agent_json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        # 调试日志失败时静默忽略
+        pass
+
+
+# endregion
+
 def main():
     root = Path(__file__).resolve().parent
     os.chdir(root)
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
+
+    run_id = "initial"
 
     from backend.config import Config
     port = Config.API_PORT
@@ -33,11 +60,43 @@ def main():
         # 本地开发：清掉 DATABASE_URL，强制用 SQLite
         env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
 
+    # region agent log
+    _agent_debug_log(
+        run_id,
+        "H1",
+        "start.py:main:env",
+        "start main env resolved",
+        {
+            "root": str(root),
+            "on_cloud": on_cloud,
+            "platform": sys.platform,
+            "port": port,
+            "has_database_url": "DATABASE_URL" in env,
+        },
+    )
+    # endregion
+
+    cmd = [sys.executable, "run_backend.py"]
+
+    # region agent log
+    _agent_debug_log(
+        run_id,
+        "H2",
+        "start.py:main:before_popen",
+        "starting backend subprocess",
+        {
+            "platform": sys.platform,
+            "cmd": cmd,
+            "cwd": str(root),
+        },
+    )
+    # endregion
+
     if sys.platform == "win32":
         # Windows 下在新控制台窗口中启动后端
         creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
         subprocess.Popen(
-            [sys.executable, "run_backend.py"],
+            cmd,
             cwd=root,
             env=env,
             creationflags=creationflags,
@@ -45,7 +104,7 @@ def main():
     else:
         # 非 Windows：后台运行即可
         subprocess.Popen(
-            [sys.executable, "run_backend.py"],
+            cmd,
             cwd=root,
             env=env,
             stdout=subprocess.DEVNULL,
@@ -55,6 +114,19 @@ def main():
 
     print("后端启动中，稍候打开浏览器…")
     time.sleep(2.5)
+
+    # region agent log
+    _agent_debug_log(
+        run_id,
+        "H3",
+        "start.py:main:before_open_browser",
+        "opening browser",
+        {
+            "url": url,
+        },
+    )
+    # endregion
+
     webbrowser.open(url)
     print(f"已打开: {url} （后端在另一窗口运行，关闭该窗口即停止）")
 

@@ -365,6 +365,95 @@ def extract_inquiry_items(
     }
 
 
+# 案例报价单模板：表头第 2 行，数据从第 3 行起，A=序号 B=询价货物名称 C=规格 E=数量
+INQUIRY_DATA_START_ROW = 3
+INQUIRY_COL_SEQ = 1   # A
+INQUIRY_COL_NAME = 2  # B
+INQUIRY_COL_SPEC = 3  # C
+INQUIRY_COL_QTY = 5   # E
+
+
+def fill_template_with_inquiry_items(
+    template_path: str,
+    items: List[dict[str, Any]],
+    output_path: str,
+    sheet_name: str = "询价单",
+) -> dict[str, Any]:
+    """
+    用「询价行」列表填写案例报价单模板，生成可被 extract_inquiry_items / Work 流程处理的 Excel。
+
+    - 复制模板到 output_path，不修改原模板。
+    - 从第 3 行起写入：A=序号(1-based)，B=product_name，C=specification，E=qty。
+    - 若 items 数量超过模板现有数据行，在「Total Excluding PPN」行之前插入空行再写。
+
+    Returns:
+        {"success": bool, "output_path": str, "filled_count": int, "error": str | None}
+    """
+    import shutil
+    try:
+        import openpyxl
+    except ImportError:
+        return {"success": False, "output_path": "", "filled_count": 0, "error": "请安装 openpyxl"}
+
+    tpl = Path(template_path)
+    if not tpl.is_absolute():
+        tpl = Path(os.getcwd()) / tpl
+    if not tpl.exists():
+        return {"success": False, "output_path": "", "filled_count": 0, "error": f"模板不存在: {tpl}"}
+    out_p = Path(output_path)
+    if not out_p.is_absolute():
+        out_p = Path(os.getcwd()) / out_p
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(tpl, out_p)
+    except Exception as e:
+        return {"success": False, "output_path": "", "filled_count": 0, "error": str(e)}
+
+    items = [x for x in items if isinstance(x, dict) and (x.get("product_name") or x.get("name"))]
+    if not items:
+        return {"success": True, "output_path": str(out_p), "filled_count": 0, "error": None}
+
+    try:
+        wb = openpyxl.load_workbook(out_p)
+        if sheet_name and sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+        else:
+            ws = wb.active or wb[wb.sheetnames[0]]
+        total_row_1based = None
+        for row in ws.iter_rows():
+            row_idx = row[0].row if row else 0
+            for cell in row:
+                if TOTAL_ROW_MARKER in _cell_value(cell):
+                    total_row_1based = row_idx
+                    break
+            if total_row_1based is not None:
+                break
+        if total_row_1based is None:
+            total_row_1based = ws.max_row + 1
+        data_start = INQUIRY_DATA_START_ROW
+        available = max(0, total_row_1based - data_start)
+        if len(items) > available:
+            ws.insert_rows(total_row_1based, len(items) - available)
+        filled = 0
+        for i, it in enumerate(items):
+            row_num = data_start + i
+            name = (it.get("product_name") or it.get("name") or "").strip()
+            spec = (it.get("specification") or it.get("spec") or "").strip()
+            try:
+                qty = int(it.get("qty", 0) or 0)
+            except (TypeError, ValueError):
+                qty = 0
+            ws.cell(row=row_num, column=INQUIRY_COL_SEQ, value=i + 1)
+            ws.cell(row=row_num, column=INQUIRY_COL_NAME, value=name)
+            ws.cell(row=row_num, column=INQUIRY_COL_SPEC, value=spec)
+            ws.cell(row=row_num, column=INQUIRY_COL_QTY, value=max(0, qty))
+            filled += 1
+        wb.save(out_p)
+        return {"success": True, "output_path": str(out_p), "filled_count": filled, "error": None}
+    except Exception as e:
+        return {"success": False, "output_path": "", "filled_count": 0, "error": str(e)}
+
+
 # ---------------------------------------------------------------------------
 # 普适性 Excel 工具（不依赖报价单结构，任意 Excel 可用）
 # ---------------------------------------------------------------------------

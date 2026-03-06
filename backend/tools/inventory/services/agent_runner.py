@@ -44,6 +44,7 @@ def _system_prompt() -> str:
 
 **2. 调用工具**  
 - **有 code**（如 10 位物料编号 8030020580）：一律用 get_inventory_by_code(code)，直接按 code 查表，不走关键词/Resolver。
+- **用户要「改为 X」「增补 X」「加库存」「锁定可售」**：先 get_inventory_by_code 确认当前数量（可选），再调用 modify_inventory(code, action, quantity)。action=supplement 表示增补库存（仓存/可售增加），action=lock 表示锁定可售（占位，待对接）。
 - **按名称/规格查**：用 search_inventory(keywords)，keywords 填用户要查的产品或规格（如 pvc dn20、Tee With Cover dn40）。
 - **仅查价格/客户价/查 code/询价**（用户未提库存）：**优先调用 match_quotation(keywords)**，一次同时查报价历史与万鼎字段匹配，结果取并集且每条带匹配来源（历史报价/字段匹配/共同）。若用户明确说「用万鼎查」「不要历史」「直接万鼎」→ 只调 match_wanding_price。任一返回 needs_selection 且用户要「选一个」时再调用 select_wanding_match；要「全部价格/所有候选」则不调 select_wanding_match，直接整表回复。回答里**不要**包含库存/可售（除非用户问了库存）。
 - **用户要「全部价格」「各档价格」「A B C D 档」**：对同一 keywords 分别调用 4 次 match_wanding_price(customer_level="A/B/C/D")，汇总成表格。
