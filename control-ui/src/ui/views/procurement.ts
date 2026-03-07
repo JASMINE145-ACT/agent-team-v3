@@ -1,7 +1,7 @@
 import { html, nothing } from "lit";
 import { t } from "../../i18n/index.ts";
 import type { ShortageRecord, ReplenishmentDraftListItem, ReplenishmentDraftDetail } from "../types.ts";
-import { procurementItemKey } from "../controllers/procurement.ts";
+import { procurementItemKey, type ReplenishmentInputLine } from "../controllers/procurement.ts";
 
 export type ProcurementProps = {
   basePath: string;
@@ -24,9 +24,16 @@ export type ProcurementProps = {
   replenishmentError: string | null;
   replenishmentConfirmBusy: boolean;
   replenishmentConfirmResult: { executed?: number; message?: string } | null;
+  replenishmentInputLines: ReplenishmentInputLine[];
+  replenishmentCreateBusy: boolean;
+  onReplenishmentLineChange: (index: number, field: "product_or_code" | "quantity", value: string | number) => void;
+  onReplenishmentAddLine: () => void;
+  onReplenishmentRemoveLine: (index: number) => void;
+  onCreateReplenishmentDraft: () => void;
   onReplenishmentRefresh: () => void;
   onSelectReplenishmentDraft: (draftId: number) => void;
   onConfirmReplenishment: (draftId: number) => void;
+  onDeleteReplenishmentDraft: (draftId: number) => void;
   onClearReplenishmentDetail: () => void;
   onRefresh: () => void;
   onToggleSelect: (key: string) => void;
@@ -303,15 +310,96 @@ export function renderProcurement(props: ProcurementProps) {
       <div class="card" style="grid-column: 1 / -1; margin-top: 16px;">
         <div class="card-title">${t("replenishment.title")}</div>
         <div class="card-sub">${t("replenishment.subtitle")}</div>
-        <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-          <button
-            class="btn"
-            ?disabled=${props.replenishmentLoading}
-            @click=${props.onReplenishmentRefresh}
-            aria-label=${t("replenishment.refreshList")}
-          >
-            ${props.replenishmentLoading ? t("replenishment.loading") : t("replenishment.refreshList")}
-          </button>
+        <div style="margin-top: 12px;">
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+              <thead>
+                <tr style="background: var(--bg-secondary, #eee);">
+                  <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">
+                    ${t("replenishment.productOrCodePlaceholder")}
+                  </th>
+                  <th style="padding: 6px 8px; text-align: right; border: 1px solid var(--border); width: 120px;">
+                    ${t("replenishment.quantityPlaceholder")}
+                  </th>
+                  <th style="padding: 6px 8px; border: 1px solid var(--border); width: 60px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${props.replenishmentInputLines.map(
+                  (line, idx) => html`
+                    <tr>
+                      <td style="padding: 6px 8px; border: 1px solid var(--border);">
+                        <input
+                          type="text"
+                          .value=${line.product_or_code}
+                          placeholder=${t("replenishment.productOrCodePlaceholder")}
+                          @input=${(e: Event) =>
+                            props.onReplenishmentLineChange(idx, "product_or_code", (e.target as HTMLInputElement).value)}
+                          style="width: 100%; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border);"
+                          aria-label=${t("replenishment.productOrCodePlaceholder")}
+                        />
+                      </td>
+                      <td style="padding: 6px 8px; border: 1px solid var(--border); text-align: right;">
+                        <input
+                          type="number"
+                          min="1"
+                          .value=${String(line.quantity || "")}
+                          placeholder=${t("replenishment.quantityPlaceholder")}
+                          @input=${(e: Event) => {
+                            const v = (e.target as HTMLInputElement).value;
+                            const n = v === "" ? 0 : Number(v);
+                            props.onReplenishmentLineChange(idx, "quantity", Number.isFinite(n) ? n : 0);
+                          }}
+                          style="width: 80px; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); text-align: right;"
+                          aria-label=${t("replenishment.quantityPlaceholder")}
+                        />
+                      </td>
+                      <td style="padding: 6px 8px; border: 1px solid var(--border);">
+                        ${props.replenishmentInputLines.length > 1
+                          ? html`
+                              <button
+                                type="button"
+                                class="btn btn-sm"
+                                style="font-size: 12px; padding: 4px 8px;"
+                                @click=${() => props.onReplenishmentRemoveLine(idx)}
+                                aria-label=${t("replenishment.removeRow")}
+                              >
+                                ${t("replenishment.removeRow")}
+                              </button>
+                            `
+                          : nothing}
+                      </td>
+                    </tr>
+                  `,
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <button
+              class="btn btn-sm"
+              @click=${props.onReplenishmentAddLine}
+              aria-label=${t("replenishment.addRow")}
+            >
+              ${t("replenishment.addRow")}
+            </button>
+            <button
+              class="btn"
+              ?disabled=${props.replenishmentCreateBusy || props.replenishmentLoading}
+              @click=${props.onCreateReplenishmentDraft}
+              aria-label=${t("replenishment.generateDraft")}
+            >
+              ${props.replenishmentCreateBusy ? t("replenishment.creating") : t("replenishment.generateDraft")}
+            </button>
+            <button
+              class="btn"
+              ?disabled=${props.replenishmentLoading}
+              @click=${props.onReplenishmentRefresh}
+              aria-label=${t("replenishment.refreshList")}
+            >
+              ${props.replenishmentLoading ? t("replenishment.loading") : t("replenishment.refreshList")}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -381,6 +469,14 @@ export function renderProcurement(props: ProcurementProps) {
                                 ${props.replenishmentConfirmBusy
                                   ? t("replenishment.confirming")
                                   : t("replenishment.confirm")}
+                              </button>
+                              <button
+                                class="btn btn-sm"
+                                style="font-size: 12px; padding: 4px 8px; color: var(--danger, #c62828);"
+                                @click=${() => props.onDeleteReplenishmentDraft(d.id)}
+                                aria-label=${t("replenishment.delete")}
+                              >
+                                ${t("replenishment.delete")}
                               </button>
                             </td>
                           </tr>

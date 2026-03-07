@@ -4,7 +4,9 @@ API 路由 — version3 单 Agent
 import asyncio
 import json
 import logging
+import os
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
@@ -826,6 +828,22 @@ async def replenishment_drafts_get(draft_id: int) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/api/replenishment-drafts/{draft_id}")
+async def replenishment_drafts_delete(draft_id: int) -> Dict[str, Any]:
+    """删除补货单（草稿或已确认均可删除）。"""
+    try:
+        ds = _get_oos_data_service()
+        ok = ds.delete_replenishment_draft(draft_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="未找到该补货单")
+        return {"success": True, "data": {"deleted": draft_id}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("replenishment-drafts DELETE 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.patch("/api/replenishment-drafts/{draft_id}")
 async def replenishment_drafts_update(draft_id: int, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """
@@ -848,10 +866,17 @@ async def replenishment_drafts_update(draft_id: int, body: Dict[str, Any] = Body
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 补货确认是否真实调用 modify_inventory 写 ACCURATE。未设置或非 1/true/yes 时仅占位：只更新草稿状态，不调库存工具。
+# 后续确认无问题后，设置环境变量 REPLENISHMENT_CONFIRM_REAL_INVENTORY=1 即可改为真实调用。
+def _replenishment_confirm_use_real_tool() -> bool:
+    return os.environ.get("REPLENISHMENT_CONFIRM_REAL_INVENTORY", "").strip().lower() in ("1", "true", "yes")
+
+
 @router.patch("/api/replenishment-drafts/{draft_id}/confirm")
 async def replenishment_drafts_confirm(draft_id: int) -> Dict[str, Any]:
     """
-    将补货单标记为 confirmed，并并行调用 modify_inventory 执行真实补货。
+    将补货单标记为 confirmed。若 REPLENISHMENT_CONFIRM_REAL_INVENTORY=1 则并行调用 modify_inventory 写 ACCURATE；
+    否则占位：仅落库状态，不调用库存工具。
     """
     try:
         ds = _get_oos_data_service()
@@ -860,44 +885,61 @@ async def replenishment_drafts_confirm(draft_id: int) -> Dict[str, Any]:
             raise HTTPException(status_code=404, detail="未找到该补货单")
         lines = draft.get("lines") or []
 
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from backend.tools.inventory.services.inventory_agent_tools import execute_inventory_tool
+        results: List[Dict[str, Any]] = []
 
-        results = []
-        with ThreadPoolExecutor(max_workers=min(len(lines) or 1, 8)) as ex:
-            futures = []
+        if _replenishment_confirm_use_real_tool():
+            # ---------- 真实调用：通过 modify_inventory 写 ACCURATE ----------
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from backend.tools.inventory.services.inventory_agent_tools import execute_inventory_tool
+
+            with ThreadPoolExecutor(max_workers=min(len(lines) or 1, 8)) as ex:
+                futures = []
+                for ln in lines:
+                    code = (ln.get("code") or "").strip()
+                    qty = ln.get("quantity") or 0
+                    if not code:
+                        results.append({"code": None, "success": False, "error": "缺少 code"})
+                        continue
+
+                    def _run_one(payload: Dict[str, Any]) -> Dict[str, Any]:
+                        out = execute_inventory_tool("modify_inventory", payload)
+                        return {
+                            "code": payload.get("code"),
+                            "success": bool(out.get("success")),
+                            "result": out.get("result"),
+                            "error": out.get("error"),
+                        }
+
+                    payload = {
+                        "code": code,
+                        "action": "supplement",
+                        "quantity": qty,
+                        "memo": f"Replenishment draft #{draft.get('draft_no')}",
+                    }
+                    futures.append(ex.submit(_run_one, payload))
+
+                for fut in as_completed(futures):
+                    results.append(fut.result())
+        else:
+            # ---------- 占位：不调用 modify_inventory，仅更新草稿状态；后续设 REPLENISHMENT_CONFIRM_REAL_INVENTORY=1 后改为上面分支 ----------
+            # 本分支内无 import execute_inventory_tool、无调用任何库存工具，确保默认情况下不写 ACCURATE。
             for ln in lines:
                 code = (ln.get("code") or "").strip()
-                qty = ln.get("quantity") or 0
-                if not code:
-                    results.append({"code": None, "success": False, "error": "缺少 code"})
-                    continue
-
-                def _run_one(payload: Dict[str, Any]) -> Dict[str, Any]:
-                    out = execute_inventory_tool("modify_inventory", payload)
-                    return {
-                        "code": payload.get("code"),
-                        "success": bool(out.get("success")),
-                        "result": out.get("result"),
-                        "error": out.get("error"),
-                    }
-
-                payload = {
-                    "code": code,
-                    "action": "supplement",
-                    "quantity": qty,
-                    "memo": f"Replenishment draft #{draft.get('draft_no')}",
-                }
-                futures.append(ex.submit(_run_one, payload))
-
-            for fut in as_completed(futures):
-                results.append(fut.result())
+                results.append({
+                    "code": code or None,
+                    "success": True,
+                    "result": "[占位] 未实际调用库存工具；设置 REPLENISHMENT_CONFIRM_REAL_INVENTORY=1 后将真实写 ACCURATE。",
+                    "error": None,
+                })
 
         confirmed = ds.confirm_replenishment_draft(draft_id)
         if not confirmed:
             raise HTTPException(status_code=500, detail="补货单状态更新失败")
         executed = sum(1 for r in results if r.get("success"))
-        return {"success": True, "data": {"executed": executed, "results": results}}
+        data: Dict[str, Any] = {"executed": executed, "results": results}
+        if not _replenishment_confirm_use_real_tool():
+            data["message"] = "当前为占位模式，已更新补货单状态，未调用库存工具。设置 REPLENISHMENT_CONFIRM_REAL_INVENTORY=1 后将真实写 ACCURATE。"
+        return {"success": True, "data": data}
     except HTTPException:
         raise
     except Exception as e:

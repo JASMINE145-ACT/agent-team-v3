@@ -15,7 +15,10 @@ import { loadChannels } from "./controllers/channels.ts";
 import { loadConfig, loadConfigSchema } from "./controllers/config.ts";
 import { loadCronJobs, loadCronStatus } from "./controllers/cron.ts";
 import { loadFulfillDrafts as loadFulfillDraftsFromController } from "./controllers/fulfill.ts";
-import { loadProcurementSuggestions as loadProcurementSuggestionsFromController } from "./controllers/procurement.ts";
+import {
+  loadProcurementSuggestions as loadProcurementSuggestionsFromController,
+  loadReplenishmentDrafts as loadReplenishmentDraftsFromController,
+} from "./controllers/procurement.ts";
 import { loadDebug } from "./controllers/debug.ts";
 import { loadDevices } from "./controllers/devices.ts";
 import { loadExecApprovals } from "./controllers/exec-approvals.ts";
@@ -214,6 +217,7 @@ export async function refreshActiveTab(host: SettingsHost) {
   }
   if (host.tab === "sessions") {
     await loadProcurementSuggestionsFromController(host as unknown as Parameters<typeof loadProcurementSuggestionsFromController>[0]);
+    await loadReplenishmentDraftsFromController(host as unknown as Parameters<typeof loadReplenishmentDraftsFromController>[0]);
   }
   if (host.tab === "cron") {
     await loadFulfillDraftsFromController(host as unknown as Parameters<typeof loadFulfillDraftsFromController>[0]);

@@ -324,6 +324,13 @@ export function renderApp(state: AppViewState) {
                 replenishmentError: state.replenishmentError,
                 replenishmentConfirmBusy: state.replenishmentConfirmBusy,
                 replenishmentConfirmResult: state.replenishmentConfirmResult,
+                replenishmentInputLines: state.replenishmentInputLines,
+                replenishmentCreateBusy: state.replenishmentCreateBusy,
+                onReplenishmentLineChange: (index, field, value) =>
+                  state.onReplenishmentLineChange(index, field, value),
+                onReplenishmentAddLine: () => state.onReplenishmentAddLine(),
+                onReplenishmentRemoveLine: (index) => state.onReplenishmentRemoveLine(index),
+                onCreateReplenishmentDraft: () => state.createProcurementReplenishmentDraft(),
                 onReplenishmentRefresh: () => state.loadProcurementReplenishment(),
                 onSelectReplenishmentDraft: (draftId) => {
                   void state.loadProcurementReplenishmentDetail(draftId);
@@ -331,6 +338,10 @@ export function renderApp(state: AppViewState) {
                 onConfirmReplenishment: (draftId) => {
                   if (typeof window !== "undefined" && !window.confirm(t("replenishment.confirmPrompt"))) return;
                   void state.confirmProcurementReplenishment(draftId);
+                },
+                onDeleteReplenishmentDraft: (draftId) => {
+                  if (typeof window !== "undefined" && !window.confirm(t("replenishment.deleteConfirm"))) return;
+                  void state.deleteProcurementReplenishmentDraft(draftId);
                 },
                 onClearReplenishmentDetail: () => {
                   state.replenishmentDetail = null;

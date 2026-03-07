@@ -357,6 +357,50 @@ export async function loadReplenishmentDraftDetail(
   }
 }
 
+export type ReplenishmentInputLine = { product_or_code: string; quantity: number };
+
+export async function createReplenishmentDraft(
+  state: ProcurementState,
+  lines: ReplenishmentInputLine[],
+): Promise<{ id: number } | null> {
+  const valid = lines.filter((l) => {
+    const code = typeof l.product_or_code === "string" ? l.product_or_code.trim() : "";
+    const qty = Number(l.quantity);
+    return code.length > 0 && qty > 0;
+  });
+  if (valid.length === 0) return null;
+
+  const body = {
+    lines: valid.map((l) => ({
+      product_or_code: typeof l.product_or_code === "string" ? l.product_or_code.trim() : "",
+      quantity: Number(l.quantity),
+    })),
+  };
+
+  const base = state.basePath?.trim() ? state.basePath.replace(/\/$/, "") : "";
+  const url = base ? `${base}${ENDPOINT_REPLENISHMENT_DRAFTS}` : ENDPOINT_REPLENISHMENT_DRAFTS;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({} as unknown));
+  if (!res.ok) {
+    state.replenishmentError = buildStandardError(
+      "生成补货单",
+      extractErrorDetail(json, `HTTP ${res.status}`),
+      "补货单未创建",
+      "请检查输入后重试",
+    );
+    return null;
+  }
+  const root = asRecord(json, ENDPOINT_REPLENISHMENT_DRAFTS);
+  const data = root.data != null ? asRecord(root.data, ENDPOINT_REPLENISHMENT_DRAFTS, "data") : {};
+  const id = asNumber(data.id, ENDPOINT_REPLENISHMENT_DRAFTS, "data.id");
+  await loadReplenishmentDrafts(state);
+  return { id };
+}
+
 export async function confirmReplenishmentDraft(
   state: ProcurementState,
   draftId: number,
@@ -384,9 +428,10 @@ export async function confirmReplenishmentDraft(
     const root = asRecord(json, ENDPOINT_REPLENISHMENT_DRAFTS, "confirm");
     const data = asRecord(root.data, ENDPOINT_REPLENISHMENT_DRAFTS, "data");
     const executed = optionalNumber(data.executed);
+    const apiMessage = optionalString(data.message);
     state.replenishmentConfirmResult = {
       executed: executed ?? undefined,
-      message: `已执行 ${executed ?? 0} 条补货操作。`,
+      message: apiMessage || `已执行 ${executed ?? 0} 条补货操作。`,
     };
     await loadReplenishmentDrafts(state);
   } catch (e) {
@@ -402,4 +447,31 @@ export async function confirmReplenishmentDraft(
   } finally {
     state.replenishmentConfirmBusy = false;
   }
+}
+
+export async function deleteReplenishmentDraft(
+  state: ProcurementState,
+  draftId: number,
+): Promise<boolean> {
+  const base = state.basePath?.trim() ? state.basePath.replace(/\/$/, "") : "";
+  const url = base
+    ? `${base}${ENDPOINT_REPLENISHMENT_DRAFTS}/${draftId}`
+    : `${ENDPOINT_REPLENISHMENT_DRAFTS}/${draftId}`;
+  const res = await fetch(url, { method: "DELETE" });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({} as unknown));
+    state.replenishmentError = buildStandardError(
+      "删除补货单",
+      extractErrorDetail(json, `HTTP ${res.status}`),
+      "补货单未删除",
+      "请重试",
+    );
+    return false;
+  }
+  if (state.replenishmentDetailId === draftId) {
+    state.replenishmentDetail = null;
+    state.replenishmentDetailId = null;
+  }
+  await loadReplenishmentDrafts(state);
+  return true;
 }

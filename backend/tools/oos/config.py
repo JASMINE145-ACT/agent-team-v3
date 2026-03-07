@@ -1,9 +1,12 @@
 """
 配置文件
 """
+import logging
 import os
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # 加载 .env（若存在）
 _env_path = Path(__file__).parent / ".env"
@@ -15,12 +18,18 @@ if _env_path.exists():
         pass
 
 # 数据库配置
+# 本地测试：不设 DATABASE_URL 则使用本地 SQLite（无货/缺货/报价单/补货单等均落本地）。
+# 云端（如 Render）：请设置 DATABASE_URL 为 Neon（或其它 Postgres）连接串，以使用云端数据库。
 DB_PATH = os.getenv("QUOTATION_DB_PATH", "data/out_of_stock.db")
-# 确保 data 目录存在
 data_dir = Path(DB_PATH).parent
 data_dir.mkdir(parents=True, exist_ok=True)
 
-DB_URL = os.getenv("DATABASE_URL")  # PostgreSQL 连接串（生产环境）
+DB_URL = (os.getenv("DATABASE_URL") or "").strip() or None
+if os.getenv("RENDER") and not DB_URL:
+    logger.warning(
+        "当前为 RENDER 环境但未设置 DATABASE_URL，将使用本地 SQLite（重启后数据不持久）。"
+        "生产环境建议在 Render 环境变量中配置 DATABASE_URL 为 Neon 连接串以使用云端数据库。"
+    )
 
 # 文件上传配置
 MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB

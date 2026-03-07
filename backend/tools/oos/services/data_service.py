@@ -1146,6 +1146,24 @@ class DataService:
         # 重新读取完整详情
         return self.get_replenishment_draft_by_id(draft_id)
 
+    def delete_replenishment_draft(self, draft_id: int) -> bool:
+        """删除补货单（先删行再删主表）。存在则删除并返回 True，不存在返回 False。"""
+        session = self.SessionLocal()
+        try:
+            draft = session.query(ReplenishmentDraftDB).filter_by(id=draft_id).first()
+            if not draft:
+                return False
+            session.query(ReplenishmentDraftLineDB).filter_by(draft_id=draft_id).delete()
+            session.delete(draft)
+            session.commit()
+            return True
+        except Exception as e:
+            logger.error("delete_replenishment_draft failed: %s", e, exc_info=True)
+            session.rollback()
+            return False
+        finally:
+            session.close()
+
     def get_all_records(self, limit: Optional[int] = None, include_deleted: bool = False) -> List[Dict]:
         """
         获取所有记录

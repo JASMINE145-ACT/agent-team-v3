@@ -47,6 +47,14 @@ import {
   onPopState as onPopStateInternal,
 } from "./app-settings.ts";
 import {
+  loadReplenishmentDrafts,
+  loadReplenishmentDraftDetail,
+  confirmReplenishmentDraft,
+  createReplenishmentDraft,
+  deleteReplenishmentDraft,
+  type ReplenishmentInputLine,
+} from "./controllers/procurement.ts";
+import {
   resetToolStream as resetToolStreamInternal,
   type ToolStreamEntry,
   type CompactionStatus,
@@ -391,6 +399,16 @@ export class OpenClawApp extends LitElement {
   @state() procurementPage = 1;
   @state() procurementPageSize = 10;
 
+  @state() replenishmentDrafts: import("./types.js").ReplenishmentDraftListItem[] = [];
+  @state() replenishmentDetail: import("./types.js").ReplenishmentDraftDetail | null = null;
+  @state() replenishmentDetailId: number | null = null;
+  @state() replenishmentLoading = false;
+  @state() replenishmentError: string | null = null;
+  @state() replenishmentConfirmBusy = false;
+  @state() replenishmentConfirmResult: { executed?: number; message?: string } | null = null;
+  @state() replenishmentInputLines: ReplenishmentInputLine[] = [{ product_or_code: "", quantity: 0 }];
+  @state() replenishmentCreateBusy = false;
+
   @state() skillsLoading = false;
   @state() skillsReport: SkillStatusReport | null = null;
   @state() skillsError: string | null = null;
@@ -554,6 +572,66 @@ export class OpenClawApp extends LitElement {
 
   async loadProcurementSuggestions() {
     await loadProcurementSuggestionsInternal(this as unknown as Parameters<typeof loadProcurementSuggestionsInternal>[0]);
+  }
+
+  async loadProcurementReplenishment() {
+    await loadReplenishmentDrafts(this as unknown as Parameters<typeof loadReplenishmentDrafts>[0]);
+  }
+
+  async loadProcurementReplenishmentDetail(draftId: number) {
+    await loadReplenishmentDraftDetail(
+      this as unknown as Parameters<typeof loadReplenishmentDraftDetail>[0],
+      draftId,
+    );
+  }
+
+  async confirmProcurementReplenishment(draftId: number) {
+    await confirmReplenishmentDraft(
+      this as unknown as Parameters<typeof confirmReplenishmentDraft>[0],
+      draftId,
+    );
+  }
+
+  async deleteProcurementReplenishmentDraft(draftId: number) {
+    await deleteReplenishmentDraft(
+      this as unknown as Parameters<typeof deleteReplenishmentDraft>[0],
+      draftId,
+    );
+  }
+
+  onReplenishmentLineChange(index: number, field: "product_or_code" | "quantity", value: string | number) {
+    const next = this.replenishmentInputLines.slice();
+    if (index < 0 || index >= next.length) return;
+    next[index] = { ...next[index], [field]: value };
+    this.replenishmentInputLines = next;
+  }
+
+  onReplenishmentAddLine() {
+    this.replenishmentInputLines = [...this.replenishmentInputLines, { product_or_code: "", quantity: 0 }];
+  }
+
+  onReplenishmentRemoveLine(index: number) {
+    const next = this.replenishmentInputLines.filter((_, i) => i !== index);
+    this.replenishmentInputLines = next.length > 0 ? next : [{ product_or_code: "", quantity: 0 }];
+  }
+
+  async createProcurementReplenishmentDraft() {
+    if (this.replenishmentCreateBusy) return;
+    this.replenishmentCreateBusy = true;
+    this.replenishmentError = null;
+    try {
+      const result = await createReplenishmentDraft(
+        this as unknown as Parameters<typeof createReplenishmentDraft>[0],
+        this.replenishmentInputLines,
+      );
+      if (result) {
+        this.replenishmentInputLines = [{ product_or_code: "", quantity: 0 }];
+        await this.loadProcurementReplenishment();
+        await this.loadProcurementReplenishmentDetail(result.id);
+      }
+    } finally {
+      this.replenishmentCreateBusy = false;
+    }
   }
 
   async handleAbortChat() {
