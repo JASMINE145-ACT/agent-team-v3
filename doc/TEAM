@@ -1,0 +1,43 @@
+Agent A
+   ↓
+Create Issue
+   ↓
+Assign Agent B
+   ↓
+Queue
+   ↓
+Agent B 执行
+
+
+Issue
+   ↓
+Queue
+   ↓
+Agent worker
+
+
+User request
+     ↓
+CREATE ISSUE
+     ↓
+Issue Queue
+     ↓
+Assign Agent
+     ↓
+Agent wakeup
+     ↓
+Agent run
+     ↓
+Update Issue status
+
+图示：
+
+User
+ ↓
+Issue
+ ↓
+Queue
+ ↓
+Agent Worker
+ ↓
+Result

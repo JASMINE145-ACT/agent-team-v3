@@ -2,11 +2,10 @@
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from backend.core.extension import AgentExtension, ExtensionContext
 from backend.core.tool_utils import tool_error, validate_file_path
-from backend.plugins.jagent.skills import CHAT_SKILL_PROMPT, OUTPUT_FORMAT
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +14,22 @@ _VALID_CUSTOMER_LEVELS = {"A", "B", "C", "D"}
 
 
 class JAgentExtension(AgentExtension):
+    """业务扩展：注册 Chat 用工具，技能/输出格式由 PromptProvider 提供（可切换 local/cloud）。"""
+
+    def __init__(self, prompt_provider: Optional[Any] = None):
+        super().__init__()
+        self._prompt_provider = prompt_provider
+
     def get_skill_prompt(self) -> str:
-        return CHAT_SKILL_PROMPT  # Chat 不含报价单流水线；整单询价填充在 Work 页
+        if self._prompt_provider is not None:
+            return self._prompt_provider.get_skill_prompt()
+        from backend.plugins.jagent.skills import CHAT_SKILL_PROMPT
+        return CHAT_SKILL_PROMPT  # 未注入 provider 时保持原有行为
 
     def get_output_format_prompt(self) -> str:
+        if self._prompt_provider is not None:
+            return self._prompt_provider.get_output_format_prompt()
+        from backend.plugins.jagent.skills import OUTPUT_FORMAT
         return OUTPUT_FORMAT
 
     def on_after_tool(self, name: str, args: dict, obs: str) -> str:

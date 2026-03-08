@@ -2,6 +2,8 @@
 
 单主 Agent（询价/库存/无货/万鼎选型等），带 Control UI 控制台。
 
+Backend 分层与模块说明见 **[doc/ARCHITECTURE.md](doc/ARCHITECTURE.md)**（各层职责、依赖方向、模块 README 索引）。
+
 ## 环境要求
 
 - Python 3.10+

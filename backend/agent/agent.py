@@ -1,18 +1,23 @@
 """
 向后兼容层。业务逻辑已迁移至 backend/core/agent.py + backend/plugins/jagent。
+技能/输出格式通过 PromptProvider 注入，默认 LocalPromptProvider，便于切换云端。
 """
 from backend.core.agent import CoreAgent
 from backend.config import Config
 from backend.plugins.jagent.extension import JAgentExtension
+from backend.prompts import LocalPromptProvider
 
 
 # 兼容旧 import: from backend.agent.agent import SingleAgent
 class SingleAgent(CoreAgent):
-    def __init__(self, api_key=None, base_url=None, model=None, session_store=None):
+    def __init__(self, api_key=None, base_url=None, model=None, session_store=None, prompt_provider=None):
+        if prompt_provider is None:
+            prompt_provider = LocalPromptProvider()
+        ext = JAgentExtension(prompt_provider=prompt_provider)
         super().__init__(
             api_key=api_key or Config.OPENAI_API_KEY,
             base_url=base_url or Config.OPENAI_BASE_URL,
             model=model or Config.LLM_MODEL,
-            extensions=[JAgentExtension()],
+            extensions=[ext],
             session_store=session_store,
         )
