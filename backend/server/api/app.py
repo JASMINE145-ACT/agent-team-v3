@@ -35,6 +35,20 @@ app.include_router(router)
 app.include_router(ws_router)
 app.include_router(wecom_router)
 
+
+@app.get("/health")
+async def health_get():
+    """健康检查：供浏览器与 UptimeRobot 等监控使用。"""
+    return {"status": "ok"}
+
+
+@app.head("/health")
+async def health_head():
+    """健康检查（HEAD 版本）：返回 200，用于只关心存活性的探针。"""
+    from fastapi import Response
+
+    return Response(status_code=200)
+
 # 项目根目录 = backend/server/api -> backend/server -> backend -> 根
 _root = Path(__file__).resolve().parent.parent.parent.parent
 _ui_dir = _root / "dist" / "control-ui"
