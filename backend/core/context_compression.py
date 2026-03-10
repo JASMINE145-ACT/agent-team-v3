@@ -120,7 +120,7 @@ def summarize_tool_result_sync(
             if text and len(text) <= max_chars * 2:
                 return text[:max_chars] + ("…" if len(text) > max_chars else "")
         except Exception as e:
-            logger.debug("摘要 LLM 调用失败，使用规则 fallback: %s", e)
+            logger.debug("摘要 LLM 调用失败，使用规则 fallback: %s", e, exc_info=True)
 
     return _summarize_by_rules(tool_name, content, max_chars)
 

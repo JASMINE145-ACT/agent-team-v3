@@ -2,10 +2,10 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from backend.core.registry import ToolRegistry
+    from backend.core.registry import ToolRegistry, ToolHandler
     from backend.agent.session import SessionStore
 
 
@@ -15,7 +15,7 @@ class ExtensionContext:
     registry: "ToolRegistry"
     session_store: "SessionStore"
 
-    def register_tool(self, definition: dict, handler: Callable) -> None:
+    def register_tool(self, definition: dict, handler: ToolHandler) -> None:
         self.registry.register(definition, handler)
 
 

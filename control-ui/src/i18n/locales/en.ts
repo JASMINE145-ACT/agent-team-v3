@@ -60,6 +60,12 @@ export const en: TranslationMap = {
     logs: "Live tail of the gateway file logs.",
   },
   overview: {
+    health: {
+      title: "Health & stats",
+      subtitle: "High-level view of instances, sessions, and cron.",
+      lastErrorLabel: "Last error",
+      noError: "No recent errors.",
+    },
     access: {
       title: "Gateway Access",
       subtitle: "Where the dashboard connects and how it authenticates.",
@@ -107,6 +113,28 @@ export const en: TranslationMap = {
       hint: "This page is HTTP, so the browser blocks device identity. Use HTTPS (Tailscale Serve) or open {url} on the gateway host.",
       stayHttp: "If you must stay on HTTP, set {config} (token-only).",
     },
+    oos: {
+      title: "Out-of-stock overview",
+      subtitle: "Recent out-of-stock stats; see Instances tab for full details.",
+      stats: {
+        totalRecords: "Total records",
+        outOfStockCount: "Out-of-stock items",
+        today: "Added today",
+        reportedGe2: "Reported out-of-stock ≥2 times",
+      },
+      empty: "No stats yet; check back later on the Instances tab.",
+    },
+    shortage: {
+      title: "Shortage overview",
+      subtitle: "Shortage stats after Work matching; focus on critical items.",
+      stats: {
+        totalRecords: "Total records",
+        shortageProductCount: "Shortage items",
+        today: "Added today",
+        reportedGe2: "Reported shortage ≥2 times",
+      },
+      empty: "No stats yet; check back later on the Instances tab.",
+    },
   },
   chat: {
     disconnected: "Disconnected from gateway.",
@@ -114,6 +142,43 @@ export const en: TranslationMap = {
     thinkingToggle: "Toggle assistant thinking/working output",
     focusToggle: "Toggle focus mode (hide sidebar + page header)",
     onboardingDisabled: "Disabled during onboarding",
+    ui: {
+      compaction: {
+        active: "Compacting context…",
+        done: "Context compacted",
+        divider: "Compaction",
+      },
+      attachments: {
+        previewAlt: "Attachment preview",
+        remove: "Remove attachment",
+      },
+      upload: {
+        label: "Upload Excel or PDF",
+        button: "Upload Excel/PDF",
+        remove: "Remove uploaded file",
+      },
+      queue: {
+        title: "Queued ({count})",
+        imageItem: "Image ({count})",
+        remove: "Remove queued message",
+      },
+      compose: {
+        placeholder: {
+          withImages: "Add a message or paste more images…",
+          default:
+            "Message (↩ to send, Shift+↩ for line breaks; paste images or upload/drag Excel/PDF)",
+          disconnected: "Connect to the gateway to start chatting…",
+        },
+        newMessages: "New messages",
+        dropHint: "Drop to upload Excel/PDF",
+        label: "Message",
+        stop: "Stop",
+        newSession: "New session",
+        send: "Send",
+        queue: "Queue",
+        exitFocus: "Exit focus mode",
+      },
+    },
   },
   work: {
     runHint: "Please select at least one file before running.",
@@ -162,6 +227,32 @@ export const en: TranslationMap = {
     textInputPlaceholder: "e.g. Cable 3*2.5 100m; Switch 20 pcs",
     generateFromText: "Generate from text",
     textGenerating: "Generating…",
+    priceLevels: {
+      FACTORY_INC_TAX: "Factory price (incl. tax)",
+      FACTORY_EXC_TAX: "Factory price (excl. tax)",
+      PURCHASE_EXC_TAX: "Purchase price (excl. tax)",
+      A_MARGIN: "Tier A (2nd-level agent) · margin",
+      A_QUOTE: "Tier A (2nd-level agent) · quotation price",
+      B_MARGIN: "Tier B (1st-level agent) · margin",
+      B_QUOTE: "Tier B (1st-level agent) · quotation price",
+      C_MARGIN: "Tier C (Juwan key account) · margin",
+      C_QUOTE: "Tier C (Juwan key account) · quotation price",
+      D_MARGIN: "Tier D (Qingshan key account) · margin",
+      D_QUOTE: "Tier D (Qingshan key account) · quotation price",
+      D_LOW: "Tier D (Qingshan key account) · reduced margin",
+      E_MARGIN: "Tier E (Datang key account, freight included) · margin",
+      E_QUOTE: "Tier E (Datang key account, freight included) · quotation price",
+    },
+    fileDisplayName: "Quotation file display name",
+    status: {
+      idle: "Idle",
+      running: "Running",
+      awaitingChoices: "Awaiting choices",
+      resuming: "Resuming",
+      done: "Done",
+      error: "Error",
+    },
+    fallbackDraftName: "Untitled quotation",
   },
   fulfill: {
     title: "Pending quotation drafts",
@@ -275,6 +366,133 @@ export const en: TranslationMap = {
     colSpec: "Spec",
     colCurrentQty: "Current qty",
     colQuantity: "Quantity",
+  },
+  oos: {
+    title: "Out-of-stock dashboard",
+    subtitle: "Overview and list of out-of-stock products, without asking the agent.",
+    actions: {
+      loading: "Loading…",
+      refresh: "Refresh",
+      addManual: "Add manually",
+      confirm: "Confirm",
+      delete: "Delete",
+      deleteHint: "Delete this out-of-stock item",
+    },
+    db: {
+      local: "Using local database",
+    },
+    stats: {
+      totalRecords: "Total records",
+      outOfStockCount: "Out-of-stock items",
+      today: "New today",
+      reportedGe2: "Reported out-of-stock ≥2 times",
+      emailSentProductCount: "Products with email sent",
+    },
+    empty: {
+      stats: "No stats yet.",
+      list: "No out-of-stock records.",
+    },
+    list: {
+      title: "Out-of-stock product list",
+      more: "Total {count} out-of-stock products; showing first 50 only",
+      meta: "Qty: {qty} {unit} · Reported out-of-stock {count} time(s) · Email: {email}",
+    },
+    addForm: {
+      title: "Add out-of-stock record",
+      namePlaceholder: "Product name (required)",
+      specPlaceholder: "Specification",
+      qtyPlaceholder: "Quantity",
+      unitPlaceholder: "Unit",
+    },
+    email: {
+      sent: "Sent",
+      notSent: "Not sent",
+    },
+    byFile: {
+      title: "By file",
+      empty: "None",
+      count: "Records: {count}",
+    },
+    byTime: {
+      title: "By time (last 30 days)",
+      empty: "None",
+      count: "New: {count}",
+    },
+  },
+  shortage: {
+    title: "Shortage records",
+    subtitle:
+      "Saved when Work detects insufficient stock; overview and list of shortage items.",
+    actions: {
+      loading: "Loading…",
+      refresh: "Refresh",
+      addManual: "Add manually",
+      confirm: "Confirm",
+      delete: "Delete",
+      deleteHint: "Delete this shortage item",
+    },
+    db: {
+      local: "Using local database",
+    },
+    stats: {
+      totalRecords: "Total records",
+      shortageProductCount: "Shortage products",
+      today: "New today",
+      reportedGe2: "Reported shortage ≥2 times",
+    },
+    empty: {
+      stats: "No stats yet.",
+      list: "No shortage records.",
+    },
+    list: {
+      title: "Shortage product list",
+      more: "Total {count} shortage products; showing first 50 only",
+      meta: "Required: {qty} · Available: {avail} · Shortfall: {diff} · Reported shortage {count} time(s)",
+    },
+    addForm: {
+      title:
+        "Add shortage record (product name, spec, required, available; shortfall will be auto-calculated)",
+      namePlaceholder: "Product name (required)",
+      specPlaceholder: "Specification",
+      qtyPlaceholder: "Required",
+      availPlaceholder: "Available",
+      qtyTitle: "Required quantity",
+      availTitle: "Available quantity",
+      diffTitle: "Shortfall = required − available; auto-calculated on submit",
+      diffText: "Shortfall: auto-calculated",
+    },
+    byFile: {
+      title: "By file",
+      empty: "None",
+      count: "Records: {count}",
+    },
+    byTime: {
+      title: "By time (last 30 days)",
+      empty: "None",
+      count: "New: {count}",
+    },
+  },
+  businessKnowledge: {
+    title: "Business knowledge",
+    subtitle:
+      "Edit wanding_business_knowledge.md for selection and matching. The LLM will use the latest content after saving.",
+    lastSavedAt: "Saved at {time}",
+    actions: {
+      reloading: "Loading…",
+      reload: "Reload",
+      saving: "Saving…",
+      save: "Save",
+    },
+    relatedFiles: {
+      title: "Related data files",
+      hint: "Selection and historical quotations rely on these Excel files. Copy the path to open them in Explorer or Excel when updating.",
+      mappingTableLabel: "Inquiry mapping table (historical quotations):",
+      priceLibraryLabel: "Wanding price library:",
+      copyPath: "Copy path",
+    },
+    editor: {
+      placeholder: "[Business knowledge]\n1. …",
+    },
   },
   languages: {
     en: "English",

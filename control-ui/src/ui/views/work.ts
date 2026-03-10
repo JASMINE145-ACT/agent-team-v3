@@ -2,27 +2,29 @@ import { html, nothing } from "lit";
 import { t } from "../../i18n/index.ts";
 import type { WorkState, WorkPendingChoice } from "../controllers/work.ts";
 
-/** 价格档位：value 与后端一致，label 与价格库表头/业务一致（中文） */
-const PRICE_LEVEL_OPTIONS: { value: string; label: string }[] = [
-  { value: "FACTORY_INC_TAX", label: "出厂价_含税" },
-  { value: "FACTORY_EXC_TAX", label: "出厂价_不含税" },
-  { value: "PURCHASE_EXC_TAX", label: "采购不含税" },
-  { value: "A_MARGIN", label: "（二级代理）A级别 利润率" },
-  { value: "A_QUOTE", label: "（二级代理）A级别 报单价格" },
-  { value: "B_MARGIN", label: "（一级代理）B级别 利润率" },
-  { value: "B_QUOTE", label: "（一级代理）B级别 报单价格" },
-  { value: "C_MARGIN", label: "（聚万大客户）C级别 利润率" },
-  { value: "C_QUOTE", label: "（聚万大客户）C级别 报单价格" },
-  { value: "D_MARGIN", label: "（青山大客户）D级别 利润率" },
-  { value: "D_QUOTE", label: "（青山大客户）D级别 报单价格" },
-  { value: "D_LOW", label: "（青山大客户）D级别 降低利润率" },
-  { value: "E_MARGIN", label: "（大唐大客户）E级别（包运费） 利润率" },
-  { value: "E_QUOTE", label: "（大唐大客户）E级别（包运费） 报单价格" },
+/** 价格档位：value 与后端一致，labelKey 对应 i18n key。 */
+const PRICE_LEVEL_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: "FACTORY_INC_TAX", labelKey: "work.priceLevels.FACTORY_INC_TAX" },
+  { value: "FACTORY_EXC_TAX", labelKey: "work.priceLevels.FACTORY_EXC_TAX" },
+  { value: "PURCHASE_EXC_TAX", labelKey: "work.priceLevels.PURCHASE_EXC_TAX" },
+  { value: "A_MARGIN", labelKey: "work.priceLevels.A_MARGIN" },
+  { value: "A_QUOTE", labelKey: "work.priceLevels.A_QUOTE" },
+  { value: "B_MARGIN", labelKey: "work.priceLevels.B_MARGIN" },
+  { value: "B_QUOTE", labelKey: "work.priceLevels.B_QUOTE" },
+  { value: "C_MARGIN", labelKey: "work.priceLevels.C_MARGIN" },
+  { value: "C_QUOTE", labelKey: "work.priceLevels.C_QUOTE" },
+  { value: "D_MARGIN", labelKey: "work.priceLevels.D_MARGIN" },
+  { value: "D_QUOTE", labelKey: "work.priceLevels.D_QUOTE" },
+  { value: "D_LOW", labelKey: "work.priceLevels.D_LOW" },
+  { value: "E_MARGIN", labelKey: "work.priceLevels.E_MARGIN" },
+  { value: "E_QUOTE", labelKey: "work.priceLevels.E_QUOTE" },
 ];
 
 export type WorkProps = WorkState & {
   onAddFile: (filePath: string, fileName: string) => void;
   onRemoveFile: (index: number) => void;
+  /** 修改当前 Work 会话中某个文件的人类可读名称（不改物理路径）。 */
+  onRenameFileName: (filePath: string, nextName: string) => void;
   onWorkTextChange: (value: string) => void;
   onGenerateFromText: () => void;
   onCustomerLevelChange: (level: string) => void;
@@ -96,10 +98,15 @@ function renderPendingChoice(item: WorkPendingChoice, selectedCode: string, onCh
   `;
 }
 
+function normalizePathKey(p: string): string {
+  return (p || "").trim().replace(/\\/g, "/").toLowerCase();
+}
+
 export function renderWork(props: WorkProps) {
   const {
     basePath,
     workFilePaths,
+    workOriginalFileNamesByPath,
     workRunning,
     workProgressStage,
     workRunStatus,
@@ -114,8 +121,10 @@ export function renderWork(props: WorkProps) {
     workTextInput,
     workTextGenerating,
     workTextError,
+    workPriceLevelOptions,
     onAddFile,
     onRemoveFile,
+    onRenameFileName,
     onWorkTextChange,
     onGenerateFromText,
     onCustomerLevelChange,
@@ -131,15 +140,34 @@ export function renderWork(props: WorkProps) {
   } = props;
   const workStages = [t("work.stageExtract"), t("work.stageMatch"), t("work.stageFill")];
 
+  const statusLabel = (() => {
+    switch (workRunStatus) {
+      case "idle":
+        return t("work.status.idle");
+      case "running":
+        return t("work.status.running");
+      case "awaiting_choices":
+        return t("work.status.awaitingChoices");
+      case "resuming":
+        return t("work.status.resuming");
+      case "done":
+        return t("work.status.done");
+      case "error":
+      default:
+        return t("work.status.error");
+    }
+  })();
+
   const uploadFile = (file: File) => {
     const url = apiUrl(basePath, "/api/quotation/upload");
     const form = new FormData();
     form.append("file", file);
     fetch(url, { method: "POST", body: form, credentials: "same-origin" })
       .then((res) => res.json())
-      .then((data: { file_path?: string; file_name?: string }) => {
-        if (typeof data.file_path === "string") {
-          onAddFile(data.file_path, data.file_name ?? file.name);
+      .then((data: { success?: boolean; data?: { file_path?: string; file_name?: string }; file_path?: string; file_name?: string }) => {
+        const payload = data.data ?? data;
+        if (typeof payload.file_path === "string") {
+          onAddFile(payload.file_path, payload.file_name ?? file.name);
         }
       })
       .catch(() => {
@@ -195,20 +223,32 @@ export function renderWork(props: WorkProps) {
           ? html`
               <ul style="margin-top: 8px; padding-left: 20px; font-size: 13px;">
                 ${workFilePaths.map(
-                  (path, i) => html`
-                    <li style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                      <span style="word-break: break-all;">${path.split(/[/\\]/).pop() ?? path}</span>
-                      <button
-                        type="button"
-                        class="btn btn-sm"
-                        style="padding: 2px 8px;"
-                        @click=${() => onRemoveFile(i)}
-                        aria-label=${t("work.removeFile")}
-                      >
-                        ${t("work.removeFile")}
-                      </button>
-                    </li>
-                  `,
+                  (path, i) => {
+                    const key = normalizePathKey(path);
+                    const basename = path.split(/[/\\]/).pop() ?? path;
+                    const displayName = (key && workOriginalFileNamesByPath[key]) || basename;
+                    return html`
+                      <li style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                        <input
+                          type="text"
+                          .value=${displayName}
+                          @change=${(e: Event) =>
+                            onRenameFileName(path, (e.target as HTMLInputElement).value)}
+                          style="flex: 1 1 auto; min-width: 0; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border); font-size: 13px; word-break: break-all;"
+                          aria-label=${t("work.fileDisplayName")}
+                        />
+                        <button
+                          type="button"
+                          class="btn btn-sm"
+                          style="padding: 2px 8px;"
+                          @click=${() => onRemoveFile(i)}
+                          aria-label=${t("work.removeFile")}
+                        >
+                          ${t("work.removeFile")}
+                        </button>
+                      </li>
+                    `;
+                  },
                 )}
               </ul>
             `
@@ -245,14 +285,23 @@ export function renderWork(props: WorkProps) {
       <div style="display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px;">
         <div>
           <label style="font-size: 12px; color: var(--muted);">${t("work.customerLevel")}</label>
-          <select
-            .value=${workCustomerLevel}
-            @change=${(e: Event) => onCustomerLevelChange((e.target as HTMLSelectElement).value)}
-            style="margin-left: 8px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 160px;"
-            aria-label=${t("work.customerLevel")}
-          >
-            ${PRICE_LEVEL_OPTIONS.map((opt) => html`<option value=${opt.value}>${opt.label}</option>`)}
-          </select>
+          ${(() => {
+            const options =
+              workPriceLevelOptions && workPriceLevelOptions.length > 0
+                ? workPriceLevelOptions
+                : PRICE_LEVEL_OPTIONS.map((opt) => ({
+                    value: opt.value,
+                    label: t(opt.labelKey),
+                  }));
+            return html`<select
+              .value=${workCustomerLevel}
+              @change=${(e: Event) => onCustomerLevelChange((e.target as HTMLSelectElement).value)}
+              style="margin-left: 8px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 160px;"
+              aria-label=${t("work.customerLevel")}
+            >
+              ${options.map((opt) => html`<option value=${opt.value}>${opt.label}</option>`)}
+            </select>`;
+          })()}
         </div>
         <label style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
           <input
@@ -308,7 +357,7 @@ export function renderWork(props: WorkProps) {
             ? html`<button class="btn btn-sm" @click=${onRetry} aria-label=${t("common.retry")}>${t("common.retry")}</button>`
             : nothing}
           ${workFilePaths.length === 0 ? html`<span class="muted" style="font-size: 12px;">${t("work.runHint")}</span>` : nothing}
-          <span class="muted" style="font-size: 12px;">${t("work.statusLabel")}: ${workRunStatus}</span>
+          <span class="muted" style="font-size: 12px;">${t("work.statusLabel")}: ${statusLabel}</span>
         </div>
       </div>
 

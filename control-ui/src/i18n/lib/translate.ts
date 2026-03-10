@@ -3,7 +3,8 @@ import type { Locale, TranslationMap } from "./types.ts";
 
 type Subscriber = (locale: Locale) => void;
 
-export const SUPPORTED_LOCALES: ReadonlyArray<Locale> = ["en", "zh-CN", "zh-TW", "pt-BR"];
+// 仅支持英文与简体中文，其它 locale（如 zh-TW/pt-BR）会在加载阶段软回退。
+export const SUPPORTED_LOCALES: ReadonlyArray<Locale> = ["en", "zh-CN"];
 
 export function isSupportedLocale(value: string | null | undefined): value is Locale {
   return value !== null && value !== undefined && SUPPORTED_LOCALES.includes(value as Locale);
@@ -20,17 +21,19 @@ class I18nManager {
 
   private loadLocale() {
     const saved = localStorage.getItem("openclaw.i18n.locale");
+    let next: Locale;
     if (isSupportedLocale(saved)) {
-      this.locale = saved;
+      next = saved;
     } else {
-      const navLang = navigator.language;
-      if (navLang.startsWith("zh")) {
-        this.locale = navLang === "zh-TW" || navLang === "zh-HK" ? "zh-TW" : "zh-CN";
-      } else if (navLang.startsWith("pt")) {
-        this.locale = "pt-BR";
-      } else {
-        this.locale = "en";
-      }
+      const navLang = navigator.language || "";
+      next = navLang.startsWith("zh") ? "zh-CN" : "en";
+    }
+    // 对非英文 locale，构造时即触发一次懒加载，确保 translations[next] 就绪
+    if (next === "en") {
+      this.locale = "en";
+    } else {
+      // setLocale 会异步加载对应语言包并更新 locale
+      void this.setLocale(next);
     }
   }
 
@@ -49,10 +52,6 @@ class I18nManager {
         let module: Record<string, TranslationMap>;
         if (locale === "zh-CN") {
           module = await import("../locales/zh-CN.ts");
-        } else if (locale === "zh-TW") {
-          module = await import("../locales/zh-TW.ts");
-        } else if (locale === "pt-BR") {
-          module = await import("../locales/pt-BR.ts");
         } else {
           return;
         }

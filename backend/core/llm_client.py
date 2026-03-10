@@ -33,7 +33,7 @@ def get_openai_client(
             client = wrap_openai(client)
             logger.info("LangSmith 追踪已启用（OpenAI 调用将上报至 LangSmith）")
     except ImportError:
-        logger.debug("未安装 langsmith，跳过 LangSmith 包装")
+        logger.debug("未安装 langsmith，跳过 LangSmith 包装", exc_info=True)
     except Exception as e:
-        logger.debug("LangSmith 包装跳过: %s", e)
+        logger.debug("LangSmith 包装跳过: %s", e, exc_info=True)
     return client

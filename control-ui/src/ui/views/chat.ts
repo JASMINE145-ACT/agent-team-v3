@@ -14,6 +14,7 @@ import type { ChatItem, MessageGroup } from "../types/chat-types.ts";
 import type { ChatAttachment, ChatQueueItem, ChatUploadedFile } from "../ui-types.ts";
 import { renderMarkdownSidebar } from "./markdown-sidebar.ts";
 import "../components/resizable-divider.ts";
+import { t } from "../../i18n/index.ts";
 
 export type CompactionIndicatorStatus = {
   active: boolean;
@@ -104,7 +105,7 @@ function renderCompactionIndicator(status: CompactionIndicatorStatus | null | un
   if (status.active) {
     return html`
       <div class="compaction-indicator compaction-indicator--active" role="status" aria-live="polite">
-        ${icons.loader} Compacting context...
+        ${icons.loader} ${t("chat.ui.compaction.active")}
       </div>
     `;
   }
@@ -115,7 +116,7 @@ function renderCompactionIndicator(status: CompactionIndicatorStatus | null | un
     if (elapsed < COMPACTION_TOAST_DURATION_MS) {
       return html`
         <div class="compaction-indicator compaction-indicator--complete" role="status" aria-live="polite">
-          ${icons.check} Context compacted
+          ${icons.check} ${t("chat.ui.compaction.done")}
         </div>
       `;
     }
@@ -182,13 +183,13 @@ function renderAttachmentPreview(props: ChatProps) {
           <div class="chat-attachment">
             <img
               src=${att.dataUrl}
-              alt="Attachment preview"
+              alt=${t("chat.ui.attachments.previewAlt")}
               class="chat-attachment__img"
             />
             <button
               class="chat-attachment__remove"
               type="button"
-              aria-label="Remove attachment"
+              aria-label=${t("chat.ui.attachments.remove")}
               @click=${() => {
                 const next = (props.attachments ?? []).filter((a) => a.id !== att.id);
                 props.onAttachmentsChange?.(next);
@@ -214,7 +215,7 @@ function renderUploadedFileRow(props: ChatProps) {
         <button
           type="button"
           class="btn chat-uploaded-file__clear"
-          aria-label="Remove uploaded file"
+          aria-label=${t("chat.ui.upload.remove")}
           @click=${onClear}
         >
           ${icons.x}
@@ -230,7 +231,7 @@ function renderUploadedFileRow(props: ChatProps) {
       <input
         type="file"
         accept=".xlsx,.xls,.xlsm,.pdf"
-        aria-label="Upload Excel or PDF"
+        aria-label=${t("chat.ui.upload.label")}
         class="chat-uploaded-file-input"
         @change=${async (e: Event) => {
           const input = e.target as HTMLInputElement;
@@ -246,7 +247,7 @@ function renderUploadedFileRow(props: ChatProps) {
         class="btn chat-upload-file-btn"
         @click=${(e: Event) => (e.currentTarget as HTMLElement).parentElement?.querySelector<HTMLInputElement>("input[type=file]")?.click()}
       >
-        上传 Excel/PDF
+        ${t("chat.ui.upload.button")}
       </button>
     </div>
   `;
@@ -268,9 +269,9 @@ export function renderChat(props: ChatProps) {
   const hasUploadedFile = Boolean(props.uploadedFile?.file_name);
   const composePlaceholder = props.connected
     ? hasAttachments
-      ? "Add a message or paste more images..."
-      : "Message (↩ to send, Shift+↩ for line breaks；可粘贴图片，或上传/拖拽 Excel/PDF)"
-    : "Connect to the gateway to start chatting…";
+      ? t("chat.ui.compose.placeholder.withImages")
+      : t("chat.ui.compose.placeholder.default")
+    : t("chat.ui.compose.placeholder.disconnected");
 
   const splitRatio = props.splitRatio ?? 0.6;
   const sidebarOpen = Boolean(props.sidebarOpen && props.onCloseSidebar);
@@ -376,8 +377,8 @@ export function renderChat(props: ChatProps) {
               class="chat-focus-exit"
               type="button"
               @click=${props.onToggleFocusMode}
-              aria-label="Exit focus mode"
-              title="Exit focus mode"
+              aria-label=${t("chat.ui.compose.exitFocus")}
+              title=${t("chat.ui.compose.exitFocus")}
             >
               ${icons.x}
             </button>
@@ -424,7 +425,9 @@ export function renderChat(props: ChatProps) {
         props.queue.length
           ? html`
             <div class="chat-queue" role="status" aria-live="polite">
-              <div class="chat-queue__title">Queued (${props.queue.length})</div>
+              <div class="chat-queue__title">
+                ${t("chat.ui.queue.title", { count: String(props.queue.length) })}
+              </div>
               <div class="chat-queue__list">
                 ${props.queue.map(
                   (item) => html`
@@ -432,13 +435,17 @@ export function renderChat(props: ChatProps) {
                       <div class="chat-queue__text">
                         ${
                           item.text ||
-                          (item.attachments?.length ? `Image (${item.attachments.length})` : "")
+                          (item.attachments?.length
+                            ? t("chat.ui.queue.imageItem", {
+                                count: String(item.attachments.length),
+                              })
+                            : "")
                         }
                       </div>
                       <button
                         class="btn chat-queue__remove"
                         type="button"
-                        aria-label="Remove queued message"
+                        aria-label=${t("chat.ui.queue.remove")}
                         @click=${() => props.onQueueRemove(item.id)}
                       >
                         ${icons.x}
@@ -462,19 +469,23 @@ export function renderChat(props: ChatProps) {
               type="button"
               @click=${props.onScrollToBottom}
             >
-              New messages ${icons.arrowDown}
+              ${t("chat.ui.compose.newMessages")} ${icons.arrowDown}
             </button>
           `
           : nothing
       }
 
       <div class="chat-compose ${props.composeDragOver ? "chat-compose--drag-over" : ""}">
-        ${props.composeDragOver ? html`<div class="chat-compose__drop-hint">松开以上传 Excel/PDF</div>` : nothing}
+        ${props.composeDragOver
+          ? html`<div class="chat-compose__drop-hint">
+              ${t("chat.ui.compose.dropHint")}
+            </div>`
+          : nothing}
         ${renderAttachmentPreview(props)}
         ${renderUploadedFileRow(props)}
         <div class="chat-compose__row">
           <label class="field chat-compose__field">
-            <span>Message</span>
+            <span>${t("chat.ui.compose.label")}</span>
             <textarea
               ${ref((el) => el && adjustTextareaHeight(el as HTMLTextAreaElement))}
               .value=${props.draft}
@@ -513,14 +524,17 @@ export function renderChat(props: ChatProps) {
               ?disabled=${!props.connected || (!canAbort && props.sending)}
               @click=${canAbort ? props.onAbort : props.onNewSession}
             >
-              ${canAbort ? "Stop" : "New session"}
+              ${canAbort ? t("chat.ui.compose.stop") : t("chat.ui.compose.newSession")}
             </button>
             <button
               class="btn primary"
               ?disabled=${!props.connected}
               @click=${props.onSend}
             >
-              ${isBusy ? "Queue" : "Send"}<kbd class="btn-kbd">↵</kbd>
+              ${isBusy ? t("chat.ui.compose.queue") : t("chat.ui.compose.send")}<kbd
+                class="btn-kbd"
+                >↵</kbd
+              >
             </button>
           </div>
         </div>
@@ -600,7 +614,7 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
           typeof marker.id === "string"
             ? `divider:compaction:${marker.id}`
             : `divider:compaction:${normalized.timestamp}:${i}`,
-        label: "Compaction",
+        label: t("chat.ui.compaction.divider"),
         timestamp: normalized.timestamp ?? Date.now(),
       });
       continue;

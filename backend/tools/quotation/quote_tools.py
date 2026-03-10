@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Any, List
+
+logger = logging.getLogger(__name__)
 
 # 边界行标识（用户指定：报价数据列到该行为止）
 TOTAL_ROW_MARKER = "Total Excluding PPN不含税总价"
@@ -82,7 +85,7 @@ def extract_quotation_data(file_path: str, sheet_name: str | None = None) -> dic
         try:
             wb.close()
         except Exception:
-            pass
+            logger.debug("关闭 workbook 失败", exc_info=True)
         return {"success": False, "result": "", "error": str(e), "rows_count": 0}
 
     if not all_rows:
@@ -172,7 +175,7 @@ def _extract_inquiry_items_smart_fallback(
         try:
             wb.close()
         except Exception:
-            pass
+            logger.debug("关闭 workbook 失败", exc_info=True)
         return {"success": False, "items": [], "error": str(e), "rows_count": 0}
 
     if not rows or len(rows) < 2:
@@ -281,7 +284,7 @@ def extract_inquiry_items(
         try:
             wb.close()
         except Exception:
-            pass
+            logger.debug("关闭 workbook 失败", exc_info=True)
         return {"success": False, "items": [], "error": str(e), "rows_count": 0}
 
     if not all_rows:
@@ -347,8 +350,8 @@ def extract_inquiry_items(
                 v = row_cells[qty_col]
                 if v is not None and str(v).strip():
                     qty_val = int(float(str(v).replace(",", "")))
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                logger.debug("解析数量失败 row=%s: %s", row_num, e)
         items.append({
             "row": row_num,
             "product_name": product_name,

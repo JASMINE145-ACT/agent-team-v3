@@ -25,12 +25,21 @@ async def query(
     Body: { "query": "用户输入", "session_id": "可选", "context": { "file_path": "可选" } }
     """
     query_text = (body.get("query") or body.get("message") or "").strip()
+    logger.info("[/api/query] received: %r  session_id=%r", query_text, body.get("session_id"))
     if not query_text:
-        return {"status": "error", "answer": "", "message": "请提供 query 或 message。"}
+        return {"success": False, "error": "请提供 query 或 message。"}
     remember_reply = try_handle_remember(query_text)
     if remember_reply is not None:
         session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
-        return {"status": "success", "answer": remember_reply, "thinking": None, "trace": [], "session_id": session_id}
+        return {
+            "success": True,
+            "data": {
+                "answer": remember_reply,
+                "thinking": None,
+                "trace": [],
+                "session_id": session_id,
+            }
+        }
     session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
     context = body.get("context") or {}
     agent = request.app.state.agent
@@ -38,20 +47,25 @@ async def query(
         result = await agent.execute_react(query_text, context=context, session_id=session_id)
     except Exception as e:
         logger.exception("query 执行失败")
-        return {"status": "error", "answer": "", "message": str(e)}
+        return {"success": False, "error": str(e)}
     if result.get("needs_clarification"):
         return {
-            "status": "needs_clarification",
-            "answer": result.get("answer", ""),
-            "questions": result.get("clarification_questions") or [],
-            "session_id": session_id,
+            "success": True,
+            "data": {
+                "answer": result.get("answer", ""),
+                "questions": result.get("clarification_questions") or [],
+                "session_id": session_id,
+                "needs_clarification": True,
+            }
         }
     return {
-        "status": "success",
-        "answer": result.get("answer", ""),
-        "thinking": result.get("thinking"),
-        "trace": result.get("trace"),
-        "session_id": session_id,
+        "success": True,
+        "data": {
+            "answer": result.get("answer", ""),
+            "thinking": result.get("thinking"),
+            "trace": result.get("trace"),
+            "session_id": session_id,
+        }
     }
 
 

@@ -206,13 +206,14 @@ def llm_select_best(
             if idx <= 0:
                 return None
             if idx > len(candidates):
-                return _candidate_to_result(candidates[0])
+                # LLM 返回 index 越界时不再隐式回退第一候选，而是走规则兜底并打上标记，交由上层按低置信度处理
+                return _rule_based_fallback(keywords, candidates, reason="llm_index_out_of_range")
             return _candidate_to_result(candidates[idx - 1])
 
         # 无把握：返回若干可能选项 + reasoning
         options = obj.get("options") or []
         if not options:
-            return _rule_based_fallback(keywords, candidates)
+            return _rule_based_fallback(keywords, candidates, reason="llm_low_confidence_options_invalid")
         seen = set()
         result_options = []
         for opt in options[:5]:
@@ -230,11 +231,11 @@ def llm_select_best(
                 "reasoning": (opt.get("reasoning") or "").strip()[:300],
             })
         if not result_options:
-            return _rule_based_fallback(keywords, candidates)
+            return _rule_based_fallback(keywords, candidates, reason="llm_low_confidence_options_invalid")
         return {"_suggestions": True, "options": result_options}
     except Exception as e:
         logger.warning("LLM 选择失败，使用规则回退: %s", e)
-        return _rule_based_fallback(keywords, candidates)
+        return _rule_based_fallback(keywords, candidates, reason="llm_error")
 
 
 def _candidate_to_result(c: dict[str, Any]) -> dict[str, Any]:
@@ -246,8 +247,12 @@ def _candidate_to_result(c: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _rule_based_fallback(keywords: str, candidates: List[dict[str, Any]]) -> Optional[dict[str, Any]]:
-    """LLM 失败时按业务规则选：等径优于异径，PPR 优于 PVC，规格精确匹配。"""
+def _rule_based_fallback(
+    keywords: str,
+    candidates: List[dict[str, Any]],
+    reason: str = "llm_error",
+) -> Optional[dict[str, Any]]:
+    """LLM 失败或输出异常时按业务规则选：等径优于异径，PPR 优于 PVC，规格精确匹配，并打上兜底标记。"""
     if not candidates:
         return None
     keywords_lower = (keywords or "").lower()
@@ -275,4 +280,8 @@ def _rule_based_fallback(keywords: str, candidates: List[dict[str, Any]]) -> Opt
         "code": (c.get("code") or "").strip(),
         "matched_name": (c.get("matched_name") or "")[:200],
         "unit_price": float(c.get("unit_price", 0) or 0),
+        "_selection_meta": {
+            "from_rule_fallback": True,
+            "reason": reason,
+        },
     }

@@ -63,6 +63,7 @@ def match_wanding_price_candidates(
     若传 max_score_tiers（如 2），则返回前 N 个分数档的全部候选；否则取前 max_candidates 条。
     """
     from backend.tools.inventory.services.wanding_fuzzy_matcher import match_fuzzy_candidates
+    from backend.tools.inventory.config import config
 
     return match_fuzzy_candidates(
         keywords,
@@ -70,6 +71,8 @@ def match_wanding_price_candidates(
         price_library_path=price_library_path,
         max_candidates=max_candidates,
         max_score_tiers=max_score_tiers,
+        min_score=getattr(config, "INVENTORY_MIN_SCORE", None),
+        min_score_gap=getattr(config, "INVENTORY_MIN_SCORE_GAP", None),
     )
 
 
@@ -255,7 +258,12 @@ def match_price_and_get_inventory(
                 options = best.get("options", [])
                 for opt in options:
                     opt["source"] = source_by_code.get(opt.get("code", ""), "共同")
-                return {"_needs_human_choice": True, "keywords": keywords, "options": options}
+                return {
+                    "_needs_human_choice": True,
+                    "keywords": keywords,
+                    "options": options,
+                    "source": "llm_low_confidence",
+                }
             # 非 Work 场景下也不要强行回退第一候选，避免误匹配。
             return None
         r = {
@@ -264,6 +272,10 @@ def match_price_and_get_inventory(
             "unit_price": best.get("unit_price", 0),
             "match_source": source_by_code.get(best.get("code", ""), "共同"),
         }
+        # 透传 LLM 选型的兜底元信息，供上层区分高置信度与规则回退/异常场景
+        selection_meta = best.get("_selection_meta")
+        if selection_meta:
+            r["_selection_meta"] = selection_meta
     if not r or not r.get("code"):
         return None
     # 历史匹配得到的 r 可能 unit_price=0（映射表无价格），用 code 去万鼎表补全
@@ -286,10 +298,14 @@ def match_price_and_get_inventory(
     except Exception as e:
         logger.debug("库存查询 %s 失败: %s", code, e)
 
-    return {
+    result = {
         "code": code,
         "matched_name": r.get("matched_name", ""),
         "unit_price": r.get("unit_price", 0.0),
         "available_qty": available_qty,
         "match_source": r.get("match_source", "共同"),
     }
+    selection_meta = r.get("_selection_meta")
+    if selection_meta:
+        result["_selection_meta"] = selection_meta
+    return result

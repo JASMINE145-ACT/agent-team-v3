@@ -2,22 +2,25 @@
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger(__name__)
+
+# 工具 handler: (args: dict, ctx: dict) -> Awaitable[str]
+ToolHandler = Callable[..., Awaitable[str]]
 
 
 @dataclass
 class ToolEntry:
     definition: dict
-    handler: Callable
+    handler: ToolHandler
 
 
 class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, ToolEntry] = {}
 
-    def register(self, definition: dict, handler: Callable) -> None:
+    def register(self, definition: dict, handler: ToolHandler) -> None:
         name = definition["function"]["name"]
         self._tools[name] = ToolEntry(definition, handler)
 

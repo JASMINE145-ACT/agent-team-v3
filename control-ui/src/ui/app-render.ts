@@ -1,6 +1,6 @@
 import { html, nothing } from "lit";
 import { parseAgentSessionKey } from "../routing/session-key.js";
-import { t } from "../i18n/index.ts";
+import { t, i18n, type Locale } from "../i18n/index.ts";
 import { refreshChatAvatar } from "./app-chat.ts";
 import { renderWorkTab } from "./app-render-work-tab.ts";
 import { renderChatControls, renderTab, renderThemeToggle } from "./app-render.helpers.ts";
@@ -114,6 +114,8 @@ export function renderApp(state: AppViewState) {
     state.agentsList?.agents?.[0]?.id ??
     null;
 
+  const currentLocale = i18n.getLocale();
+
   return html`
     <div class="shell ${isChat ? "shell--chat" : ""} ${chatFocus ? "shell--chat-focus" : ""} ${state.settings.navCollapsed ? "shell--nav-collapsed" : ""} ${state.onboarding ? "shell--onboarding" : ""}">
       <header class="topbar">
@@ -147,6 +149,21 @@ export function renderApp(state: AppViewState) {
             <span class="mono">${state.connected ? t("common.ok") : t("common.offline")}</span>
           </div>
           ${renderThemeToggle(state)}
+          <label class="topbar-lang">
+            <span class="sr-only">${t("overview.access.language")}</span>
+            <select
+              .value=${currentLocale}
+              style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 140px;"
+              @change=${(e: Event) => {
+                const v = (e.target as HTMLSelectElement).value as Locale;
+                void i18n.setLocale(v);
+                state.applySettings({ ...state.settings, locale: v });
+              }}
+            >
+              <option value="en">${t("languages.en")}</option>
+              <option value="zh-CN">${t("languages.zhCN")}</option>
+            </select>
+          </label>
         </div>
       </header>
       <aside class="nav ${state.settings.navCollapsed ? "nav--collapsed" : ""}">

@@ -248,6 +248,7 @@ export function renderOverview(props: OverviewProps) {
             <span>${t("overview.access.language")}</span>
             <select
               .value=${currentLocale}
+          style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 160px;"
               @change=${(e: Event) => {
                 const v = (e.target as HTMLSelectElement).value as Locale;
                 void i18n.setLocale(v);
@@ -256,8 +257,6 @@ export function renderOverview(props: OverviewProps) {
             >
               <option value="en">${t("languages.en")}</option>
               <option value="zh-CN">${t("languages.zhCN")}</option>
-              <option value="zh-TW">${t("languages.zhTW")}</option>
-              <option value="pt-BR">${t("languages.ptBR")}</option>
             </select>
           </label>
         </div>
@@ -313,15 +312,27 @@ export function renderOverview(props: OverviewProps) {
 
     <section class="grid grid-cols-2" style="margin-top: 18px;">
       <div class="card">
-        <div class="card-title">无货总览</div>
-        <div class="card-sub">最近的无货情况汇总，点击「实例」页可查看明细。</div>
+        <div class="card-title">${t("overview.oos.title")}</div>
+        <div class="card-sub">${t("overview.oos.subtitle")}</div>
         <div class="row" style="margin-top: 12px; gap: 12px; flex-wrap: wrap;">
           ${props.oosStats
             ? [
-                { label: "总记录数", value: props.oosStats.total_records },
-                { label: "无货产品数", value: props.oosStats.out_of_stock_count },
-                { label: "今日新增", value: props.oosStats.today_count },
-                { label: "被报无货≥2 次", value: props.oosStats.notified_count },
+                {
+                  label: t("overview.oos.stats.totalRecords"),
+                  value: props.oosStats.total_records,
+                },
+                {
+                  label: t("overview.oos.stats.outOfStockCount"),
+                  value: props.oosStats.out_of_stock_count,
+                },
+                {
+                  label: t("overview.oos.stats.today"),
+                  value: props.oosStats.today_count,
+                },
+                {
+                  label: t("overview.oos.stats.reportedGe2"),
+                  value: props.oosStats.notified_count,
+                },
               ].map(
                 (c) => html`
                   <div class="card stat-card" style="min-width: 120px;">
@@ -330,19 +341,31 @@ export function renderOverview(props: OverviewProps) {
                   </div>
                 `,
               )
-            : html`<div class="muted">暂无统计，稍后可在「实例」页查看。</div>`}
+            : html`<div class="muted">${t("overview.oos.empty")}</div>`}
         </div>
       </div>
       <div class="card">
-        <div class="card-title">缺货总览</div>
-        <div class="card-sub">Work 匹配后库存不足的统计，需重点关注的紧缺物资。</div>
+        <div class="card-title">${t("overview.shortage.title")}</div>
+        <div class="card-sub">${t("overview.shortage.subtitle")}</div>
         <div class="row" style="margin-top: 12px; gap: 12px; flex-wrap: wrap;">
           ${props.shortageStats
             ? [
-                { label: "总记录数", value: props.shortageStats.total_records },
-                { label: "缺货产品数", value: props.shortageStats.shortage_product_count },
-                { label: "今日新增", value: props.shortageStats.today_count },
-                { label: "被报缺货≥2 次", value: props.shortageStats.reported_ge2_count },
+                {
+                  label: t("overview.shortage.stats.totalRecords"),
+                  value: props.shortageStats.total_records,
+                },
+                {
+                  label: t("overview.shortage.stats.shortageProductCount"),
+                  value: props.shortageStats.shortage_product_count,
+                },
+                {
+                  label: t("overview.shortage.stats.today"),
+                  value: props.shortageStats.today_count,
+                },
+                {
+                  label: t("overview.shortage.stats.reportedGe2"),
+                  value: props.shortageStats.reported_ge2_count,
+                },
               ].map(
                 (c) => html`
                   <div class="card stat-card" style="min-width: 120px;">
@@ -351,7 +374,7 @@ export function renderOverview(props: OverviewProps) {
                   </div>
                 `,
               )
-            : html`<div class="muted">暂无统计，稍后可在「实例」页查看。</div>`}
+            : html`<div class="muted">${t("overview.shortage.empty")}</div>`}
         </div>
       </div>
     </section>

@@ -7,10 +7,13 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # 触发前缀（顺序无关，取第一个匹配到的并截断前缀得到「要记的内容」）
 _REMEMBER_PATTERNS = [
@@ -30,7 +33,7 @@ def _get_knowledge_path() -> Optional[Path]:
         if path:
             return Path(path)
     except Exception:
-        pass
+        logger.warning("获取业务知识路径失败", exc_info=True)
     return None
 
 
@@ -76,7 +79,7 @@ def try_handle_remember(user_input: str) -> Optional[str]:
             from backend.tools.inventory.services.llm_selector import invalidate_business_knowledge_cache
             invalidate_business_knowledge_cache()
         except Exception:
-            pass
+            logger.warning("失效业务知识缓存失败", exc_info=True)
         return f"已记住：{content[:80]}{'…' if len(content) > 80 else ''}\n（已追加到业务知识文件，后续万鼎选型与匹配会参考。）"
     except Exception as e:
         return f"写入业务知识文件失败：{e}"
@@ -107,7 +110,7 @@ def append_business_knowledge(content: str) -> str:
             from backend.tools.inventory.services.llm_selector import invalidate_business_knowledge_cache
             invalidate_business_knowledge_cache()
         except Exception:
-            pass
+            logger.warning("失效业务知识缓存失败", exc_info=True)
         return f"已追加到业务知识：{content[:80]}{'…' if len(content) > 80 else ''}\n（后续万鼎选型与匹配会参考。）"
     except Exception as e:
         return f"写入业务知识文件失败：{e}"

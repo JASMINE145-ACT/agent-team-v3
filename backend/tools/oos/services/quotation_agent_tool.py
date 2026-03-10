@@ -195,9 +195,10 @@ def persist_out_of_stock_records(
     """
     from backend.tools.oos.models.models import OutOfStockProduct
     from backend.tools.oos.services.oos_repository import insert_oos_record
-    from .data_service import DataService
+    # 例外：tools 层暂从 deps 取 DataService 单例，见代码准则规则2；后续可改为调用方注入
+    from backend.server.api.deps import get_oos_data_service
 
-    data_service = DataService()
+    data_service = get_oos_data_service()
     inserted = 0
     errors: list[str] = []
     default_sheet = (sheet_name or "").strip()

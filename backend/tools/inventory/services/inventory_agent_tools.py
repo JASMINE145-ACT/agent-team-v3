@@ -179,11 +179,17 @@ def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
         if r is None:
             return {"success": True, "result": f"LLM 判定无匹配：{keywords}"}
         if r.get("_suggestions") and r.get("options"):
-            lines = [f"LLM 无把握单选，以下为几个可能选项及理由（请人工确认）：\n"]
-            for i, opt in enumerate(r["options"], 1):
-                lines.append(f"{i}. code: {opt.get('code', '')} | {opt.get('matched_name', '')} | unit_price: {opt.get('unit_price', 0)}")
-                lines.append(f"   reasoning: {opt.get('reasoning', '')}\n")
-            return {"success": True, "result": "\n".join(lines)}
+            options = r.get("options", []) or []
+            # 为每个选项补充来源，结构与 match_price_and_get_inventory 中保持一致
+            for opt in options:
+                opt["source"] = match_source
+            payload = {
+                "_needs_human_choice": True,
+                "keywords": keywords,
+                "options": options,
+                "source": "select_wanding_match",
+            }
+            return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
         chosen_code = (r.get("code") or "").strip()
         chosen_index = 0
         for i, c in enumerate(candidates):
@@ -191,7 +197,18 @@ def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
                 chosen_index = i + 1
                 break
         chosen = {"code": r.get("code", ""), "matched_name": r.get("matched_name", ""), "unit_price": r.get("unit_price", 0)}
-        payload = {"single": True, "candidates": candidates, "chosen": chosen, "chosen_index": chosen_index, "match_source": match_source}
+        payload: dict[str, Any] = {
+            "single": True,
+            "candidates": candidates,
+            "chosen": chosen,
+            "chosen_index": chosen_index,
+            "match_source": match_source,
+        }
+        # 若为规则兜底结果，增加机器可读标记，便于上游区分高置信度与兜底
+        selection_meta = r.get("_selection_meta") or {}
+        if selection_meta.get("from_rule_fallback"):
+            payload["fallback"] = True
+            payload["_selection_meta"] = selection_meta
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
     except Exception as e:
         logger.exception("select_wanding_match 失败")

@@ -15,3 +15,12 @@ def validate_file_path(path: str, tool_name: str) -> str | None:
     if not Path(path).exists():
         return tool_error(f"[{tool_name}] 文件不存在: {path}，请确认路径是否正确")
     return None
+
+
+def unwrap_tool_result(out: dict) -> str:
+    """将工具函数的 {'success': bool, 'result': str} 拆包为字符串。
+    成功时返回 result 字段；失败时返回 JSON 字符串（供 LLM 理解错误）。
+    """
+    if out.get("success"):
+        return out.get("result", "")
+    return json.dumps(out, ensure_ascii=False)

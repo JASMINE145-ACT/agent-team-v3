@@ -32,15 +32,17 @@ def test_router_included():
 
 
 def test_health_endpoint():
-    """GET /health 返回 200 且包含 status。"""
+    """GET /health 返回 200，格式为 {success, data}，data 内包含 status 与 service。"""
     from fastapi.testclient import TestClient
     from backend.server.api.app import app
     client = TestClient(app)
     resp = client.get("/health")
     assert resp.status_code == 200
     data = resp.json()
-    assert data.get("status") == "ok"
-    assert "service" in data
+    assert data.get("success") is True
+    payload = data.get("data") or {}
+    assert payload.get("status") == "ok"
+    assert "service" in payload
 
 
 def test_config_loads():

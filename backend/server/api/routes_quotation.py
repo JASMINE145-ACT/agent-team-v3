@@ -12,6 +12,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _is_pure_oos_line(ln: Any) -> bool:
+    """
+    判断该行是否属于「纯无货」：
+    - Work 流程构造 pending_quotation_draft 时，未匹配到任何产品的行统一赋值 code == \"无货\"；
+    - 库存不足但已有匹配 code 的行不会使用该 sentinel，而是通过 shortage/available_qty 表达。
+    仅对这类行做无货登记，其它缺货行交由 shortage_records 统一管理。
+    """
+    if not isinstance(ln, dict):
+        return False
+    code = (ln.get("code") or "").strip()
+    return code == "无货"
+
+
 def _replenishment_confirm_use_real_tool() -> bool:
     """补货确认是否真实调用 modify_inventory 写 ACCURATE。"""
     return os.environ.get("REPLENISHMENT_CONFIRM_REAL_INVENTORY", "").strip().lower() in ("1", "true", "yes")
@@ -38,7 +51,9 @@ async def quotation_drafts_create(body: Dict[str, Any] = Body(...)) -> Dict[str,
     try:
         ds = get_oos_data_service()
         result = ds.insert_quotation_draft(name=name, source=source, file_path=file_path, lines=lines)
-        oos_lines = [ln for ln in lines if isinstance(ln, dict) and ln.get("is_shortage")]
+        # 仅对「纯无货」行做无货登记：匹配不到任何产品、code 固定为 \"无货\"。
+        # 库存不足（已有 code 但 available_qty < qty）的行只写 shortage_records，不再重复写入 out_of_stock_records。
+        oos_lines = [ln for ln in lines if _is_pure_oos_line(ln)]
         if oos_lines:
             oos_records = []
             for ln in oos_lines:

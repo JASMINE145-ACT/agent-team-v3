@@ -32,6 +32,7 @@ export function renderWorkTab(state: AppViewState) {
     workTextInput: state.workTextInput,
     workTextGenerating: state.workTextGenerating,
     workTextError: state.workTextError,
+    workPriceLevelOptions: state.workPriceLevelOptions,
     onWorkTextChange: (v) => {
       state.workTextInput = v;
     },
@@ -47,6 +48,23 @@ export function renderWorkTab(state: AppViewState) {
         state.workOriginalFileNamesByPath = {
           ...state.workOriginalFileNamesByPath,
           [key]: (fileName || "").trim() || filePath.split(/[/\\]/).pop() || filePath,
+        };
+      }
+    },
+    onRenameFileName: (filePath, nextName) => {
+      const key = normalizePathKey(filePath);
+      if (!key) return;
+      const trimmed = (nextName || "").trim();
+      const fallback = filePath.split(/[/\\]/).pop() || filePath;
+      state.workOriginalFileNamesByPath = {
+        ...state.workOriginalFileNamesByPath,
+        [key]: trimmed || fallback,
+      };
+      const draft = state.workPendingQuotationDraft;
+      if (draft && draft.file_path && normalizePathKey(draft.file_path) === key) {
+        state.workPendingQuotationDraft = {
+          ...draft,
+          name: trimmed || fallback,
         };
       }
     },

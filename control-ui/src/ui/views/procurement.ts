@@ -135,6 +135,7 @@ export function renderProcurement(props: ProcurementProps) {
               .value=${sortBy}
               @change=${(e: Event) => onSortByChange((e.target as HTMLSelectElement).value as "uploaded_at" | "shortfall" | "count" | "product_name")}
               aria-label=${t("procurement.sortBy")}
+              style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 160px;"
             >
               <option value="uploaded_at">${t("procurement.sortUploadedAt")}</option>
               <option value="shortfall">${t("procurement.sortShortfall")}</option>
@@ -148,6 +149,7 @@ export function renderProcurement(props: ProcurementProps) {
               .value=${sortDir}
               @change=${(e: Event) => onSortDirChange((e.target as HTMLSelectElement).value as "asc" | "desc")}
               aria-label=${t("procurement.sortDir")}
+              style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 140px;"
             >
               <option value="desc">${t("procurement.sortDesc")}</option>
               <option value="asc">${t("procurement.sortAsc")}</option>
@@ -159,6 +161,7 @@ export function renderProcurement(props: ProcurementProps) {
               .value=${String(safePageSize)}
               @change=${(e: Event) => onPageSizeChange(Number((e.target as HTMLSelectElement).value) || 10)}
               aria-label=${t("procurement.pageSize")}
+              style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 120px;"
             >
               <option value="10">10</option>
               <option value="20">20</option>

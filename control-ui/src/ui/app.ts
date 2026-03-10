@@ -363,6 +363,7 @@ export class OpenClawApp extends LitElement {
   @state() workTextInput = "";
   @state() workTextGenerating = false;
   @state() workTextError: string | null = null;
+  @state() workPriceLevelOptions: Array<{ value: string; label: string }> = [];
 
   @state() cronLoading = false;
   @state() cronJobs: CronJob[] = [];

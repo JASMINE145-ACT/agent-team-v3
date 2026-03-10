@@ -1,6 +1,7 @@
 export type TranslationMap = { [key: string]: string | TranslationMap };
 
-export type Locale = "en" | "zh-CN" | "zh-TW" | "pt-BR";
+// UI 仅正式支持英文与简体中文。
+export type Locale = "en" | "zh-CN";
 
 export interface I18nConfig {
   locale: Locale;

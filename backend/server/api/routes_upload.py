@@ -2,13 +2,15 @@
 import logging
 import uuid
 from pathlib import Path
+from typing import Any, Dict
 
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from typing import Any, Dict
 
 from backend.config import Config
 from backend.server.api.deps import sanitize_upload_filename
+from backend.tools.quotation.quote_tools import fill_template_with_inquiry_items
+from backend.tools.quotation.text_to_inquiry import text_to_inquiry_items
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -37,7 +39,7 @@ async def quotation_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
         except ValueError:
             raise HTTPException(status_code=400, detail="非法文件名")
         out_path.write_bytes(content)
-        return {"file_path": str(out_path), "file_name": raw_name}
+        return {"success": True, "data": {"file_path": str(out_path), "file_name": raw_name}}
     except HTTPException:
         raise
     except Exception as e:
@@ -51,12 +53,6 @@ async def quotation_from_text(body: Dict[str, Any] = Body(...)) -> Dict[str, Any
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="请提供 text（产品描述文字）")
-    try:
-        from backend.tools.quotation.text_to_inquiry import text_to_inquiry_items
-        from backend.tools.quotation.quote_tools import fill_template_with_inquiry_items
-    except ImportError:
-        logger.exception("quotation/from-text 依赖加载失败")
-        raise HTTPException(status_code=500, detail="依赖加载失败")
     template_path = (body.get("template_path") or "").strip() or str(Config.QUOTATION_TEMPLATE_PATH)
     if not Path(template_path).exists():
         raise HTTPException(status_code=500, detail=f"报价单模板不存在: {template_path}")
@@ -78,7 +74,7 @@ async def quotation_from_text(body: Dict[str, Any] = Body(...)) -> Dict[str, Any
     )
     if not out.get("success"):
         raise HTTPException(status_code=500, detail=out.get("error", "填写模板失败"))
-    return {"file_path": str(output_path), "file_name": "文字报价.xlsx"}
+    return {"success": True, "data": {"file_path": str(output_path), "file_name": "文字报价.xlsx"}}
 
 
 @router.get("/api/quotation/download")

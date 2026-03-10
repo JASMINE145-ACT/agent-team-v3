@@ -518,11 +518,15 @@ def match_fuzzy_candidates(
     price_library_path: Optional[str | Path] = None,
     max_candidates: int = 20,
     max_score_tiers: Optional[int] = None,
+    min_score: Optional[float] = None,
+    min_score_gap: Optional[float] = None,
 ) -> List[dict[str, Any]]:
     """
     返回候选列表，每项含 code, matched_name, unit_price, score。
     - max_score_tiers 为 None：按分数排序取前 max_candidates 条。
     - max_score_tiers 为 N（如 2）：取分数前 N 档，每档全部返回（如 top1 有 3 条、top2 有 2 条则共 5 条）。
+    - min_score：若最高分低于该阈值，则视为整体未命中，返回空列表。
+    - min_score_gap：若 top1 分数与 top2 之差 ≥ 该值，则仅保留 top1 作为唯一高置信度候选。
     先按业务知识【字段匹配补充规则】扩展检索词，再做同义/外语替换。
     """
     keywords = (keywords or "").strip()
@@ -538,7 +542,28 @@ def match_fuzzy_candidates(
         return []
 
     results = search_fuzzy(df, keywords)
-    if max_score_tiers is not None and max_score_tiers > 0:
+    if not results:
+        return []
+
+    # 默认阈值从配置读取（如未显式传入）
+    if min_score is None:
+        min_score = getattr(config, "INVENTORY_MIN_SCORE", None)
+    if min_score_gap is None:
+        min_score_gap = getattr(config, "INVENTORY_MIN_SCORE_GAP", None)
+
+    top_score = results[0][1]
+    # 若最高分低于阈值，则视为整体未命中，直接返回空列表
+    if isinstance(min_score, (int, float)) and top_score < float(min_score):
+        return []
+
+    # 若 top1 与 top2 分数差足够大，则视为唯一高置信度候选，直接截断为单候选
+    if (
+        isinstance(min_score_gap, (int, float))
+        and len(results) >= 2
+        and (top_score - results[1][1]) >= float(min_score_gap)
+    ):
+        results = results[:1]
+    elif max_score_tiers is not None and max_score_tiers > 0:
         # 取前 max_score_tiers 个分数档，每档全部返回
         tiers: List[float] = []
         for _rd, score in results:

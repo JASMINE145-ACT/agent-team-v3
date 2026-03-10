@@ -37,7 +37,7 @@ async def procurement_approve(body: Dict[str, Any] = Body(...)) -> Dict[str, Any
         ds = get_oos_data_service()
         inserted, inserted_ids = ds.insert_procurement_approvals(normalized)
         if inserted == 0:
-            return {"success": True, "approved_count": 0, "message": "未写入任何记录"}
+            return {"success": True, "data": {"approved_count": 0, "message": "未写入任何记录"}}
         try:
             from backend.tools.oos.services.email_service import send_procurement_approval_email
             if send_procurement_approval_email(items=normalized):
@@ -46,8 +46,10 @@ async def procurement_approve(body: Dict[str, Any] = Body(...)) -> Dict[str, Any
             logger.warning("采购批准邮件发送失败（不影响落库）: %s", mail_err)
         return {
             "success": True,
-            "approved_count": inserted,
-            "message": f"已批准 {inserted} 条并落库，已通知采购员。",
+            "data": {
+                "approved_count": inserted,
+                "message": f"已批准 {inserted} 条并落库，已通知采购员。",
+            },
         }
     except Exception as e:
         logger.exception("procurement/approve 失败")

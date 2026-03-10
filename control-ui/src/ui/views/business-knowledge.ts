@@ -4,6 +4,7 @@
  * 含「相关数据文件」指引：历史报价/选型依赖的 Excel 路径，可复制后打开编辑。
  */
 import { html, nothing } from "lit";
+import { t } from "../../i18n/index.ts";
 
 export type DependentFiles = {
   mapping_table: string;
@@ -42,7 +43,7 @@ export function renderBusinessKnowledge(props: BusinessKnowledgeProps) {
 
   const lastSuccessStr =
     lastSuccessAt != null
-      ? new Date(lastSuccessAt).toLocaleTimeString("zh-CN", {
+      ? new Date(lastSuccessAt).toLocaleTimeString(undefined, {
           hour: "2-digit",
           minute: "2-digit",
           second: "2-digit",
@@ -53,18 +54,22 @@ export function renderBusinessKnowledge(props: BusinessKnowledgeProps) {
     <section class="card">
       <div class="row" style="justify-content: space-between; align-items: flex-start;">
         <div>
-          <div class="card-title">业务知识</div>
+          <div class="card-title">${t("businessKnowledge.title")}</div>
           <div class="card-sub">
-            编辑万鼎业务知识（wanding_business_knowledge.md），供选型与匹配使用。保存后 LLM 将使用最新内容。
+            ${t("businessKnowledge.subtitle")}
           </div>
         </div>
         <div class="row" style="gap: 8px; align-items: center;">
-          ${lastSuccessStr ? html`<span class="muted">已保存 ${lastSuccessStr}</span>` : nothing}
+          ${lastSuccessStr
+            ? html`<span class="muted">
+                ${t("businessKnowledge.lastSavedAt", { time: lastSuccessStr })}
+              </span>`
+            : nothing}
           <button class="btn" ?disabled=${loading} @click=${onReload}>
-            ${loading ? "加载中…" : "重新加载"}
+            ${loading ? t("businessKnowledge.actions.reloading") : t("businessKnowledge.actions.reload")}
           </button>
           <button class="btn btn--primary" ?disabled=${loading || saving} @click=${() => onSave(content)}>
-            ${saving ? "保存中…" : "保存"}
+            ${saving ? t("businessKnowledge.actions.saving") : t("businessKnowledge.actions.save")}
           </button>
         </div>
       </div>
@@ -72,22 +77,26 @@ export function renderBusinessKnowledge(props: BusinessKnowledgeProps) {
       ${dependentFiles && (dependentFiles.mapping_table || dependentFiles.price_library)
         ? html`
             <div class="callout" style="margin-top: 12px; padding: 12px;">
-              <div style="font-weight: 600; margin-bottom: 8px;">相关数据文件</div>
+              <div style="font-weight: 600; margin-bottom: 8px;">
+                ${t("businessKnowledge.relatedFiles.title")}
+              </div>
               <p class="muted" style="margin: 0 0 10px 0; font-size: 0.9rem;">
-                选型与历史报价依赖以下 Excel，有更新时可复制路径后在资源管理器中打开或用 Excel 编辑。
+                ${t("businessKnowledge.relatedFiles.hint")}
               </p>
               ${dependentFiles.mapping_table
                 ? html`
                     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap;">
-                      <span style="min-width: 100px;">询价映射表（历史报价）：</span>
+                      <span style="min-width: 100px;">
+                        ${t("businessKnowledge.relatedFiles.mappingTableLabel")}
+                      </span>
                       <code style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 0.85rem;">${dependentFiles.mapping_table}</code>
                       <button
                         class="btn"
                         style="flex-shrink: 0;"
                         @click=${() => copyPath(dependentFiles.mapping_table)}
-                        title="复制路径"
+                        title=${t("businessKnowledge.relatedFiles.copyPath")}
                       >
-                        复制路径
+                        ${t("businessKnowledge.relatedFiles.copyPath")}
                       </button>
                     </div>
                   `
@@ -95,15 +104,17 @@ export function renderBusinessKnowledge(props: BusinessKnowledgeProps) {
               ${dependentFiles.price_library
                 ? html`
                     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                      <span style="min-width: 100px;">万鼎价格库：</span>
+                      <span style="min-width: 100px;">
+                        ${t("businessKnowledge.relatedFiles.priceLibraryLabel")}
+                      </span>
                       <code style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 0.85rem;">${dependentFiles.price_library}</code>
                       <button
                         class="btn"
                         style="flex-shrink: 0;"
                         @click=${() => copyPath(dependentFiles.price_library)}
-                        title="复制路径"
+                        title=${t("businessKnowledge.relatedFiles.copyPath")}
                       >
-                        复制路径
+                        ${t("businessKnowledge.relatedFiles.copyPath")}
                       </button>
                     </div>
                   `
@@ -121,7 +132,7 @@ export function renderBusinessKnowledge(props: BusinessKnowledgeProps) {
             const t = (e.target as HTMLTextAreaElement);
             onContentChange(t?.value ?? "");
           }}
-          placeholder="【业务知识】&#10;1. …"
+          placeholder=${t("businessKnowledge.editor.placeholder")}
         ></textarea>
       </div>
     </section>

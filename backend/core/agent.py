@@ -5,114 +5,30 @@ CoreAgent — 纯 ReAct 引擎，不含任何业务逻辑。
 import asyncio
 import json
 import logging
-import re
 import time
-import types as _types
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 import openai
 
+from backend.agent.session import SessionStore, get_session_store
+from backend.config import Config
+from backend.core.agent_helpers import _extract_tag, build_system_prompt, call_llm_streaming_sync
+from backend.core.context_compression import (
+    _trim_context,
+    build_tool_call_id_to_name,
+    make_summarizer,
+)
+from backend.core.extension import AgentExtension, ExtensionContext
 from backend.core.llm_client import get_openai_client
 from backend.core.registry import ToolRegistry
-from backend.core.extension import AgentExtension, ExtensionContext
-from backend.config import Config
-from backend.core.context_compression import build_tool_call_id_to_name, make_summarizer
-from backend.agent.session import SessionStore, get_session_store
 
 logger = logging.getLogger(__name__)
 
 # 单次工具结果最大字符数（过大会导致多轮 ReAct 时 prompt 迅速膨胀）
 TOOL_RESULT_MAX_CHARS = 8_000
-# 多轮对话总上下文上限，超出时压缩历史 tool 结果（越小越早压缩、越省 token）
+# 多轮对话总上下文上限，超出时压缩历史 tool 结果
 _CONTEXT_MAX_CHARS = 8_000
 _MAX_STEPS_HINT = "（已达最大步数）请根据目前已获取的信息直接给出最终回答，不再调用任何工具。"
-_CORE_OUTPUT_FORMAT = """\
-## 输出格式（每轮必须）
-1. 先输出 <think>...</think>：目标 / 已知 / 缺失 / 本步行动。
-2. 若调用工具：紧接 tool_call；结果返回后目标已完成则直接输出最终回答；否则继续下一轮。
-3. 若不调用工具：在 <think> 后直接给出最终回答。
-**多轮指代**：用户说「选哪个」→ 必须调用 select_wanding_match；用户说「那个产品」→ 用上轮完整名称。"""
-
-
-def _extract_tag(content: str, tag: str) -> Tuple[str, str]:
-    pattern = re.compile(rf"<{tag}>(.*?)</{tag}>", re.DOTALL | re.IGNORECASE)
-    match = pattern.search(content)
-    if not match:
-        return content, ""
-    return pattern.sub("", content).strip(), match.group(1).strip()
-
-
-def _trim_context(
-    messages: List[dict],
-    max_chars: int = _CONTEXT_MAX_CHARS,
-    tool_call_id_to_name: Optional[Dict[str, str]] = None,
-    summarizer: Optional[Callable[[str, str], str]] = None,
-) -> None:
-    total = sum(len(str(m.get("content") or "")) for m in messages)
-    if total <= max_chars:
-        return
-    id_to_name = tool_call_id_to_name or {}
-    for m in messages:
-        if m.get("role") == "tool":
-            orig = str(m.get("content") or "")
-            if len(orig) <= 200:
-                continue
-            if summarizer is not None:
-                tool_name = id_to_name.get(m.get("tool_call_id") or "", "")
-                m["content"] = summarizer(tool_name, orig)
-            else:
-                m["content"] = f"[已压缩，原长 {len(orig)} 字符]"
-            total -= len(orig) - len(m["content"])
-            if total <= max_chars:
-                break
-
-
-def _call_llm_streaming_sync(client, kwargs, on_token) -> Tuple[str, List, Optional[Dict]]:
-    create_kw = {**kwargs, "stream": True, "stream_options": {"include_usage": True}}
-    stream = client.chat.completions.create(**create_kw)
-    content_parts: List[str] = []
-    tool_calls_raw: Dict[int, dict] = {}
-    last_usage = None
-    for chunk in stream:
-        if getattr(chunk, "usage", None):
-            u = chunk.usage
-            last_usage = {"prompt_tokens": u.prompt_tokens or 0, "completion_tokens": u.completion_tokens or 0}
-        if not chunk.choices:
-            continue
-        delta = chunk.choices[0].delta
-        if delta.content:
-            on_token(delta.content)
-            content_parts.append(delta.content)
-        if delta.tool_calls:
-            for tc in delta.tool_calls:
-                idx = tc.index
-                if idx not in tool_calls_raw:
-                    tool_calls_raw[idx] = {"id": getattr(tc, "id", "") or "", "name": "", "arguments": ""}
-                fn = getattr(tc, "function", None)
-                if fn:
-                    if fn.name:
-                        tool_calls_raw[idx]["name"] += fn.name
-                    if fn.arguments:
-                        tool_calls_raw[idx]["arguments"] += fn.arguments
-    content = "".join(content_parts)
-    tool_calls = [
-        _types.SimpleNamespace(
-            id=tool_calls_raw[k]["id"],
-            function=_types.SimpleNamespace(name=tool_calls_raw[k]["name"], arguments=tool_calls_raw[k]["arguments"]),
-        )
-        for k in sorted(tool_calls_raw)
-    ]
-    return content, tool_calls, last_usage
-
-
-def _build_system_prompt(skill_prompt: str, output_format: str) -> str:
-    return (
-        "你是统一业务助手，**一个主 Agent 掌握全部技能**，根据用户意图直接选用下方工具完成目标。无子 Agent，不委托、不转发。\n\n"
-        "---\n\n## 技能与工具（按目标选用）\n\n"
-        + skill_prompt
-        + "\n\n---\n\n"
-        + (output_format or _CORE_OUTPUT_FORMAT)
-    )
 
 
 class CoreAgent:
@@ -156,7 +72,7 @@ class CoreAgent:
             of = ext.get_output_format_prompt()
             if of:
                 output_fmt = of
-        self._system_prompt = _build_system_prompt("\n\n".join(skill_parts), output_fmt)
+        self._system_prompt = build_system_prompt("\n\n".join(skill_parts), output_fmt)
 
     async def execute_react(
         self,
@@ -175,7 +91,7 @@ class CoreAgent:
                 try:
                     on_event(event_type, {"session_id": session_id or "", **payload})
                 except Exception:
-                    pass
+                    logger.debug("on_event callback failed", exc_info=True)
 
         def _raise_if_cancelled() -> None:
             if should_cancel:
@@ -186,7 +102,7 @@ class CoreAgent:
                     raise
                 except Exception:
                     # Cancellation callback must never break the agent loop.
-                    pass
+                    logger.debug("cancel check failed", exc_info=True)
 
         _fire("loop_start", {"query": user_input[:200]})
 
@@ -196,7 +112,7 @@ class CoreAgent:
             try:
                 user_content = ext.on_before_prompt(user_content, ctx)
             except Exception:
-                pass
+                logger.warning("ext.on_before_prompt 失败，已跳过", exc_info=True)
 
         if context and context.get("file_path"):
             user_content += f"\n\n[Context: 已上传报价单，file_path={context['file_path']}]"
@@ -232,6 +148,7 @@ class CoreAgent:
             from backend.config import Config
             max_tokens = getattr(Config, "LLM_MAX_TOKENS", 5000)
         except Exception:
+            logger.warning("读取 LLM_MAX_TOKENS 失败，使用默认 5000", exc_info=True)
             max_tokens = 5000
 
         for step in range(max_steps):
@@ -249,7 +166,7 @@ class CoreAgent:
             if on_token is not None:
                 # 流式调用：先用主模型，若因网络/超时失败且配置了 fallback，则自动切到 fallback 模型重试一次
                 llm_task = asyncio.create_task(
-                    asyncio.to_thread(_call_llm_streaming_sync, self.client, kwargs, on_token)
+                    asyncio.to_thread(call_llm_streaming_sync, self.client, kwargs, on_token)
                 )
                 try:
                     while not llm_task.done():
@@ -265,7 +182,7 @@ class CoreAgent:
                         logger.warning("主模型调用超时，fallback 到备用模型: %s", self._fallback_model)
                         fb_kwargs: Dict[str, Any] = {**kwargs, "model": self._fallback_model}
                         fb_task = asyncio.create_task(
-                            asyncio.to_thread(_call_llm_streaming_sync, self._fallback_client, fb_kwargs, on_token)
+                            asyncio.to_thread(call_llm_streaming_sync, self._fallback_client, fb_kwargs, on_token)
                         )
                         while not fb_task.done():
                             _raise_if_cancelled()
@@ -325,7 +242,7 @@ class CoreAgent:
                 try:
                     on_tool_calls_ready(n)
                 except Exception:
-                    pass
+                    logger.debug("on_tool_calls_ready callback failed", exc_info=True)
 
             for i, tc in enumerate(tool_calls):
                 _raise_if_cancelled()
@@ -335,10 +252,11 @@ class CoreAgent:
                     try:
                         on_tool_start(name, i + 1, n)
                     except Exception:
-                        pass
+                        logger.debug("on_tool_start callback failed", exc_info=True)
                 try:
                     args = json.loads(getattr(tc.function, "arguments", "{}") or "{}")
                 except json.JSONDecodeError:
+                    logger.debug("工具参数 JSON 解析失败，使用空 dict", exc_info=True)
                     args = {}
 
                 if on_event:
@@ -357,7 +275,7 @@ class CoreAgent:
                             },
                         )
                     except Exception:
-                        pass
+                        logger.debug("on_event callback failed", exc_info=True)
 
                 trace.append({"step": step + 1, "type": "tool_call", "name": name, "arguments": args})
                 tool_task = asyncio.create_task(self._registry.execute(name, args, ctx))
@@ -377,7 +295,7 @@ class CoreAgent:
                     try:
                         obs = ext.on_after_tool(name, args, obs)
                     except Exception:
-                        pass
+                        logger.warning("ext.on_after_tool 失败，已跳过 name=%s", name, exc_info=True)
 
                 if on_event:
                     try:
@@ -395,7 +313,7 @@ class CoreAgent:
                             },
                         )
                     except Exception:
-                        pass
+                        logger.debug("on_event callback failed", exc_info=True)
 
                 trace.append({"step": step + 1, "type": "observation", "content": obs})
                 messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": obs})
@@ -420,7 +338,7 @@ class CoreAgent:
                     clarification_questions = d.get("questions", [])
                     last_answer = "请补充说明：" + ("；".join(clarification_questions) if clarification_questions else "您的意图不太明确。")
             except Exception:
-                pass
+                logger.debug("clarification JSON parse failed", exc_info=True)
 
         if session_id and self._store and last_answer:
             try:

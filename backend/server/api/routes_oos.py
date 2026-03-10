@@ -1,19 +1,24 @@
 """无货/缺货看板与业务知识 API。"""
 import logging
 from pathlib import Path
-
-from fastapi import APIRouter, Body, HTTPException
 from typing import Any, Dict
 
+from fastapi import APIRouter, Body, HTTPException
+
 from backend.server.api.deps import get_oos_data_service
+from backend.tools.inventory.config import config as inv_config
+from backend.tools.inventory.services.llm_selector import (
+    _BUSINESS_KNOWLEDGE,
+    invalidate_business_knowledge_cache,
+)
+from backend.tools.oos.services.quotation_agent_tool import persist_out_of_stock_records
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 def _get_business_knowledge_path() -> Path:
-    from backend.tools.inventory.config import config
-    path = getattr(config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
+    path = getattr(inv_config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
     if not path:
         raise ValueError("WANDING_BUSINESS_KNOWLEDGE_PATH 未配置")
     return Path(path)
@@ -88,7 +93,7 @@ async def oos_delete(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     try:
         ds = get_oos_data_service()
         n = ds.delete_by_product_key_hard(product_key)
-        return {"success": True, "deleted": n}
+        return {"success": True, "data": {"deleted": n}}
     except Exception as e:
         logger.exception("oos/delete 失败")
         raise HTTPException(status_code=500, detail=str(e))
@@ -114,10 +119,9 @@ async def oos_add(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             "unit": (body.get("unit") or "").strip(),
             "quantity": qty,
         }
-        from backend.tools.oos.services.quotation_agent_tool import persist_out_of_stock_records
         out = persist_out_of_stock_records("看板手动添加", [record], "")
         if out.get("success"):
-            return {"success": True, "message": out.get("result", "已添加")}
+            return {"success": True, "data": {"message": out.get("result", "已添加")}}
         raise HTTPException(status_code=400, detail=out.get("error", "添加失败"))
     except HTTPException:
         raise
@@ -134,7 +138,6 @@ async def get_business_knowledge() -> Dict[str, Any]:
     try:
         p = _get_business_knowledge_path()
         if not p.exists():
-            from backend.tools.inventory.services.llm_selector import _BUSINESS_KNOWLEDGE
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(_BUSINESS_KNOWLEDGE.strip(), encoding="utf-8")
         content = p.read_text(encoding="utf-8")
@@ -154,9 +157,8 @@ async def put_business_knowledge(body: Dict[str, Any] = Body(...)) -> Dict[str, 
         p = _get_business_knowledge_path()
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content if isinstance(content, str) else str(content), encoding="utf-8")
-        from backend.tools.inventory.services.llm_selector import invalidate_business_knowledge_cache
         invalidate_business_knowledge_cache()
-        return {"success": True}
+        return {"success": True, "data": {}}
     except HTTPException:
         raise
     except Exception as e:
@@ -168,9 +170,8 @@ async def put_business_knowledge(body: Dict[str, Any] = Body(...)) -> Dict[str, 
 async def get_business_knowledge_dependent_files() -> Dict[str, Any]:
     """返回选型与历史报价依赖的 Excel 路径，供业务知识页「相关数据文件」指引使用。"""
     try:
-        from backend.tools.inventory.config import config
-        mapping = getattr(config, "MAPPING_TABLE_PATH", "") or ""
-        price_lib = getattr(config, "PRICE_LIBRARY_PATH", "") or ""
+        mapping = getattr(inv_config, "MAPPING_TABLE_PATH", "") or ""
+        price_lib = getattr(inv_config, "PRICE_LIBRARY_PATH", "") or ""
         return {
             "success": True,
             "data": {"mapping_table": mapping, "price_library": price_lib},
@@ -240,7 +241,7 @@ async def shortage_delete(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     try:
         ds = get_oos_data_service()
         n = ds.delete_shortage_by_product_key_hard(product_key)
-        return {"success": True, "deleted": n}
+        return {"success": True, "data": {"deleted": n}}
     except Exception as e:
         logger.exception("shortage/delete 失败")
         raise HTTPException(status_code=500, detail=str(e))
@@ -266,7 +267,7 @@ async def shortage_add(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         ds = get_oos_data_service()
         n = ds.insert_shortage_records("看板手动添加", [record], max_rows=1)
         if n:
-            return {"success": True, "message": "已添加"}
+            return {"success": True, "data": {"message": "已添加"}}
         raise HTTPException(status_code=400, detail="添加失败")
     except HTTPException:
         raise

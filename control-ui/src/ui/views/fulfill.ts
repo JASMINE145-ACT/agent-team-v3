@@ -27,6 +27,17 @@ export type FulfillProps = {
   onPageSizeChange: (value: number) => void;
 };
 
+function displayDraftName(raw: string | null | undefined): string {
+  const name = (raw ?? "").trim();
+  if (!name) return "";
+  const fallbackEn = "Untitled quotation";
+  const fallbackZh = "未命名报价单";
+  if (name === fallbackEn || name === fallbackZh) {
+    return t("work.fallbackDraftName");
+  }
+  return name;
+}
+
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "-";
   try {
@@ -119,6 +130,7 @@ export function renderFulfill(props: FulfillProps) {
               .value=${sortBy}
               @change=${(e: Event) => onSortByChange((e.target as HTMLSelectElement).value as "created_at" | "draft_no" | "name")}
               aria-label=${t("fulfill.sortBy")}
+              style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 160px;"
             >
               <option value="created_at">${t("fulfill.sortCreatedAt")}</option>
               <option value="draft_no">${t("fulfill.sortDraftNo")}</option>
@@ -131,6 +143,7 @@ export function renderFulfill(props: FulfillProps) {
               .value=${sortDir}
               @change=${(e: Event) => onSortDirChange((e.target as HTMLSelectElement).value as "asc" | "desc")}
               aria-label=${t("fulfill.sortDir")}
+              style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 140px;"
             >
               <option value="desc">${t("fulfill.sortDesc")}</option>
               <option value="asc">${t("fulfill.sortAsc")}</option>
@@ -142,6 +155,7 @@ export function renderFulfill(props: FulfillProps) {
               .value=${String(safePageSize)}
               @change=${(e: Event) => onPageSizeChange(Number((e.target as HTMLSelectElement).value) || 10)}
               aria-label=${t("fulfill.pageSize")}
+              style="padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); min-width: 120px;"
             >
               <option value="10">10</option>
               <option value="20">20</option>
@@ -191,7 +205,7 @@ export function renderFulfill(props: FulfillProps) {
                         (d) => html`
                           <tr style=${detailId === d.id ? "background: var(--bg-secondary, #f5f5f5);" : ""}>
                             <td style="padding: 6px 8px; border: 1px solid var(--border);">${d.draft_no}</td>
-                            <td style="padding: 6px 8px; border: 1px solid var(--border);">${d.name}</td>
+                            <td style="padding: 6px 8px; border: 1px solid var(--border);">${displayDraftName(d.name)}</td>
                             <td style="padding: 6px 8px; border: 1px solid var(--border);">${d.source ?? "-"}</td>
                             <td style="padding: 6px 8px; border: 1px solid var(--border);">${formatDate(d.created_at)}</td>
                             <td style="padding: 6px 8px; border: 1px solid var(--border); display: flex; gap: 6px; flex-wrap: wrap;">
@@ -245,7 +259,7 @@ export function renderFulfill(props: FulfillProps) {
         ? html`
             <div class="card" style="grid-column: 1 / -1;" tabindex="-1">
               <div class="card-title">${t("fulfill.detailTitle", { draftNo: detail.draft_no })}</div>
-              <div class="card-sub">${detail.name}</div>
+              <div class="card-sub">${displayDraftName(detail.name)}</div>
               <div style="margin-top: 8px; display: flex; gap: 8px;">
                 <button class="btn btn-sm" @click=${onClearDetail}>${t("fulfill.closeDetail")}</button>
                 <button

@@ -52,6 +52,12 @@ export const zh_TW: TranslationMap = {
     logs: "網關文件日志的實時追蹤。",
   },
   overview: {
+    health: {
+      title: "健康與統計",
+      subtitle: "實例、會話與排程狀態的總覽。",
+      lastErrorLabel: "最近錯誤",
+      noError: "最近無錯誤。",
+    },
     access: {
       title: "網關訪問",
       subtitle: "儀表板連接的位置及其身份驗證方式。",
@@ -105,6 +111,188 @@ export const zh_TW: TranslationMap = {
     thinkingToggle: "切換助手思考/工作輸出",
     focusToggle: "切換專注模式 (隱藏側邊欄 + 頁面頁眉)",
     onboardingDisabled: "引導期間禁用",
+    ui: {
+      compaction: {
+        active: "正在壓縮上下文…",
+        done: "上下文已壓縮",
+        divider: "上下文壓縮",
+      },
+      attachments: {
+        previewAlt: "附件預覽",
+        remove: "移除附件",
+      },
+      upload: {
+        label: "上傳 Excel 或 PDF",
+        button: "上傳 Excel/PDF",
+        remove: "移除已上傳檔案",
+      },
+      queue: {
+        title: "已排隊（{count}）",
+        imageItem: "圖片（{count}）",
+        remove: "移除排隊訊息",
+      },
+      compose: {
+        placeholder: {
+          withImages: "新增訊息或繼續貼上圖片…",
+          default:
+            "訊息（↩ 送出，Shift+↩ 換行；可貼上圖片，或上傳/拖曳 Excel/PDF）",
+          disconnected: "請先連線到網關再開始聊天…",
+        },
+        newMessages: "有新訊息",
+        dropHint: "放開以上傳 Excel/PDF",
+        label: "訊息",
+        stop: "停止",
+        newSession: "新會話",
+        send: "送出",
+        queue: "排隊",
+        exitFocus: "退出專注模式",
+      },
+    },
+  },
+  work: {
+    // keep existing keys (not shown here) and extend with priceLevels/fileDisplayName
+    priceLevels: {
+      FACTORY_INC_TAX: "出廠價_含稅",
+      FACTORY_EXC_TAX: "出廠價_不含稅",
+      PURCHASE_EXC_TAX: "採購不含稅",
+      A_MARGIN: "（二級代理）A級別 利潤率",
+      A_QUOTE: "（二級代理）A級別 報單價格",
+      B_MARGIN: "（一級代理）B級別 利潤率",
+      B_QUOTE: "（一級代理）B級別 報單價格",
+      C_MARGIN: "（聚萬大客戶）C級別 利潤率",
+      C_QUOTE: "（聚萬大客戶）C級別 報單價格",
+      D_MARGIN: "（青山大客戶）D級別 利潤率",
+      D_QUOTE: "（青山大客戶）D級別 報單價格",
+      D_LOW: "（青山大客戶）D級別 降低利潤率",
+      E_MARGIN: "（大唐大客戶）E級別（包運費） 利潤率",
+      E_QUOTE: "（大唐大客戶）E級別（包運費） 報單價格",
+    },
+    fileDisplayName: "報價檔案顯示名稱",
+  },
+  oos: {
+    title: "無貨看板",
+    subtitle: "總覽與無貨產品列表，無需向 Agent 提問即可查看。",
+    actions: {
+      loading: "加載中…",
+      refresh: "刷新",
+      addManual: "手動新增",
+      confirm: "確定",
+      delete: "刪除",
+      deleteHint: "刪除該無貨產品",
+    },
+    db: {
+      local: "當前使用本地資料庫",
+    },
+    stats: {
+      totalRecords: "總記錄數",
+      outOfStockCount: "無貨產品數",
+      today: "今日新增",
+      reportedGe2: "被報無貨≥2 次",
+      emailSentProductCount: "已發郵件產品數",
+    },
+    empty: {
+      stats: "暫無統計",
+      list: "暫無無貨產品記錄。",
+    },
+    list: {
+      title: "無貨產品列表",
+      more: "共 {count} 個無貨產品，僅展示前 50 個",
+      meta: "數量: {qty} {unit} · 被報無貨 {count} 次 · 郵件: {email}",
+    },
+    addForm: {
+      title: "新增無貨記錄",
+      namePlaceholder: "產品名稱（必填）",
+      specPlaceholder: "規格",
+      qtyPlaceholder: "數量",
+      unitPlaceholder: "單位",
+    },
+    email: {
+      sent: "已發送",
+      notSent: "未發",
+    },
+    byFile: {
+      title: "按檔案",
+      empty: "暫無",
+      count: "記錄數: {count}",
+    },
+    byTime: {
+      title: "按時間（最近 30 天）",
+      empty: "暫無",
+      count: "新增: {count}",
+    },
+  },
+  shortage: {
+    title: "缺貨記錄",
+    subtitle: "Work 匹配後庫存不足會落庫，總覽與缺貨產品列表。",
+    actions: {
+      loading: "加載中…",
+      refresh: "刷新",
+      addManual: "手動新增",
+      confirm: "確定",
+      delete: "刪除",
+      deleteHint: "刪除該缺貨產品",
+    },
+    db: {
+      local: "當前使用本地資料庫",
+    },
+    stats: {
+      totalRecords: "總記錄數",
+      shortageProductCount: "缺貨產品數",
+      today: "今日新增",
+      reportedGe2: "被報缺貨≥2 次",
+    },
+    empty: {
+      stats: "暫無統計",
+      list: "暫無缺貨產品記錄。",
+    },
+    list: {
+      title: "缺貨產品列表",
+      more: "共 {count} 個缺貨產品，僅展示前 50 個",
+      meta: "需求: {qty} · 供給: {avail} · 差異: {diff} · 被報缺貨 {count} 次",
+    },
+    addForm: {
+      title: "新增缺貨記錄（產品名字、規格、需求、供給；差異自動計算）",
+      namePlaceholder: "產品名字（必填）",
+      specPlaceholder: "規格",
+      qtyPlaceholder: "需求",
+      availPlaceholder: "供給",
+      qtyTitle: "需求數量",
+      availTitle: "可用供給",
+      diffTitle: "差異 = 需求 - 供給，提交時自動計算",
+      diffText: "差異：自動計算",
+    },
+    byFile: {
+      title: "按檔案",
+      empty: "暫無",
+      count: "記錄數: {count}",
+    },
+    byTime: {
+      title: "按時間（最近 30 天）",
+      empty: "暫無",
+      count: "新增: {count}",
+    },
+  },
+  businessKnowledge: {
+    title: "業務知識",
+    subtitle:
+      "編輯萬鼎業務知識（wanding_business_knowledge.md），供選型與匹配使用。保存後 LLM 將使用最新內容。",
+    lastSavedAt: "已保存 {time}",
+    actions: {
+      reloading: "加載中…",
+      reload: "重新載入",
+      saving: "保存中…",
+      save: "保存",
+    },
+    relatedFiles: {
+      title: "相關數據檔案",
+      hint: "選型與歷史報價依賴以下 Excel，有更新時可複製路徑後在檔案總管中打開或用 Excel 編輯。",
+      mappingTableLabel: "詢價映射表（歷史報價）：",
+      priceLibraryLabel: "萬鼎價格庫：",
+      copyPath: "複製路徑",
+    },
+    editor: {
+      placeholder: "【業務知識】\n1. …",
+    },
   },
   languages: {
     en: "English",

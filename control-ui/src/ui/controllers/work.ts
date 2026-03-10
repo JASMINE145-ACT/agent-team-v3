@@ -76,6 +76,8 @@ export type WorkState = {
   workTextGenerating: boolean;
   /** 文字生成报价单错误信息 */
   workTextError: string | null;
+  /** 从后端动态加载的价格档位选项，为空时视图层使用本地默认值 */
+  workPriceLevelOptions: Array<{ value: string; label: string }>;
 };
 
 type WorkRuntime = {
@@ -95,7 +97,7 @@ type WorkApiPayload = {
   pending_quotation_draft?: PendingQuotationDraft;
 };
 
-const FALLBACK_DRAFT_NAME = "未命名报价单";
+const FALLBACK_DRAFT_NAME = "Untitled quotation";
 const RUN_TIMEOUT_MS = 240_000;
 const RESUME_TIMEOUT_MS = 120_000;
 const MAX_RETRIES = 1;
@@ -781,8 +783,9 @@ export async function generateWorkFileFromText(state: WorkState): Promise<boolea
       state.workTextError = detail;
       return false;
     }
-    const filePath = typeof json.file_path === "string" ? json.file_path : "";
-    const fileName = typeof json.file_name === "string" ? json.file_name : "文字报价.xlsx";
+    const payload = (json && typeof json.data === "object" ? json.data : json) as Record<string, unknown>;
+    const filePath = typeof payload.file_path === "string" ? payload.file_path : "";
+    const fileName = typeof payload.file_name === "string" ? payload.file_name : "文字报价.xlsx";
     if (!filePath) {
       state.workTextError = "接口未返回 file_path";
       return false;
@@ -805,6 +808,21 @@ export async function generateWorkFileFromText(state: WorkState): Promise<boolea
     return false;
   } finally {
     state.workTextGenerating = false;
+  }
+}
+
+/** 从后端加载价格档位选项；失败时静默忽略，视图层 fallback 到本地默认值 */
+export async function loadWorkPriceLevels(state: WorkState): Promise<void> {
+  try {
+    const url = apiUrl(state.basePath, "/api/config/price-levels");
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json() as { success: boolean; data?: Array<{ value: string; label: string }> };
+    if (json.success && Array.isArray(json.data)) {
+      state.workPriceLevelOptions = json.data;
+    }
+  } catch (e) {
+    console.warn("[work] 加载价格档位失败，使用本地默认值", e);
   }
 }
 

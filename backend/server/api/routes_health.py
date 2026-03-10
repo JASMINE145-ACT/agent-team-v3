@@ -1,10 +1,15 @@
 """健康检查与全局配置类 API。"""
 import logging
-from fastapi import APIRouter
 from typing import Any, Dict
+
+from fastapi import APIRouter
 
 from backend.config import Config
 from backend.server.api.deps import get_oos_data_service
+from backend.tools.inventory.services.wanding_fuzzy_matcher import (
+    PRICE_COLS,
+    PRICE_LEVEL_DISPLAY_NAMES,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,20 +28,16 @@ async def health_check() -> Dict[str, Any]:
         out["oos_db"] = "postgres" if getattr(ds, "using_postgres", False) else "sqlite"
         out["oos_using_postgres"] = getattr(ds, "using_postgres", False)
     except Exception as e:
-        logger.debug("health: oos DataService 未就绪: %s", e)
+        logger.warning("health: oos DataService 未就绪: %s", e, exc_info=True)
         out["oos_db"] = None
         out["oos_using_postgres"] = False
-    return out
+    return {"success": True, "data": out}
 
 
 @router.get("/api/config/price-levels")
 async def get_price_levels() -> Dict[str, Any]:
     """返回价格档位列表（value + 全名 label），供 Work/Chat 下拉与展示用。"""
     try:
-        from backend.tools.inventory.services.wanding_fuzzy_matcher import (
-            PRICE_LEVEL_DISPLAY_NAMES,
-            PRICE_COLS,
-        )
         order = [
             "FACTORY_INC_TAX", "FACTORY_EXC_TAX", "PURCHASE_EXC_TAX",
             "A_MARGIN", "A_QUOTE", "B_MARGIN", "B_QUOTE",
@@ -50,5 +51,5 @@ async def get_price_levels() -> Dict[str, Any]:
         ]
         return {"success": True, "data": options}
     except Exception as e:
-        logger.debug("price-levels: %s", e)
-        return {"success": False, "data": []}
+        logger.warning("price-levels 加载失败: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)}

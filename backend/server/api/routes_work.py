@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body
 from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ async def work_run(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             customer_level=customer_level,
             do_register_oos=do_register_oos,
         )
-        out = {
+        data = {
             "status": result.get("status", "done"),
             "success": result.get("success", True),
             "answer": result.get("answer", ""),
@@ -63,14 +63,14 @@ async def work_run(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             "error": result.get("error"),
         }
         if result.get("pending_quotation_draft") is not None:
-            out["pending_quotation_draft"] = result.get("pending_quotation_draft")
+            data["pending_quotation_draft"] = result.get("pending_quotation_draft")
         if result.get("status") == "awaiting_choices":
-            out["run_id"] = result.get("run_id")
-            out["pending_choices"] = result.get("pending_choices", [])
-        return out
+            data["run_id"] = result.get("run_id")
+            data["pending_choices"] = result.get("pending_choices", [])
+        return {"success": True, "data": data}
     except Exception as e:
         logger.exception("work/run 失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"success": False, "error": str(e)}
 
 
 @router.post("/api/work/run-stream")
@@ -134,11 +134,11 @@ async def work_resume(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     run_id = body.get("run_id")
     selections = body.get("selections")
     if not run_id or not isinstance(selections, list):
-        raise HTTPException(status_code=400, detail="需要 run_id 与 selections")
+        return {"success": False, "error": "需要 run_id 与 selections"}
     try:
         from backend.agent.work_executor import run_work_flow_resume
         result = await run_work_flow_resume(run_id=run_id, selections=selections)
-        out = {
+        data = {
             "status": result.get("status", "done"),
             "success": result.get("success", True),
             "answer": result.get("answer", ""),
@@ -146,11 +146,11 @@ async def work_resume(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
             "error": result.get("error"),
         }
         if result.get("pending_quotation_draft") is not None:
-            out["pending_quotation_draft"] = result.get("pending_quotation_draft")
+            data["pending_quotation_draft"] = result.get("pending_quotation_draft")
         if result.get("status") == "awaiting_choices":
-            out["run_id"] = result.get("run_id")
-            out["pending_choices"] = result.get("pending_choices", [])
-        return out
+            data["run_id"] = result.get("run_id")
+            data["pending_choices"] = result.get("pending_choices", [])
+        return {"success": True, "data": data}
     except Exception as e:
         logger.exception("work/resume 失败")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"success": False, "error": str(e)}

@@ -56,8 +56,8 @@ if _ui_dir.is_dir():
         try:
             if safe_path.is_file() and str(safe_path).startswith(str(_ui_dir.resolve())):
                 return FileResponse(safe_path)
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug("SPA fallback 读取文件失败: %s", e, exc_info=True)
         r = FileResponse(_ui_dir / "index.html")
         r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         return r
@@ -103,24 +103,24 @@ def _warmup_sync(agent=None) -> None:
             from backend.agent.tools import get_all_tools
             get_all_tools()
     except Exception as e:
-        logger.debug("预热工具列表失败: %s", e)
+        logger.debug("预热工具列表失败: %s", e, exc_info=True)
     try:
         from backend.tools.inventory.services.inventory_agent_tools import _get_resolver, _get_table_agent
         _get_resolver()   # 加载 slim 表 + .npy 向量（主要耗时）
         _get_table_agent()  # 初始化 ACCURATE API 客户端
     except Exception as e:
-        logger.debug("预热库存组件失败: %s", e)
+        logger.debug("预热库存组件失败: %s", e, exc_info=True)
     try:
         # 预热无货/缺货数据库连接（Postgres 不可达会回退 SQLite；只做一次，避免首次点击时卡顿）
-        from backend.server.api import routes as api_routes
-        api_routes._get_oos_data_service()
+        from backend.server.api.deps import get_oos_data_service
+        get_oos_data_service()
     except Exception as e:
-        logger.debug("预热无货/缺货数据库失败: %s", e)
+        logger.debug("预热无货/缺货数据库失败: %s", e, exc_info=True)
     try:
         from backend.tools.inventory.services.llm_selector import _load_business_knowledge
         _load_business_knowledge()
     except Exception as e:
-        logger.debug("预热万鼎业务知识失败: %s", e)
+        logger.debug("预热万鼎业务知识失败: %s", e, exc_info=True)
     try:
         from backend.tools.inventory.config import config as inv_config
         from backend.tools.inventory.services.mapping_table_matcher import load_mapping_df
@@ -128,7 +128,7 @@ def _warmup_sync(agent=None) -> None:
         if mapping_path:
             load_mapping_df(mapping_path)
     except Exception as e:
-        logger.debug("预热历史报价映射表失败: %s", e)
+        logger.debug("预热历史报价映射表失败: %s", e, exc_info=True)
     try:
         from backend.tools.inventory.config import config as inv_config
         from backend.tools.inventory.services.wanding_fuzzy_matcher import (
@@ -140,7 +140,7 @@ def _warmup_sync(agent=None) -> None:
         if price_path:
             _get_cached_df(price_path, "B_QUOTE")
     except Exception as e:
-        logger.debug("预热万鼎价格库失败: %s", e)
+        logger.debug("预热万鼎价格库失败: %s", e, exc_info=True)
 
 
 async def _warmup(agent=None) -> None:

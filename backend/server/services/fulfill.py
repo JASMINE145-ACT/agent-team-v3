@@ -8,7 +8,7 @@
 import logging
 from typing import Any, Dict
 
-from backend.tools.oos.services.data_service import DataService
+from backend.server.api.deps import get_oos_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ def run_fulfill_loop(draft_id: int, draft_no: str = "") -> Dict[str, Any]:
     - 尚未调用 ACCURATE API 或实际锁库存，后续可在此基础上扩展。
     """
     logger.info("成单闭环开始：draft_id=%s draft_no=%s", draft_id, draft_no or "")
-    ds = DataService()
+    ds = get_oos_data_service()
     result = ds.create_order_from_draft(draft_id)
     if not result:
         msg = "未找到该报价单或创建订单失败"

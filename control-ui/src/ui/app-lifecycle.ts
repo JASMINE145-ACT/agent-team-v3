@@ -17,6 +17,7 @@ import {
   syncThemeWithSettings,
 } from "./app-settings.ts";
 import { loadControlUiBootstrapConfig } from "./controllers/control-ui-bootstrap.ts";
+import { loadWorkPriceLevels } from "./controllers/work.ts";
 import type { Tab } from "./navigation.ts";
 
 type LifecycleHost = {
@@ -36,11 +37,13 @@ type LifecycleHost = {
   logsEntries: unknown[];
   popStateHandler: () => void;
   topbarObserver: ResizeObserver | null;
+  workPriceLevelOptions: Array<{ value: string; label: string }>;
 };
 
 export function handleConnected(host: LifecycleHost) {
   host.basePath = inferBasePath();
   void loadControlUiBootstrapConfig(host);
+  void loadWorkPriceLevels(host as unknown as Parameters<typeof loadWorkPriceLevels>[0]);
   applySettingsFromUrl(host as unknown as Parameters<typeof applySettingsFromUrl>[0]);
   syncTabWithLocation(host as unknown as Parameters<typeof syncTabWithLocation>[0], true);
   syncThemeWithSettings(host as unknown as Parameters<typeof syncThemeWithSettings>[0]);

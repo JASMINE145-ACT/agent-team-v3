@@ -237,6 +237,7 @@ export type AppViewState = {
   workTextInput: string;
   workTextGenerating: boolean;
   workTextError: string | null;
+  workPriceLevelOptions: Array<{ value: string; label: string }>;
   cronLoading: boolean;
   cronJobs: CronJob[];
   cronStatus: CronStatus | null;

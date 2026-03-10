@@ -52,6 +52,12 @@ export const pt_BR: TranslationMap = {
     logs: "Acompanhamento ao vivo dos logs de arquivo do gateway.",
   },
   overview: {
+    health: {
+      title: "Saúde e estatísticas",
+      subtitle: "Visão geral de instâncias, sessões e cron.",
+      lastErrorLabel: "Último erro",
+      noError: "Sem erros recentes.",
+    },
     access: {
       title: "Acesso ao Gateway",
       subtitle: "Onde o dashboard se conecta e como ele se autentica.",
@@ -108,6 +114,189 @@ export const pt_BR: TranslationMap = {
     thinkingToggle: "Alternar saída de pensamento/trabalho do assistente",
     focusToggle: "Alternar modo de foco (ocultar barra lateral + cabeçalho da página)",
     onboardingDisabled: "Desativado durante a integração",
+    ui: {
+      compaction: {
+        active: "Compactando contexto…",
+        done: "Contexto compactado",
+        divider: "Compactação",
+      },
+      attachments: {
+        previewAlt: "Prévia do anexo",
+        remove: "Remover anexo",
+      },
+      upload: {
+        label: "Enviar Excel ou PDF",
+        button: "Enviar Excel/PDF",
+        remove: "Remover arquivo enviado",
+      },
+      queue: {
+        title: "Na fila ({count})",
+        imageItem: "Imagem ({count})",
+        remove: "Remover mensagem da fila",
+      },
+      compose: {
+        placeholder: {
+          withImages: "Adicione uma mensagem ou cole mais imagens…",
+          default:
+            "Mensagem (↩ para enviar, Shift+↩ para quebra de linha; cole imagens ou envie/arraste Excel/PDF)",
+          disconnected: "Conecte-se ao gateway para iniciar o chat…",
+        },
+        newMessages: "Novas mensagens",
+        dropHint: "Solte para enviar Excel/PDF",
+        label: "Mensagem",
+        stop: "Parar",
+        newSession: "Nova sessão",
+        send: "Enviar",
+        queue: "Fila",
+        exitFocus: "Sair do modo foco",
+      },
+    },
+  },
+  work: {
+    priceLevels: {
+      FACTORY_INC_TAX: "Preço de fábrica (c/ imposto)",
+      FACTORY_EXC_TAX: "Preço de fábrica (s/ imposto)",
+      PURCHASE_EXC_TAX: "Preço de compra (s/ imposto)",
+      A_MARGIN: "Nível A (agente nível 2) · margem",
+      A_QUOTE: "Nível A (agente nível 2) · preço de cotação",
+      B_MARGIN: "Nível B (agente nível 1) · margem",
+      B_QUOTE: "Nível B (agente nível 1) · preço de cotação",
+      C_MARGIN: "Nível C (cliente chave Juwan) · margem",
+      C_QUOTE: "Nível C (cliente chave Juwan) · preço de cotação",
+      D_MARGIN: "Nível D (cliente chave Qingshan) · margem",
+      D_QUOTE: "Nível D (cliente chave Qingshan) · preço de cotação",
+      D_LOW: "Nível D (cliente chave Qingshan) · margem reduzida",
+      E_MARGIN: "Nível E (cliente chave Datang, frete incluso) · margem",
+      E_QUOTE: "Nível E (cliente chave Datang, frete incluso) · preço de cotação",
+    },
+    fileDisplayName: "Nome exibido do arquivo de cotação",
+  },
+  oos: {
+    title: "Painel de itens sem estoque",
+    subtitle: "Visão geral e lista de produtos sem estoque, sem precisar perguntar ao agente.",
+    actions: {
+      loading: "Carregando…",
+      refresh: "Atualizar",
+      addManual: "Adicionar manualmente",
+      confirm: "Confirmar",
+      delete: "Excluir",
+      deleteHint: "Excluir este item sem estoque",
+    },
+    db: {
+      local: "Usando banco de dados local",
+    },
+    stats: {
+      totalRecords: "Total de registros",
+      outOfStockCount: "Produtos sem estoque",
+      today: "Novos hoje",
+      reportedGe2: "Reportado sem estoque ≥2 vezes",
+      emailSentProductCount: "Produtos com e‑mail enviado",
+    },
+    empty: {
+      stats: "Sem estatísticas ainda.",
+      list: "Nenhum registro de item sem estoque.",
+    },
+    list: {
+      title: "Lista de produtos sem estoque",
+      more: "Total de {count} produtos sem estoque; exibindo apenas os 50 primeiros",
+      meta: "Qtd: {qty} {unit} · Reportado sem estoque {count} vez(es) · E‑mail: {email}",
+    },
+    addForm: {
+      title: "Adicionar registro de item sem estoque",
+      namePlaceholder: "Nome do produto (obrigatório)",
+      specPlaceholder: "Especificação",
+      qtyPlaceholder: "Quantidade",
+      unitPlaceholder: "Unidade",
+    },
+    email: {
+      sent: "Enviado",
+      notSent: "Não enviado",
+    },
+    byFile: {
+      title: "Por arquivo",
+      empty: "Nenhum",
+      count: "Registros: {count}",
+    },
+    byTime: {
+      title: "Por data (últimos 30 dias)",
+      empty: "Nenhum",
+      count: "Novos: {count}",
+    },
+  },
+  shortage: {
+    title: "Registros de falta de estoque",
+    subtitle:
+      "Gravados quando o Work detecta estoque insuficiente; visão geral e lista de produtos em falta.",
+    actions: {
+      loading: "Carregando…",
+      refresh: "Atualizar",
+      addManual: "Adicionar manualmente",
+      confirm: "Confirmar",
+      delete: "Excluir",
+      deleteHint: "Excluir este item em falta",
+    },
+    db: {
+      local: "Usando banco de dados local",
+    },
+    stats: {
+      totalRecords: "Total de registros",
+      shortageProductCount: "Produtos em falta",
+      today: "Novos hoje",
+      reportedGe2: "Reportado em falta ≥2 vezes",
+    },
+    empty: {
+      stats: "Sem estatísticas ainda.",
+      list: "Nenhum registro de produto em falta.",
+    },
+    list: {
+      title: "Lista de produtos em falta",
+      more: "Total de {count} produtos em falta; exibindo apenas os 50 primeiros",
+      meta: "Necessário: {qty} · Disponível: {avail} · Diferença: {diff} · Reportado em falta {count} vez(es)",
+    },
+    addForm: {
+      title:
+        "Adicionar registro de falta (nome, especificação, necessário, disponível; diferença será calculada automaticamente)",
+      namePlaceholder: "Nome do produto (obrigatório)",
+      specPlaceholder: "Especificação",
+      qtyPlaceholder: "Necessário",
+      availPlaceholder: "Disponível",
+      qtyTitle: "Quantidade necessária",
+      availTitle: "Quantidade disponível",
+      diffTitle: "Diferença = necessário − disponível; calculada automaticamente ao enviar",
+      diffText: "Diferença: calculada automaticamente",
+    },
+    byFile: {
+      title: "Por arquivo",
+      empty: "Nenhum",
+      count: "Registros: {count}",
+    },
+    byTime: {
+      title: "Por data (últimos 30 dias)",
+      empty: "Nenhum",
+      count: "Novos: {count}",
+    },
+  },
+  businessKnowledge: {
+    title: "Conhecimento de negócios",
+    subtitle:
+      "Edite wanding_business_knowledge.md para seleção e correspondência. O LLM usará o conteúdo mais recente após salvar.",
+    lastSavedAt: "Salvo às {time}",
+    actions: {
+      reloading: "Carregando…",
+      reload: "Recarregar",
+      saving: "Salvando…",
+      save: "Salvar",
+    },
+    relatedFiles: {
+      title: "Arquivos de dados relacionados",
+      hint: "A seleção e as cotações históricas dependem destes arquivos Excel. Copie o caminho para abri‑los no Explorer ou no Excel ao atualizar.",
+      mappingTableLabel: "Tabela de mapeamento de cotações (histórico):",
+      priceLibraryLabel: "Biblioteca de preços Wanding:",
+      copyPath: "Copiar caminho",
+    },
+    editor: {
+      placeholder: "[Conhecimento de negócios]\n1. …",
+    },
   },
   languages: {
     en: "English",
