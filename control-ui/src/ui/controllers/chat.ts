@@ -95,11 +95,17 @@ export async function uploadChatFile(
       const text = await res.text();
       throw new Error(text || `Upload failed: ${res.status}`);
     }
-    const data = (await res.json()) as { file_path?: string; file_name?: string };
-    if (typeof data.file_path !== "string") {
+    const payload = (await res.json()) as { success?: boolean; data?: { file_path?: string; file_name?: string; file_id?: string; summary_meta?: ChatUploadedFile["summaryMeta"] } };
+    const data = payload?.data ?? payload;
+    if (!data || typeof data.file_path !== "string") {
       return null;
     }
-    return { file_path: data.file_path, file_name: data.file_name ?? file.name };
+    return {
+      file_id: data.file_id ?? "",
+      file_path: data.file_path,
+      file_name: data.file_name ?? file.name,
+      summaryMeta: data.summary_meta,
+    };
   } catch (err) {
     console.error("uploadChatFile", err);
     throw err;
@@ -171,7 +177,13 @@ export async function sendChatMessage(
         .filter((a): a is NonNullable<typeof a> => a !== null)
     : undefined;
 
-  const context = uploadedFile?.file_path ? { file_path: uploadedFile.file_path } : undefined;
+  const context =
+    uploadedFile && uploadedFile.file_path
+      ? {
+          file_path: uploadedFile.file_path,
+          ...(uploadedFile.file_id ? { file_id: uploadedFile.file_id } : {}),
+        }
+      : undefined;
   try {
     await state.client.request("chat.send", {
       sessionKey: state.sessionKey,

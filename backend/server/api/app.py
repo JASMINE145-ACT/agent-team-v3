@@ -20,6 +20,7 @@ from starlette.responses import FileResponse
 
 from backend.config import Config
 from backend.server.api.routes import router
+from backend.server.api.routes_wecom import router as wecom_router
 from backend.server.gateway.gateway import router as ws_router
 
 logging.basicConfig(
@@ -32,6 +33,7 @@ app = FastAPI(title="Agent-JK v3 (Single Agent)", description="单主 Agent 掌�
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(router)
 app.include_router(ws_router)
+app.include_router(wecom_router)
 
 # 项目根目录 = backend/server/api -> backend/server -> backend -> 根
 _root = Path(__file__).resolve().parent.parent.parent.parent

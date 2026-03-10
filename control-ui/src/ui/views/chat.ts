@@ -209,6 +209,7 @@ function renderUploadedFileRow(props: ChatProps) {
   const onSelect = props.onFileSelect;
   const onClear = props.onClearUploadedFile;
   if (file?.file_name) {
+    const meta = file.summaryMeta;
     return html`
       <div class="chat-uploaded-file">
         <span class="chat-uploaded-file__name" title=${file.file_path}>${file.file_name}</span>
@@ -220,6 +221,17 @@ function renderUploadedFileRow(props: ChatProps) {
         >
           ${icons.x}
         </button>
+        ${meta
+          ? html`<span class="chat-uploaded-file__meta">
+              ${[
+                meta.rows_count != null ? `rows=${meta.rows_count}` : "",
+                meta.preview_count != null ? `preview=${meta.preview_count}` : "",
+                meta.truncated ? "…truncated" : "",
+              ]
+                .filter(Boolean)
+                .join(" / ")}
+            </span>`
+          : nothing}
       </div>
     `;
   }

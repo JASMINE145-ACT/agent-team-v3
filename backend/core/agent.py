@@ -21,6 +21,11 @@ from backend.core.context_compression import (
 from backend.core.extension import AgentExtension, ExtensionContext
 from backend.core.llm_client import get_openai_client
 from backend.core.registry import ToolRegistry
+from backend.tools.quotation.excel_summary import (
+    ExcelSummaryEntry,
+    format_excel_summary_for_prompt,
+    get_excel_summary_for_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +119,17 @@ class CoreAgent:
             except Exception:
                 logger.warning("ext.on_before_prompt 失败，已跳过", exc_info=True)
 
+        excel_summary_entry: Optional[ExcelSummaryEntry] = None
+        if ctx and (ctx.get("file_id") or ctx.get("file_path")):
+            try:
+                excel_summary_entry = get_excel_summary_for_context(ctx)
+            except Exception:
+                logger.debug("get_excel_summary_for_context 失败，已忽略", exc_info=True)
+
         if context and context.get("file_path"):
             user_content += f"\n\n[Context: 已上传报价单，file_path={context['file_path']}]"
+        if context and context.get("file_id"):
+            user_content += f"\n\n[Context] file_id={context['file_id']}（用于在工具中定位同一 Excel 摘要）"
 
         if session_id and self._store:
             session = self._store.load(session_id)
@@ -137,8 +151,14 @@ class CoreAgent:
         tools = self._registry.get_definitions()
         messages: List[dict] = [
             {"role": "system", "content": self._system_prompt},
-            {"role": "user", "content": user_content},
         ]
+        if excel_summary_entry is not None:
+            try:
+                summary_text = format_excel_summary_for_prompt(excel_summary_entry)
+                messages.append({"role": "system", "content": summary_text})
+            except Exception:
+                logger.debug("format_excel_summary_for_prompt 失败，已忽略", exc_info=True)
+        messages.append({"role": "user", "content": user_content})
         thinking_parts: List[str] = []
         trace: List[dict] = []
         last_answer = ""

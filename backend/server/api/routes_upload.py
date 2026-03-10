@@ -9,6 +9,12 @@ from fastapi.responses import FileResponse
 
 from backend.config import Config
 from backend.server.api.deps import sanitize_upload_filename
+from backend.tools.quotation.excel_summary import (
+    ExcelSummary,
+    generate_excel_summary,
+    make_file_id,
+    put_excel_summary,
+)
 from backend.tools.quotation.quote_tools import fill_template_with_inquiry_items
 from backend.tools.quotation.text_to_inquiry import text_to_inquiry_items
 
@@ -18,7 +24,7 @@ router = APIRouter()
 
 @router.post("/api/quotation/upload")
 async def quotation_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
-    """上传报价单或文档（Excel/PDF），返回 file_path、file_name。"""
+    """上传报价单或文档（Excel/PDF），返回 file_path、file_name 及解析摘要元信息。"""
     try:
         Config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         content = await file.read()
@@ -39,7 +45,34 @@ async def quotation_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
         except ValueError:
             raise HTTPException(status_code=400, detail="非法文件名")
         out_path.write_bytes(content)
-        return {"success": True, "data": {"file_path": str(out_path), "file_name": raw_name}}
+        file_path_str = str(out_path)
+
+        # 仅对 Excel 文件尝试生成摘要；PDF 暂不解析。
+        summary: ExcelSummary | None = None
+        summary_meta: Dict[str, Any] | None = None
+        file_id = make_file_id(file_path_str)
+        if suffix.lower() in (".xlsx", ".xlsm"):
+            try:
+                summary = generate_excel_summary(file_path_str)
+            except Exception:
+                logger.exception("generate_excel_summary 失败（已忽略）")
+                summary = None
+            if summary is not None:
+                entry = put_excel_summary(file_path_str, summary)
+                # 以缓存中的 file_id 为准（与 make_file_id 一致）
+                file_id = entry.file_id
+                meta = summary.get("meta") or {}
+                summary_meta = {
+                    "rows_count": meta.get("rows_count"),
+                    "preview_count": meta.get("preview_count"),
+                    "truncated": bool(meta.get("truncated")),
+                    "items_success": bool(meta.get("items_success")),
+                }
+
+        data: Dict[str, Any] = {"file_path": file_path_str, "file_name": raw_name, "file_id": file_id}
+        if summary_meta is not None:
+            data["summary_meta"] = summary_meta
+        return {"success": True, "data": data}
     except HTTPException:
         raise
     except Exception as e:

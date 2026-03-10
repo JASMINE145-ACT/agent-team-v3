@@ -4,10 +4,17 @@ export type ChatAttachment = {
   mimeType: string;
 };
 
-/** 已上传的文档（Excel/PDF），随下一条消息以 context.file_path 传给 agent */
+/** 已上传的文档（Excel/PDF），随下一条消息以 context.file_path / context.file_id 传给 agent */
 export type ChatUploadedFile = {
+  file_id: string;
   file_path: string;
   file_name: string;
+  summaryMeta?: {
+    rows_count?: number;
+    preview_count?: number;
+    truncated?: boolean;
+    items_success?: boolean;
+  };
 };
 
 export type ChatQueueItem = {
