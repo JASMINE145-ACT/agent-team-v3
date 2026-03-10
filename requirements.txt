@@ -33,3 +33,6 @@ google-api-python-client>=2.0.0
 
 # 可选：企业微信回调（若需可取消注释）
 # pycryptodome>=3.19.0
+
+# 企业微信智能机器人长连接（wecom-aibot-sdk）
+wecom-aibot-sdk>=1.0.2
