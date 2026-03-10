@@ -1,5 +1,9 @@
 # Agent Team version3 — 项目说明（Claude 用）
 
+### 企业微信长连接 Bot — 超时策略补充
+
+- WeCom 长连接通路通过 `backend/wecom_bot/handler.py` 的 `handle_wecom_message` 将文本消息转给 `CoreAgent.execute_react`。
+- 为避免单条慢请求长期占用长连接，`handle_wecom_message` 使用 `asyncio.wait_for(_call_agent(), timeout=90)` 做超时保护：超过 **90 秒** 仍未返回时，会在日志中记录 warning，并向企业微信用户回复「处理超时，请稍后重试。」。
 **单主 Agent 架构**：无子 Agent 委托，主 Agent 掌握全部技能，根据用户意图直接选用工具完成目标。
 
 ## 与 version2 的区别
@@ -127,3 +131,13 @@ Agent Team version3/
 - **WebSocket `/ws`（Gateway 适配层）**：供 OpenClaw 控制台 1:1 复刻使用。连接后收 `connect.challenge`，发 `connect` 得 `hello-ok`；支持 `sessions.list`、`sessions.patch`、`chat.history`、`chat.send`、`chat.abort`、`agent.identity.get` 等。`sessions.list` 返回的 `label` 为会话标题（LLM 生成或首条消息截断），`updatedAt` 为毫秒时间戳；`inputTokens`/`outputTokens`/`totalTokens` 来自 SessionStore。**会话标题**：首轮对话结束后，后端用 LLM 根据首轮内容生成 5–10 字标题并写回 session（`backend/server/gateway/handlers/chat.py`）；可选环境变量 `SESSION_TITLE_MODEL` 指定标题用模型，默认与 `LLM_MODEL` 相同。`sessions.patch` 支持传 `key`+`label` 由前端或用户编辑标题。测试：先 `python run_backend.py`，再 `python backend/server/gateway/test_gateway_manual.py`（需 `pip install websockets`）。
 
 - **Jagent 控制台（前端）**：已接好，界面展示品牌为 **Jagent**（标题、侧栏 LOGO 文案、助手名称）。`control-ui/` 为 OpenClaw UI 拷贝并改品牌展示，默认 WS 为 `ws://${host}/ws`；构建产出 `dist/control-ui/`，由 `backend/server/api/app.py` 在存在时挂载到 `/`。运行 `python run_backend.py` 后访问 `http://localhost:8000/` 即可。若需重构建：`cd control-ui && npm run build`。**概览页（Overview）**：顶端新增「系统健康状态」卡片（一眼看在线/离线、实例数、会话数、定时任务开关与下次运行时间，并展示最近错误摘要），下方保留连接信息与网关 Snapshot、注意事项；健康区文案通过 i18n key（`overview.health.*`）管理，前端不再内联默认中文字符串。**无货看板与缺货记录**：Control 侧栏「实例 / Instances」页同时展示**无货看板**与**缺货记录**。无货看板通过 `/api/oos/*` 展示统计与无货产品列表、按文件/按时间统计，支持**删除**与**手动新增**；缺货记录通过 `/api/shortage/*` 展示 Work 匹配后库存不足落库或看板手动添加的统计/列表/按文件/按时间，支持**删除**与**手动新增**。手动新增缺货需填产品名字、规格、需求、供给，**差异**由后端自动计算（需求 − 供给）；列表展示需求/供给/差异及被报缺货次数。**采购页补货**：Control 侧栏「采购 / Sessions」页含缺货申报与**补货**区块。补货区提供**输入表**：多行「产品名或编码」+「新购数量」、添加/删除行、「生成补货单」按钮；生成后调用 `POST /api/replenishment-drafts`（body: `{ lines: [{ product_or_code, quantity }] }`），**成功后自动刷新列表**并展开新 draft；下方补货单列表支持查看明细、确认执行（`PATCH .../confirm`）、**删除**（`DELETE /api/replenishment-drafts/{draft_id}`，删除前二次确认）。**补货确认占位开关**：默认**占位**（仅更新补货单状态为 confirmed，不调用 `modify_inventory` 写 ACCURATE）；需真实写库存时设置环境变量 `REPLENISHMENT_CONFIRM_REAL_INVENTORY=1`（或 true/yes）后重启后端即可改为真实调用。方案与数据流见 `补货前端与云端落库` 方案文档。**SPA 会话直链**：直接打开或刷新 `/chat?session=xxx`、`/sessions` 等前端路由时，后端对无对应静态文件的路径回退为返回 `index.html`，避免 404。**注意**：前端使用 Lit 装饰器，需 Vite 6 + `vite-ts-decorators`（`control-ui/tsconfig.json` 中 `experimentalDecorators: true`），否则构建后浏览器会报 "Unsupported decorator location: field" 导致页面空白。
+
+### 企业微信长连接 Bot（长连接模式概览）
+
+- **URL 回调（已接入 Phase 1）**：`backend/server/api/routes_wecom.py` 暴露 `GET/POST /api/wecom/callback`，由 `backend/server/services/wecom_service.py` 做 URL 验证与明文 XML 解析，`wecom_chat_bridge.py` 将 WeCom 文本映射为 `session_id="wecom:{FromUserName}"` 并调用现有 `CoreAgent.execute_react`，再把结果包装为企业微信要求的 XML 文本回复；相关配置为 `.env` 中的 `WECOM_TOKEN/WECOM_AES_KEY/WECOM_CORP_ID/WECOM_AGENT_ID`。
+- **长连接 Bot（当前为 Dummy 骨架，可平滑替换为官方 SDK）**：
+  - 模块位置：`backend/wecom_bot/`，包含：
+    - `config.py`：`load_wecom_bot_config()` 从环境变量读取 `WECOM_BOT_ID/WECOM_BOT_SECRET/WECOM_BOT_PROXY_URL`，并在缺少关键配置时仅发出 warning（允许本地 Dummy 模式运行）；
+    - `handler.py`：定义 `handle_wecom_message(agent, msg)`，将标准化 WeCom 消息（`msg_id/from_user/to_user/msg_type/content/raw`）转成 `session_id="wecom:{from_user}"` 调用 `CoreAgent.execute_react`，带 60s 超时与异常兜底，始终返回一段可落地给用户的文本。
+    - `client.py`：当前实现 `DummyWeComBotClient`，通过命令行 stdin 模拟 WeCom 文本消息，`run_wecom_bot(agent)` 负责加载配置并启动 Dummy 客户端；未来接入企业微信长连接 SDK 时，只需在此处用真实 WeComBotClient 替换 Dummy 即可。
+  - 启动入口：`start_wecom_bot.py`，与 HTTP 后端保持同一套 `Config` 与 `CoreAgent` 初始化逻辑，启动后会提示「当前为 Dummy 模式，使用命令行模拟 WeCom 消息」，支持在本地直接输入文本观察 `session_id="wecom:debug-user"` 下的对话行为。Render 等平台上可将该脚本作为单独 worker 进程运行，后续接上真实长连接实现即可对接企业微信 Bot。

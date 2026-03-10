@@ -158,6 +158,7 @@ async def startup_event():
     Config.validate()
     from backend.core.agent import CoreAgent
     from backend.plugins.jagent.extension import JAgentExtension
+    from backend.wecom_bot.client import run_wecom_bot
     agent = CoreAgent(
         api_key=Config.OPENAI_API_KEY,
         base_url=Config.OPENAI_BASE_URL,
@@ -174,7 +175,14 @@ async def startup_event():
             except Exception as e:
                 logger.warning("创建目录失败 %s: %s", p, e)
     logger.info("Agent-JK v3 单 Agent 后端启动完成 — %s:%s", Config.API_HOST, Config.API_PORT)
+    # 后台预热库存/报价/无货数据库
     asyncio.create_task(_warmup(agent))
+    # 启动企业微信长连接 Bot（wecom-aibot-sdk 或 Dummy 模式，取决于环境配置）
+    try:
+        asyncio.create_task(run_wecom_bot(agent))
+        logger.info("WeCom Bot 长连接协程已启动。")
+    except Exception as e:
+        logger.warning("启动 WeCom Bot 长连接失败（不影响 HTTP API）: %s", e)
 
 
 if __name__ == "__main__":
