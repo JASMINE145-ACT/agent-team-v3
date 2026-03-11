@@ -1,78 +1,178 @@
 from __future__ import annotations
 
 """
-WeCom 长连接消息与 CoreAgent 之间的桥接。
-
-StandardWeComMessage 约定字段：
-    {
-        "msg_id": str,
-        "from_user": str,
-        "to_user": str,
-        "msg_type": "text" | "image" | ...,
-        "content": str,      # 文本内容
-        "raw": dict,        # 原始消息体（透传方便排查）
-    }
+Bridge between WeCom websocket events and CoreAgent.
 """
 
 import asyncio
 import logging
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, Tuple
 
+from backend.config import Config
 from backend.core.agent import CoreAgent
-
+from backend.tools.quotation.excel_summary import (
+    ExcelSummaryEntry,
+    generate_excel_summary,
+    make_file_id,
+    put_excel_summary,
+)
 
 logger = logging.getLogger(__name__)
-
 
 StandardWeComMessage = Dict[str, Any]
 
 
+def _load_wecom_session_context(agent: CoreAgent, session_id: str) -> Dict[str, Any]:
+    """Read file context from session store so follow-up messages keep Excel context."""
+    try:
+        store = getattr(agent, "_store", None)
+        if store is None:
+            return {}
+
+        session = store.load(session_id)
+        fp = (getattr(session, "file_path", None) or "").strip()
+        if not fp:
+            return {}
+
+        norm_path = str(Path(fp).resolve())
+        ctx: Dict[str, Any] = {"file_path": norm_path}
+        try:
+            ctx["file_id"] = make_file_id(norm_path)
+        except Exception:
+            logger.debug("make_file_id failed, keep file_path only", exc_info=True)
+        return ctx
+    except Exception:
+        logger.debug("failed to load wecom session context", exc_info=True)
+        return {}
+
+
+def _bind_session_file_path(agent: CoreAgent, session_id: str, file_path: str) -> None:
+    """Store the uploaded file path immediately for next user message."""
+    try:
+        store = getattr(agent, "_store", None)
+        if store is None:
+            return
+        session = store.load(session_id)
+        session.file_path = file_path
+    except Exception:
+        logger.debug("failed to bind session file_path", exc_info=True)
+
+
+def _build_excel_summary_entry(file_path: str) -> Tuple[Dict[str, Any], ExcelSummaryEntry]:
+    summary = generate_excel_summary(file_path)
+    entry = put_excel_summary(file_path, summary)
+    return summary, entry
+
+
 async def handle_wecom_message(agent: CoreAgent, msg: StandardWeComMessage) -> str:
-    """
-    将 WeCom 标准消息转发给 CoreAgent.execute_react，并返回文本答案。
-    仅处理文本消息，其余类型统一给出能力提示。
-    """
+    """Forward standard WeCom message to CoreAgent and return text answer."""
     msg_type = (msg.get("msg_type") or "").lower()
     if msg_type != "text":
-        logger.info("收到非文本 WeCom 消息，msg_type=%s，暂不支持。", msg_type)
-        return "暂时只支持文本消息，请直接发送文字问题或报价需求。"
+        logger.info("non-text WeCom message ignored, msg_type=%s", msg_type)
+        return "暂时只支持文本消息，请直接发送文字问题。"
 
     user_text = (msg.get("content") or "").strip()
     if not user_text:
-        return "收到空消息，暂时只支持纯文本内容。"
+        return "收到空消息，请发送文本内容。"
 
     from_user = msg.get("from_user") or ""
     session_id = f"wecom:{from_user}" if from_user else "wecom:anonymous"
+    context = _load_wecom_session_context(agent, session_id)
 
-    logger.info("WeCom[%s] → Agent: %s", session_id, user_text)
+    logger.info("WeCom[%s] -> Agent: %s", session_id, user_text)
 
     async def _call_agent() -> str:
         try:
             result = await agent.execute_react(
                 user_input=user_text,
-                context={},  # 后续可注入 file_id/file_path 等上下文
+                context=context,
                 session_id=session_id,
             )
         except Exception as e:  # noqa: BLE001
-            logger.exception("WeCom 消息调用 CoreAgent 失败: %s", e)
-            return "系统处理消息时出错，请稍后再试或联系管理员。"
+            logger.exception("CoreAgent failed on WeCom text message: %s", e)
+            return "系统处理消息时出错，请稍后重试。"
 
         answer = (result.get("answer") or "").strip() if isinstance(result, dict) else ""
         if not answer:
-            logger.warning("WeCom 消息处理结果为空，result=%r", result)
+            logger.warning("empty answer from CoreAgent, result=%r", result)
             return "（未能生成有效回复）"
         return answer
 
-    # 为避免单条消息长时间占用长连接，这里增加超时保护（默认 90 秒）
     try:
         answer = await asyncio.wait_for(_call_agent(), timeout=90)
     except asyncio.TimeoutError:
-        logger.warning("WeCom 消息处理超时（session_id=%s）", session_id)
+        logger.warning("WeCom text timeout, session_id=%s", session_id)
         return "处理超时，请稍后重试。"
 
-    logger.info("Agent → WeCom[%s]: %s", session_id, answer)
+    logger.info("Agent -> WeCom[%s]: %s", session_id, answer)
     return answer
 
 
-__all__ = ["StandardWeComMessage", "handle_wecom_message"]
+async def handle_wecom_file(agent: CoreAgent, from_user: str, file_path: str) -> str:
+    """
+    Handle WeCom uploaded Excel file:
+    1) generate summary + cache
+    2) bind file context to current session
+    3) trigger one background execute_react to strengthen session binding
+    4) return confirmation text
+    """
+    session_id = f"wecom:{from_user}" if from_user else "wecom:anonymous"
+    norm_path = str(Path(file_path).resolve())
 
+    logger.info("WeCom[%s] file handling start: %s", session_id, norm_path)
+
+    try:
+        summary, entry = await asyncio.to_thread(_build_excel_summary_entry, norm_path)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("failed to build Excel summary for WeCom file: %s", e)
+        return "文件已接收，但解析 Excel 失败，请稍后重试。"
+
+    ctx: Dict[str, Any] = {"file_path": norm_path, "file_id": entry.file_id}
+
+    # Make follow-up text available immediately, without waiting execute_react.
+    _bind_session_file_path(agent, session_id, norm_path)
+
+    user_hint = "用户刚刚在企业微信上传了一份 Excel 报价单，请将这份文件绑定到当前会话上下文。"
+
+    async def _bind_with_agent_background() -> None:
+        timeout_s = int(getattr(Config, "WECOM_FILE_BIND_TIMEOUT_SECONDS", 20) or 20)
+        timeout_s = max(5, min(timeout_s, 60))
+        try:
+            await asyncio.wait_for(
+                agent.execute_react(
+                    user_input=user_hint,
+                    context=ctx,
+                    session_id=session_id,
+                ),
+                timeout=timeout_s,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("WeCom file context bind timeout, session_id=%s", session_id)
+        except Exception:
+            logger.warning("WeCom file context bind failed, session_id=%s", session_id, exc_info=True)
+
+    # Fire-and-forget: do not block user confirmation response.
+    asyncio.create_task(_bind_with_agent_background())
+
+    meta = summary.get("meta") or {}
+    rows = meta.get("rows_count")
+    preview = meta.get("preview_count")
+    truncated = bool(meta.get("truncated"))
+
+    parts = []
+    if isinstance(rows, int):
+        parts.append(f"共 {rows} 行数据")
+    if isinstance(preview, int):
+        parts.append(f"已生成前 {preview} 行摘要")
+    if truncated:
+        parts.append("其余行会在需要时按需解析")
+    detail = "，".join(parts) if parts else "已生成基础摘要"
+
+    return (
+        f"已成功接收并解析 Excel 报价单（{Path(norm_path).name}），{detail}。\n"
+        "接下来你可以直接回复“帮我选一个”“查一下库存”“按这份表给报价”等问题。"
+    )
+
+
+__all__ = ["StandardWeComMessage", "handle_wecom_message", "handle_wecom_file"]

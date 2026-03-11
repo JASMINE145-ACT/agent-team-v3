@@ -12,12 +12,21 @@ WeCom 长连接 Bot 客户端。
 
 import asyncio
 import logging
+import os
+import re
 import sys
+import time
 import uuid
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
+from backend.config import Config
 from backend.wecom_bot.config import WeComBotConfig, load_wecom_bot_config
-from backend.wecom_bot.handler import StandardWeComMessage, handle_wecom_message
+from backend.wecom_bot.handler import (
+    StandardWeComMessage,
+    handle_wecom_message,
+    handle_wecom_file,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -155,6 +164,96 @@ class WeComBotClient:
             await self._ws.reply_stream(frame, stream_id, answer, True)
 
         self._ws.on("message.text", _on_text_message)
+
+        # 文件消息（Excel 为主）→ 下载到 UPLOAD_DIR 并生成摘要，随后提示用户
+        async def _on_file_message(frame):
+            body = frame.get("body", {}) or {}
+            file_info = (body.get("file") or {}) or {}
+            url = file_info.get("url") or ""
+            aes_key = file_info.get("aeskey")
+            filename = (file_info.get("filename") or "").strip() or "wecom_upload.xlsx"
+
+            frm = body.get("from", {}) or {}
+            from_user = (
+                frm.get("userid")
+                or frm.get("user_id")
+                or frm.get("external_userid")
+                or frm.get("open_userid")
+                or "wecom-user"
+            )
+
+            logger.info("WeCom 文件消息来自 %s: %s", from_user, filename)
+
+            # 仅处理 Excel 文件，其它类型直接提示暂不支持
+            lower_name = filename.lower()
+            if not (lower_name.endswith(".xlsx") or lower_name.endswith(".xlsm")):
+                stream_id = generate_req_id("stream")
+                msg = "当前企业微信入口暂时只支持 Excel 报价单文件（.xlsx/.xlsm），请改用 Excel 文件或在 Web 控制台上传。"
+                await self._ws.reply_stream(frame, stream_id, msg, True)
+                return
+
+            if not url:
+                stream_id = generate_req_id("stream")
+                msg = "收到文件消息，但未能获取下载地址，请稍后重试或改用 Web 控制台上传报价单。"
+                await self._ws.reply_stream(frame, stream_id, msg, True)
+                return
+
+            # 下载并保存到 UPLOAD_DIR/wecom/<user>/...
+            try:
+                result = await self._ws.download_file(url, aes_key)
+                buffer = result["buffer"]
+                dl_name = (result.get("filename") or "").strip()
+                if dl_name:
+                    filename_local = dl_name
+                else:
+                    filename_local = filename
+            except Exception as e:  # noqa: BLE001
+                logger.exception("下载 WeCom 文件失败: %s", e)
+                stream_id = generate_req_id("stream")
+                msg = "文件下载失败，请稍后重试或在 Web 控制台上传 Excel 报价单。"
+                await self._ws.reply_stream(frame, stream_id, msg, True)
+                return
+
+            safe_user = re.sub(r"[^\w\-]", "_", from_user)[:64] or "wecom"
+            upload_root = Path(Config.UPLOAD_DIR)
+            save_dir = upload_root / "wecom" / safe_user
+            try:
+                save_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as e:  # noqa: BLE001
+                logger.exception("创建 WeCom 上传目录失败: %s", e)
+                stream_id = generate_req_id("stream")
+                msg = "服务端目录创建失败，暂时无法保存文件，请联系管理员或改用 Web 控制台上传。"
+                await self._ws.reply_stream(frame, stream_id, msg, True)
+                return
+
+            # 防止文件名过长或异常字符
+            base_name = os.path.basename(filename_local)
+            if not (base_name.lower().endswith(".xlsx") or base_name.lower().endswith(".xlsm")):
+                base_name = "wecom_upload.xlsx"
+            ts = int(time.time())
+            local_path = save_dir / f"{ts}_{base_name}"
+
+            try:
+                local_path.write_bytes(buffer)
+            except OSError as e:  # noqa: BLE001
+                logger.exception("保存 WeCom 文件到本地失败: %s", e)
+                stream_id = generate_req_id("stream")
+                msg = "文件保存失败，请稍后重试或改用 Web 控制台上传报价单。"
+                await self._ws.reply_stream(frame, stream_id, msg, True)
+                return
+
+            logger.info("WeCom 文件已保存: %s", local_path)
+
+            try:
+                confirm_text = await handle_wecom_file(self._agent, from_user, str(local_path))
+            except Exception as e:  # noqa: BLE001
+                logger.exception("处理 WeCom 文件消息失败: %s", e)
+                confirm_text = "文件已接收，但在解析或绑定上下文时出错，请稍后重试或改用 Web 控制台。"
+
+            stream_id = generate_req_id("stream")
+            await self._ws.reply_stream(frame, stream_id, confirm_text, True)
+
+        self._ws.on("message.file", _on_file_message)
 
     async def run_forever(self) -> None:
         """
