@@ -141,3 +141,7 @@ Agent Team version3/
     - `handler.py`：定义 `handle_wecom_message(agent, msg)`，将标准化 WeCom 消息（`msg_id/from_user/to_user/msg_type/content/raw`）转成 `session_id="wecom:{from_user}"` 调用 `CoreAgent.execute_react`，带 60s 超时与异常兜底，始终返回一段可落地给用户的文本。
     - `client.py`：当前实现 `DummyWeComBotClient`，通过命令行 stdin 模拟 WeCom 文本消息，`run_wecom_bot(agent)` 负责加载配置并启动 Dummy 客户端；未来接入企业微信长连接 SDK 时，只需在此处用真实 WeComBotClient 替换 Dummy 即可。
   - 启动入口：`start_wecom_bot.py`，与 HTTP 后端保持同一套 `Config` 与 `CoreAgent` 初始化逻辑，启动后会提示「当前为 Dummy 模式，使用命令行模拟 WeCom 消息」，支持在本地直接输入文本观察 `session_id="wecom:debug-user"` 下的对话行为。Render 等平台上可将该脚本作为单独 worker 进程运行，后续接上真实长连接实现即可对接企业微信 Bot。
+
+### 前端 Work 页测试补充
+
+- 在 `control-ui/src/ui/work.test.ts` 中新增 Vitest 浏览器测试，用于回归验证 Work 页结果区的 Excel 下载按钮行为：当 `workResult.trace` 中包含 Excel 输出路径时，会渲染 `/api/quotation/download?path=...` 的下载按钮；当 trace 中不存在输出路径时，不应渲染该按钮，避免误导用户。

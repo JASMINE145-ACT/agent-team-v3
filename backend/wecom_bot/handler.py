@@ -6,6 +6,7 @@ Bridge between WeCom websocket events and CoreAgent.
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -21,6 +22,33 @@ from backend.tools.quotation.excel_summary import (
 logger = logging.getLogger(__name__)
 
 StandardWeComMessage = Dict[str, Any]
+
+# in-memory mapping: WeCom from_user -> current session_id
+_WECHAT_SESSIONS: Dict[str, str] = {}
+
+
+def _get_current_session_id(from_user: str) -> str:
+    """Return current session id for a WeCom user, creating one if absent."""
+    if not from_user:
+        return "wecom:anonymous"
+    sid = _WECHAT_SESSIONS.get(from_user)
+    if sid:
+        return sid
+    # initial session id
+    sid = f"wecom:{from_user}:{int(time.time())}"
+    _WECHAT_SESSIONS[from_user] = sid
+    return sid
+
+
+def _new_session_id(from_user: str) -> str:
+    """Create a fresh session id for a WeCom user and update mapping."""
+    if not from_user:
+        sid = f"wecom:anonymous:{int(time.time())}"
+        _WECHAT_SESSIONS[""] = sid
+        return sid
+    sid = f"wecom:{from_user}:{int(time.time())}"
+    _WECHAT_SESSIONS[from_user] = sid
+    return sid
 
 
 def _load_wecom_session_context(agent: CoreAgent, session_id: str) -> Dict[str, Any]:
@@ -77,7 +105,14 @@ async def handle_wecom_message(agent: CoreAgent, msg: StandardWeComMessage) -> s
         return "收到空消息，请发送文本内容。"
 
     from_user = msg.get("from_user") or ""
-    session_id = f"wecom:{from_user}" if from_user else "wecom:anonymous"
+
+    # /new 指令：为该 WeCom 用户开启一个全新的会话
+    if user_text == "/new":
+        new_sid = _new_session_id(from_user)
+        logger.info("WeCom user %s requested /new, new session_id=%s", from_user, new_sid)
+        return "已为你开启一个新的对话，会从当前这条消息开始理解，不再参考之前的上下文。"
+
+    session_id = _get_current_session_id(from_user)
     context = _load_wecom_session_context(agent, session_id)
 
     logger.info("WeCom[%s] -> Agent: %s", session_id, user_text)
@@ -111,13 +146,9 @@ async def handle_wecom_message(agent: CoreAgent, msg: StandardWeComMessage) -> s
 
 async def handle_wecom_file(agent: CoreAgent, from_user: str, file_path: str) -> str:
     """
-    Handle WeCom uploaded Excel file:
-    1) generate summary + cache
-    2) bind file context to current session
-    3) trigger one background execute_react to strengthen session binding
-    4) return confirmation text
+    Handle WeCom uploaded Excel file for the *current* session of that user.
     """
-    session_id = f"wecom:{from_user}" if from_user else "wecom:anonymous"
+    session_id = _get_current_session_id(from_user)
     norm_path = str(Path(file_path).resolve())
 
     logger.info("WeCom[%s] file handling start: %s", session_id, norm_path)

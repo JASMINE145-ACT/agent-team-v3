@@ -2,7 +2,7 @@ import { html, nothing } from "lit";
 import { t } from "../../i18n/index.ts";
 import type { WorkState, WorkPendingChoice } from "../controllers/work.ts";
 
-/** 价格档位：value 与后端一致，labelKey 对应 i18n key。 */
+/** 浠锋牸妗ｄ綅锛歷alue 涓庡悗绔竴鑷达紝labelKey 瀵瑰簲 i18n key銆?*/
 const PRICE_LEVEL_OPTIONS: { value: string; labelKey: string }[] = [
   { value: "FACTORY_INC_TAX", labelKey: "work.priceLevels.FACTORY_INC_TAX" },
   { value: "FACTORY_EXC_TAX", labelKey: "work.priceLevels.FACTORY_EXC_TAX" },
@@ -23,7 +23,7 @@ const PRICE_LEVEL_OPTIONS: { value: string; labelKey: string }[] = [
 export type WorkProps = WorkState & {
   onAddFile: (filePath: string, fileName: string) => void;
   onRemoveFile: (index: number) => void;
-  /** 修改当前 Work 会话中某个文件的人类可读名称（不改物理路径）。 */
+  /** 淇敼褰撳墠 Work 浼氳瘽涓煇涓枃浠剁殑浜虹被鍙鍚嶇О锛堜笉鏀圭墿鐞嗚矾寰勶級銆?*/
   onRenameFileName: (filePath: string, nextName: string) => void;
   onWorkTextChange: (value: string) => void;
   onGenerateFromText: () => void;
@@ -60,18 +60,43 @@ function tryParseJson(s: string): unknown {
 function getOutputFileBasenamesFromTrace(trace: unknown[] | undefined): string[] {
   if (!Array.isArray(trace)) return [];
   const basenames: string[] = [];
+  const pushBasename = (p: unknown) => {
+    if (typeof p !== "string" || !p.trim()) return;
+    const base = p.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
+    if (base && !basenames.includes(base)) basenames.push(base);
+  };
+
   for (const entry of trace) {
-    const type = (entry as Record<string, unknown>).type;
-    const content = (entry as Record<string, unknown>).content;
-    if (type !== "observation" || typeof content !== "string") continue;
-    const obj = tryParseJson(content) as Record<string, unknown> | null;
-    if (!obj || typeof obj !== "object") continue;
-    const outPath = obj.output_path;
-    if (typeof outPath === "string" && outPath.trim()) {
-      const base = outPath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
-      if (base && !basenames.includes(base)) basenames.push(base);
+    // Use loose typing to avoid compile failures when backend trace shape changes.
+    const rec = entry as { [key: string]: unknown };
+    const type = rec.type as unknown;
+    const content = rec.content as unknown;
+
+    // 1) Backward compatibility: observation.content JSON string.
+    if (type === "observation" && typeof content === "string") {
+      const obj = tryParseJson(content) as Record<string, unknown> | null;
+      if (obj && typeof obj === "object") {
+        // Direct output path fields.
+        pushBasename(obj.output_path ?? obj.filled_path);
+
+        // Some tools wrap output info under result (JSON string or object).
+        const rawResult = obj.result as unknown;
+        const inner =
+          typeof rawResult === "string"
+            ? (tryParseJson(rawResult) as Record<string, unknown> | null)
+            : rawResult && typeof rawResult === "object"
+              ? (rawResult as Record<string, unknown>)
+              : null;
+        if (inner && typeof inner === "object") {
+          pushBasename(inner.output_path ?? inner.filled_path);
+        }
+      }
     }
+
+    // 2) Future compatibility: output path directly on trace entry.
+    pushBasename(rec.output_path ?? rec.filled_path);
   }
+
   return basenames;
 }
 
@@ -80,8 +105,8 @@ function renderPendingChoice(item: WorkPendingChoice, selectedCode: string, onCh
     <li style="margin-bottom: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px;">
       <div style="font-size: 13px; margin-bottom: 8px;">
         ${item.product_name ?? item.keywords ?? ""}
-        ${item.specification ? html`<span class="muted"> · ${item.specification}</span>` : nothing}
-        ${item.qty != null ? html`<span class="muted"> · ${t("work.qty")}: ${item.qty}</span>` : nothing}
+        ${item.specification ? html`<span class="muted"> 路 ${item.specification}</span>` : nothing}
+        ${item.qty != null ? html`<span class="muted"> 路 ${t("work.qty")}: ${item.qty}</span>` : nothing}
       </div>
       <select
         .value=${selectedCode}
@@ -91,7 +116,7 @@ function renderPendingChoice(item: WorkPendingChoice, selectedCode: string, onCh
       >
         <option value="__OOS__">${t("work.choiceOos")}</option>
         ${(item.options ?? []).map(
-          (opt) => html`<option value=${opt.code}>${opt.code}${opt.matched_name ? ` · ${opt.matched_name}` : ""}${opt.unit_price != null ? ` · ${opt.unit_price}` : ""}</option>`,
+          (opt) => html`<option value=${opt.code}>${opt.code}${opt.matched_name ? ` 路 ${opt.matched_name}` : ""}${opt.unit_price != null ? ` 路 ${opt.unit_price}` : ""}</option>`,
         )}
       </select>
     </li>
@@ -373,23 +398,27 @@ export function renderWork(props: WorkProps) {
     </section>
 
     ${workRunStatus === "awaiting_choices" && workPendingChoices.length
-      ? html`
-          <section class="card" style="margin-bottom: 16px;" aria-live="polite">
-            <div class="card-title">${t("work.awaitingTitle")}</div>
-            <p class="muted" style="margin-bottom: 12px;">${t("work.awaitingHint")}</p>
-            <ul style="list-style: none; padding: 0; margin: 0;">
-              ${workPendingChoices.map((item) =>
-                renderPendingChoice(item, workSelections[item.id] ?? "__OOS__", (value) => onSelectionChange(item.id, value))
-              )}
-            </ul>
-            <div style="display: flex; gap: 8px; margin-top: 12px;">
-              <button class="btn" style="background: var(--accent); color: var(--bg);" ?disabled=${workRunning} @click=${onResume}>
-                ${workRunning || workRunStatus === "resuming" ? t("work.resuming") : t("work.resume")}
-              </button>
-              ${workRunStatus === "error" ? html`<button class="btn btn-sm" @click=${onRetry}>${t("common.retry")}</button>` : nothing}
-            </div>
-          </section>
-        `
+      ? (() => {
+          // Capture status as a plain string so TypeScript doesn't narrow it inside the template.
+          const s: string = workRunStatus;
+          return html`
+            <section class="card" style="margin-bottom: 16px;" aria-live="polite">
+              <div class="card-title">${t("work.awaitingTitle")}</div>
+              <p class="muted" style="margin-bottom: 12px;">${t("work.awaitingHint")}</p>
+              <ul style="list-style: none; padding: 0; margin: 0;">
+                ${workPendingChoices.map((item) =>
+                  renderPendingChoice(item, workSelections[item.id] ?? "__OOS__", (value) => onSelectionChange(item.id, value))
+                )}
+              </ul>
+              <div style="display: flex; gap: 8px; margin-top: 12px;">
+                <button class="btn" style="background: var(--accent); color: var(--bg);" ?disabled=${workRunning} @click=${onResume}>
+                  ${workRunning || s === "resuming" ? t("work.resuming") : t("work.resume")}
+                </button>
+                ${s === "error" ? html`<button class="btn btn-sm" @click=${onRetry}>${t("common.retry")}</button>` : nothing}
+              </div>
+            </section>
+          `;
+        })()
       : nothing}
 
     ${workQuotationDraftSaveStatus?.status === "ok"
@@ -472,22 +501,19 @@ export function renderWork(props: WorkProps) {
       ? html`
           <section class="card">
             <div class="card-title">${t("work.resultTitle")}</div>
-            ${((): ReturnType<typeof html> => {
-              const basenames = getOutputFileBasenamesFromTrace(workResult.trace as unknown[] | undefined);
-              return basenames.length
-                ? html`
-                    <div style="margin-bottom: 12px;">
-                      ${basenames.map(
-                        (name) => html`
-                          <a href=${apiUrl(basePath, `/api/quotation/download?path=${encodeURIComponent(name)}`)} download=${name} class="btn btn-sm" style="margin-right: 8px; margin-bottom: 6px; text-decoration: none;">
-                            ${t("work.download", { name })}
-                          </a>
-                        `,
-                      )}
-                    </div>
-                  `
-                : nothing;
-            })()}
+            ${getOutputFileBasenamesFromTrace(workResult.trace as unknown[] | undefined).length
+              ? html`
+                  <div style="margin-bottom: 12px;">
+                    ${getOutputFileBasenamesFromTrace(workResult.trace as unknown[] | undefined).map(
+                      (name) => html`
+                        <a href=${apiUrl(basePath, `/api/quotation/download?path=${encodeURIComponent(name)}`)} download=${name} class="btn btn-sm" style="margin-right: 8px; margin-bottom: 6px; text-decoration: none;">
+                          ${t("work.download", { name })}
+                        </a>
+                      `,
+                    )}
+                  </div>
+                `
+              : nothing}
 
             ${workResult.answer ? html`<div style="white-space: pre-wrap; margin-bottom: 12px;">${workResult.answer}</div>` : nothing}
             ${workResult.error ? html`<p style="color: var(--danger, #e53935);">${workResult.error}</p>` : nothing}
