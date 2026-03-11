@@ -1,0 +1,9 @@
+# Render Web Service 配置（可选）
+# 若在 Dashboard 已配置，可忽略本文件。用于 Blueprint 或一键部署时指定启动方式。
+# 重要：启动命令必须是「前台常驻进程」，不能是 start.py（start.py 会 spawn 子进程后自己退出，Render 会判为部署失败、Port scan timeout）。
+services:
+  - type: web
+    name: agent-team-v3
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run_backend.py
