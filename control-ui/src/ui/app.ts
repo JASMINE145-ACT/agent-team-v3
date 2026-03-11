@@ -357,7 +357,7 @@ export class OpenClawApp extends LitElement {
   @state() workResult: { success?: boolean; answer?: string; trace?: unknown[]; error?: string } | null = null;
   @state() workError: string | null = null;
   @state() workCustomerLevel = "B_QUOTE";
-  @state() workDoRegisterOos = true;
+  @state() workDoRegisterOos = false;
   @state() workPendingQuotationDraft: import("./controllers/work.js").PendingQuotationDraft | null = null;
   @state() workQuotationDraftSaveStatus: import("./controllers/work.js").WorkQuotationDraftSaveStatus | null = null;
   @state() workTextInput = "";
@@ -798,4 +798,3 @@ export class OpenClawApp extends LitElement {
     return renderApp(this as unknown as AppViewState);
   }
 }
-

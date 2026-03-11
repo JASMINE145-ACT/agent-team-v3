@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from backend.config import Config
@@ -23,7 +23,10 @@ router = APIRouter()
 
 
 @router.post("/api/quotation/upload")
-async def quotation_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
+async def quotation_upload(
+    file: UploadFile = File(...),
+    with_summary: bool = Query(True, description="Whether to generate excel summary metadata"),
+) -> Dict[str, Any]:
     """上传报价单或文档（Excel/PDF），返回 file_path、file_name 及解析摘要元信息。"""
     try:
         Config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -51,7 +54,7 @@ async def quotation_upload(file: UploadFile = File(...)) -> Dict[str, Any]:
         summary: ExcelSummary | None = None
         summary_meta: Dict[str, Any] | None = None
         file_id = make_file_id(file_path_str)
-        if suffix.lower() in (".xlsx", ".xlsm"):
+        if with_summary and suffix.lower() in (".xlsx", ".xlsm"):
             try:
                 summary = generate_excel_summary(file_path_str)
             except Exception:

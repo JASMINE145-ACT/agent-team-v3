@@ -519,7 +519,6 @@ async function executeRunStreamOnce(state: WorkState, endpoint: string): Promise
             throw new ResponseSchemaError(endpoint, "stage must be a number");
           }
           state.workProgressStage = stage;
-          await wait(80);
         } else if (eventType === "result") {
           const payload = parseWorkPayload(event.payload, endpoint);
           applyWorkPayload(state, payload);

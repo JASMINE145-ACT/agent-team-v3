@@ -6,10 +6,51 @@ import json
 import logging
 import os
 import re
+from copy import copy
+from datetime import date
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Tuple
 
 logger = logging.getLogger(__name__)
+
+# 表头关键词：交货日期列、报价日期标签（用于定位填写格）
+DELIVERY_DATE_COL_KEYWORDS = [
+    "交货日期",
+    "Tanggal Pengiriman",
+    "Delivery Date",
+    "Tanggal Pengiriman Barang",
+]
+QUOTATION_DATE_LABEL_KEYWORDS = [
+    "报价日期",
+    "Tanggal Penawaran",
+    "Quotation Date",
+]
+
+
+def _copy_cell_style(source_cell, dest_cell) -> None:
+    """
+    将 source_cell 的格式（边框、底纹、字体、对齐、数字格式）复制到 dest_cell，
+    避免填表时新建单元格使用默认样式导致虚线边框或异常底纹（如绿色块）。
+    """
+    try:
+        if getattr(source_cell, "has_style", False) and getattr(source_cell, "_style", None) is not None:
+            dest_cell._style = copy(source_cell._style)
+            return
+    except (TypeError, AttributeError):
+        pass
+    try:
+        if getattr(source_cell, "font", None) is not None:
+            dest_cell.font = copy(source_cell.font)
+        if getattr(source_cell, "border", None) is not None:
+            dest_cell.border = copy(source_cell.border)
+        if getattr(source_cell, "fill", None) is not None:
+            dest_cell.fill = copy(source_cell.fill)
+        if getattr(source_cell, "alignment", None) is not None:
+            dest_cell.alignment = copy(source_cell.alignment)
+        if getattr(source_cell, "number_format", None) is not None:
+            dest_cell.number_format = source_cell.number_format
+    except (TypeError, AttributeError):
+        logger.debug("复制单元格样式时部分属性失败", exc_info=True)
 
 # 边界行标识（用户指定：报价数据列到该行为止）
 TOTAL_ROW_MARKER = "Total Excluding PPN不含税总价"
@@ -131,6 +172,45 @@ def _find_col_by_header(header: List[str], keywords_list: List[str]) -> int:
             if kw.lower() in val:
                 return i
     return -1
+
+
+def _find_delivery_date_column(ws, max_header_rows: int = 4, max_cols: int = 30) -> int:
+    """
+    在前几行表头中按关键词查找「交货日期」列，返回 1-based 列号，未找到返回 0。
+    """
+    for row_1based in range(1, max_header_rows + 1):
+        row_cells: List[str] = []
+        for c in range(1, max_cols + 1):
+            try:
+                v = ws.cell(row=row_1based, column=c).value
+                row_cells.append(str(v).strip() if v is not None else "")
+            except Exception:
+                break
+        col0 = _find_col_by_header(row_cells, DELIVERY_DATE_COL_KEYWORDS)
+        if col0 >= 0:
+            return col0 + 1
+    return 0
+
+
+def _find_quotation_date_cell(
+    ws, total_row_1based: int, search_rows: int = 20, max_cols: int = 30
+) -> Tuple[int, int] | None:
+    """
+    在合计行下方的 footer 区域查找「报价日期」标签所在行，返回应填写日期的单元格 (row, col) 1-based。
+    约定：日期写在标签所在单元格的右侧一列。
+    """
+    for r in range(total_row_1based + 4, total_row_1based + search_rows + 1):
+        for c in range(1, max_cols + 1):
+            try:
+                val = ws.cell(row=r, column=c).value
+                if val is None:
+                    continue
+                s = str(val).strip()
+                if any(kw in s for kw in QUOTATION_DATE_LABEL_KEYWORDS):
+                    return (r, c + 1)
+            except Exception:
+                continue
+    return None
 
 
 def _extract_inquiry_items_smart_fallback(
@@ -435,8 +515,14 @@ def fill_template_with_inquiry_items(
             total_row_1based = ws.max_row + 1
         data_start = INQUIRY_DATA_START_ROW
         available = max(0, total_row_1based - data_start)
-        if len(items) > available:
-            ws.insert_rows(total_row_1based, len(items) - available)
+        insert_count = max(0, len(items) - available)
+        if insert_count > 0:
+            ws.insert_rows(total_row_1based, insert_count)
+            # 新插入行从上一行复制样式，避免出现默认虚线/绿底
+            style_row = total_row_1based - 1
+            for new_row in range(total_row_1based, total_row_1based + insert_count):
+                for col in range(1, min(ws.max_column + 1, 20)):
+                    _copy_cell_style(ws.cell(row=style_row, column=col), ws.cell(row=new_row, column=col))
         filled = 0
         for i, it in enumerate(items):
             row_num = data_start + i
@@ -650,7 +736,7 @@ def get_quote_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "fill_quotation_sheet",
-                "description": "【报价单导向】将数据写入报价单 Excel 指定行。fill_items 每项含 row(Excel行号1-based)、code、quote_name、unit_price、qty、specification。写入列：G=产品编号, H=报价名称, J=规格, L=数量, N=单价。相当于 excel write_data 填表。",
+                "description": "【报价单导向】将数据写入报价单 Excel 指定行。fill_items 每项含 row、code、quote_name、unit_price、qty、specification。写入列：G=产品编号, H=报价名称, J=规格, L=数量, N=单价, O=总价；并按表头自动填写「交货日期」「报价日期」（不传则用当天 YYYY/MM/DD）。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -673,6 +759,8 @@ def get_quote_tools_openai_format() -> list[dict]:
                         },
                         "output_path": {"type": "string", "description": "可选，输出路径，默认覆盖原文件"},
                         "sheet_name": {"type": "string", "description": "工作表名，不传用第一个"},
+                        "quotation_date": {"type": "string", "description": "报价日期，如 2026/03/11，不传用当天"},
+                        "delivery_date": {"type": "string", "description": "交货日期（每行同一值），如 2026/03/20，不传用当天"},
                     },
                     "required": ["file_path", "fill_items"],
                 },
@@ -758,10 +846,13 @@ def fill_quotation(
     sheet_name: str | None = None,
     output_path: str | None = None,
     freight: float = 0.0,
+    quotation_date: str | None = None,
+    delivery_date: str | None = None,
 ) -> dict[str, Any]:
     """
     将匹配到的产品信息回填到报价单 Excel。
-    未匹配项写「无货」；写完后更新底部 4 个价格计算行。
+    每行保证填写的列：G=产品编号, H=报价名称, J=报价产品规格(无 specification 时用 quote_name), L=数量, N=单价, O=总价；
+    未匹配项写「无货」；写完后更新底部 4 个价格计算行；并按表头填写「交货日期」「报价日期」。
 
     Args:
         file_path: 原始报价单路径
@@ -769,6 +860,8 @@ def fill_quotation(
         sheet_name: 工作表名，默认第一个
         output_path: 输出路径，默认覆盖原文件（建议调用方传副本路径）
         freight: 运费，默认 0
+        quotation_date: 报价日期，默认当天 YYYY/MM/DD
+        delivery_date: 交货日期（每行同一值），默认当天 YYYY/MM/DD
 
     Returns:
         {"success": bool, "output_path": str, "filled_count": int, "error": str | None}
@@ -792,6 +885,31 @@ def fill_quotation(
             ws = wb[sheet_name]
         else:
             ws = wb.active or wb[wb.sheetnames[0]]
+
+        # 先定位「Total Excluding PPN」行，避免后续 iter_rows 与写表顺序导致样式错乱
+        total_row_1based = None
+        for row in ws.iter_rows():
+            row_idx = row[0].row if row else 0
+            for cell in row:
+                if TOTAL_ROW_MARKER in _cell_value(cell):
+                    total_row_1based = row_idx
+                    break
+            if total_row_1based is not None:
+                break
+
+        today_str = date.today().strftime("%Y/%m/%d")
+        qdate_str = (quotation_date or today_str).strip() or today_str
+        ddate_str = (delivery_date or today_str).strip() or today_str
+
+        delivery_col = _find_delivery_date_column(ws)
+        quotation_date_cell = _find_quotation_date_cell(ws, total_row_1based or 0) if total_row_1based else None
+
+        # 数据区写入列（用于填表后统一从模板行复制样式，避免出现虚线边框或绿色底纹）
+        data_cols = [COL_PRODUCT_NO, COL_QUOTE_NAME, COL_QUOTE_SPEC, COL_QTY_OUT, COL_UNIT_PRICE, COL_TOTAL]
+        if delivery_col and delivery_col not in data_cols:
+            data_cols.append(delivery_col)
+        style_source_row = min((it.get("row") for it in fill_items if it.get("row")), default=None)
+
         filled = 0
         total_excluding_ppn = 0.0
         for it in fill_items:
@@ -808,8 +926,9 @@ def fill_quotation(
                 ws.cell(row=row_num, column=COL_UNIT_PRICE, value=float(it["unit_price"]))
             if it.get("qty") is not None:
                 ws.cell(row=row_num, column=COL_QTY_OUT, value=int(it["qty"]))
-            if it.get("specification"):
-                ws.cell(row=row_num, column=COL_QUOTE_SPEC, value=str(it["specification"]))
+            # 报价产品规格：有 specification 用 specification，否则用 quote_name，保证该列有内容（避免留空）
+            spec_val = (it.get("specification") or it.get("quote_name") or "").strip()
+            ws.cell(row=row_num, column=COL_QUOTE_SPEC, value=spec_val if spec_val else None)
             up = it.get("unit_price")
             q = it.get("qty")
             if up is not None and q is not None and code and str(code) != "无货":
@@ -818,22 +937,34 @@ def fill_quotation(
                 total_excluding_ppn += row_total
             elif up is not None and q is not None and (not code or str(code) == "无货"):
                 ws.cell(row=row_num, column=COL_TOTAL, value=0)
+            if delivery_col:
+                ws.cell(row=row_num, column=delivery_col, value=ddate_str)
+            # 每行写完后从模板行复制样式，保证边框/底纹与模板一致（实线、白底）
+            if style_source_row is not None:
+                for col in data_cols:
+                    _copy_cell_style(
+                        ws.cell(row=style_source_row, column=col),
+                        ws.cell(row=row_num, column=col),
+                    )
+
         ppn = round(total_excluding_ppn * 0.11, 2)
         total_including = round(total_excluding_ppn + ppn + float(freight), 2)
-        total_row_1based = None
-        for row in ws.iter_rows():
-            row_idx = row[0].row if row else 0
-            for cell in row:
-                if TOTAL_ROW_MARKER in _cell_value(cell):
-                    total_row_1based = row_idx
-                    break
-            if total_row_1based is not None:
-                break
         if total_row_1based is not None:
             ws.cell(row=total_row_1based, column=TOTALS_VALUE_COL, value=round(total_excluding_ppn, 2))
             ws.cell(row=total_row_1based + 1, column=TOTALS_VALUE_COL, value=ppn)
             ws.cell(row=total_row_1based + 2, column=TOTALS_VALUE_COL, value=float(freight))
             ws.cell(row=total_row_1based + 3, column=TOTALS_VALUE_COL, value=total_including)
+            # 合计区 4 行样式与第一行合计行一致
+            for i in range(4):
+                _copy_cell_style(
+                    ws.cell(row=total_row_1based, column=TOTALS_VALUE_COL),
+                    ws.cell(row=total_row_1based + i, column=TOTALS_VALUE_COL),
+                )
+        if quotation_date_cell:
+            qr, qc = quotation_date_cell
+            ws.cell(row=qr, column=qc, value=qdate_str)
+            if qc > 1:
+                _copy_cell_style(ws.cell(row=qr, column=qc - 1), ws.cell(row=qr, column=qc))
         wb.save(out_p)
         return {"success": True, "output_path": str(out_p), "filled_count": filled, "error": None}
     except Exception as e:
@@ -853,6 +984,8 @@ def execute_quote_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         fill_items = arguments.get("fill_items") or []
         output_path = (arguments.get("output_path") or "").strip() or None
         sheet_name = (arguments.get("sheet_name") or "").strip() or None
+        quotation_date = (arguments.get("quotation_date") or "").strip() or None
+        delivery_date = (arguments.get("delivery_date") or "").strip() or None
         if not file_path:
             return {"success": False, "result": "", "error": "请提供 file_path"}
         if not fill_items or not isinstance(fill_items, list):
@@ -862,6 +995,8 @@ def execute_quote_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             fill_items=fill_items,
             sheet_name=sheet_name,
             output_path=output_path,
+            quotation_date=quotation_date,
+            delivery_date=delivery_date,
         )
         if out.get("success"):
             return {"success": True, "result": json.dumps({"filled_count": out["filled_count"], "output_path": out["output_path"]}, ensure_ascii=False), "error": None}

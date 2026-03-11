@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Optional
@@ -39,6 +40,7 @@ WORK_TOOLS_OPENAI_FORMAT = [
                 "properties": {
                     "file_path": {"type": "string", "description": "报价单路径（用于与 extract 对应）"},
                     "customer_level": {"type": "string", "enum": ["FACTORY_INC_TAX", "FACTORY_EXC_TAX", "PURCHASE_EXC_TAX", "A_MARGIN", "A_QUOTE", "B_MARGIN", "B_QUOTE", "C_MARGIN", "C_QUOTE", "D_MARGIN", "D_QUOTE", "D_LOW", "E_MARGIN", "E_QUOTE"], "description": "价格档位：出厂价_含税/不含税、采购不含税、二级代理A/一级代理B/聚万C/青山D/大唐E 各级别（利润率、报单价格、D降低利润率），默认 B_QUOTE"},
+                    "items": {"type": "array", "description": "可选：已提取的询价行，用于跳过重复 extract"},
                 },
                 "required": ["file_path"],
             },
@@ -104,16 +106,30 @@ def _run_work_quotation_match(
     customer_level: str = "B",
     price_library_path: Optional[str] = None,
     sheet_name: Optional[str] = None,
+    items: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """与 Chat 一致：共同查询（历史+万鼎并集）+ LLM 选型，见 match_price_and_get_inventory。"""
     from backend.tools.inventory.services.match_and_inventory import match_price_and_get_inventory
     from backend.tools.quotation.quote_tools import extract_inquiry_items
 
-    ext = extract_inquiry_items(file_path, sheet_name=sheet_name)
-    if not ext.get("success"):
-        return {"success": False, "error": ext.get("error", "提取失败"), "to_fill": [], "shortage": [], "unmatched": [], "items": []}
-    items = ext.get("items", [])
-    if not items:
+    if items is not None:
+        if not isinstance(items, list):
+            return {
+                "success": False,
+                "error": "items must be a list",
+                "to_fill": [],
+                "shortage": [],
+                "unmatched": [],
+                "items": [],
+            }
+        resolved_items: list[dict[str, Any]] = [it for it in items if isinstance(it, dict)]
+    else:
+        ext = extract_inquiry_items(file_path, sheet_name=sheet_name)
+        if not ext.get("success"):
+            return {"success": False, "error": ext.get("error", "提取失败"), "to_fill": [], "shortage": [], "unmatched": [], "items": []}
+        resolved_items = list(ext.get("items", []) or [])
+
+    if not resolved_items:
         return {"success": True, "to_fill": [], "shortage": [], "unmatched": [], "items": [], "fill_items_merged": []}
 
     to_fill: list[dict] = []
@@ -139,9 +155,9 @@ def _run_work_quotation_match(
     except Exception:
         max_workers = 5
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        match_results = list(pool.map(_match_one, items))
+        match_results = list(pool.map(_match_one, resolved_items))
 
-    for it, result in zip(items, match_results):
+    for it, result in zip(resolved_items, match_results):
         qty = it.get("qty", 0)
         row = it.get("row")
         product_name = it.get("product_name", "")
@@ -220,7 +236,7 @@ def _run_work_quotation_match(
         "to_fill": to_fill,
         "shortage": shortage,
         "unmatched": unmatched,
-        "items": items,
+        "items": resolved_items,
         "fill_items_merged": fill_items_merged,
     }
     if pending_choices:
@@ -431,6 +447,44 @@ def _run_work_quotation_shortage_report(shortage_items: list[dict]) -> dict[str,
     return generate_shortage_report(shortage_items)
 
 
+def _persist_shortage_records_and_alerts(file_path: str, shortage_list: list[dict[str, Any]]) -> None:
+    """Persist shortage records and send alerts without blocking the response."""
+    try:
+        from backend.tools.oos.services.data_service import DataService
+        from backend.tools.oos.services.email_service import send_shortage_alert
+
+        file_name = Path(file_path).name if file_path else "unknown"
+        ds = DataService()
+        _, email_alerts = ds.insert_shortage_records(
+            file_name,
+            [
+                {
+                    "product_name": s.get("product_name"),
+                    "specification": s.get("specification"),
+                    "quantity": s.get("qty"),
+                    "available_qty": s.get("available_qty"),
+                    "shortfall": s.get("shortfall"),
+                    "code": s.get("code"),
+                    "quote_name": s.get("quote_name"),
+                    "unit_price": s.get("unit_price"),
+                }
+                for s in shortage_list
+            ],
+            file_path=file_path,
+        )
+        for alert in email_alerts:
+            if send_shortage_alert(
+                product_name=alert.get("product_name", ""),
+                specification=alert.get("specification"),
+                product_key=alert.get("product_key", ""),
+                count=alert.get("count", 0),
+                file_name=alert.get("file_name", ""),
+            ):
+                ds.mark_email_sent_shortage(alert.get("product_key", ""))
+    except Exception as e:
+        logger.debug("缺货记录落库或发信跳过: %s", e)
+
+
 def execute_work_tool_sync(name: str, arguments: dict[str, Any]) -> str:
     """同步执行 Work 工具，返回 JSON 字符串供 ReAct 观察。"""
     args = arguments or {}
@@ -442,31 +496,21 @@ def execute_work_tool_sync(name: str, arguments: dict[str, Any]) -> str:
     if name == "work_quotation_match":
         customer_level = (args.get("customer_level") or "B").strip().upper() or "B"
         sheet_name = (args.get("sheet_name") or "").strip() or None
-        out = _run_work_quotation_match(file_path, customer_level=customer_level, sheet_name=sheet_name)
+        items = args.get("items")
+        out = _run_work_quotation_match(
+            file_path,
+            customer_level=customer_level,
+            sheet_name=sheet_name,
+            items=items if isinstance(items, list) else None,
+        )
         # 缺货记录落库，与无货对齐：两次缺货发邮件（count>=2 + 冷却）
         shortage_list = out.get("shortage") or []
         if shortage_list and out.get("success"):
-            try:
-                from backend.tools.oos.services.data_service import DataService
-                from backend.tools.oos.services.email_service import send_shortage_alert
-                file_name = Path(file_path).name if file_path else "unknown"
-                ds = DataService()
-                inserted, email_alerts = ds.insert_shortage_records(
-                    file_name,
-                    [{"product_name": s.get("product_name"), "specification": s.get("specification"), "quantity": s.get("qty"), "available_qty": s.get("available_qty"), "shortfall": s.get("shortfall"), "code": s.get("code"), "quote_name": s.get("quote_name"), "unit_price": s.get("unit_price")} for s in shortage_list],
-                    file_path=file_path,
-                )
-                for alert in email_alerts:
-                    if send_shortage_alert(
-                        product_name=alert.get("product_name", ""),
-                        specification=alert.get("specification"),
-                        product_key=alert.get("product_key", ""),
-                        count=alert.get("count", 0),
-                        file_name=alert.get("file_name", ""),
-                    ):
-                        ds.mark_email_sent_shortage(alert.get("product_key", ""))
-            except Exception as e:
-                logger.debug("缺货记录落库或发信跳过: %s", e)
+            threading.Thread(
+                target=_persist_shortage_records_and_alerts,
+                args=(file_path, shortage_list),
+                daemon=True,
+            ).start()
         # 待确认报价单：供前端可编辑表格与「确认并保存」落库（不在此落库）
         if out.get("success") and not out.get("needs_human_choice"):
             items_by_row = {(it.get("row")): it for it in (out.get("items") or [])}

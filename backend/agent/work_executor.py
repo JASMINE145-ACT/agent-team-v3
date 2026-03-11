@@ -623,6 +623,7 @@ async def _process_files_pipeline(
 
     for idx in range(start_index, len(file_paths)):
         file_path = file_paths[idx]
+        extracted_items: Optional[List[dict]] = None
 
         # 闂冭埖? 1閿涙俺鐦戦崚?銆冮弫鐗堝祦閿涘牅瀵岀憰浣烘暏娴?trace 娑撳骸褰茬憴鍌涚ゴ閹嶇礉閻喐? match 閸愬懘鍎存稊鐔剁窗鐠嬪啰鏁?extract閿?
         if precomputed_match_result is None or idx != start_index:
@@ -654,6 +655,13 @@ async def _process_files_pipeline(
                     "duration_ms": elapsed_ms,
                 }
             )
+            try:
+                parsed_extract = json.loads(extract_obs)
+                items = parsed_extract.get("items") if isinstance(parsed_extract, dict) else None
+                if isinstance(items, list):
+                    extracted_items = [it for it in items if isinstance(it, dict)]
+            except Exception:
+                extracted_items = None
 
         # 闂冭埖? 2+3閿涙艾灏柊?+ 闁鐎?
         if precomputed_match_result is not None and idx == start_index:
@@ -664,6 +672,9 @@ async def _process_files_pipeline(
                 "file_path": file_path,
                 "customer_level": customer_level,
             }
+            match_exec_args: Dict[str, Any] = dict(match_args)
+            if extracted_items is not None:
+                match_exec_args["items"] = extracted_items
             step_count += 1
             if on_step:
                 try:
@@ -676,7 +687,7 @@ async def _process_files_pipeline(
                 match_obs = await asyncio.to_thread(
                     execute_work_tool_sync,
                     "work_quotation_match",
-                    match_args,
+                    match_exec_args,
                 )
             except Exception as e:
                 logger.exception("Work pipeline execution failed")

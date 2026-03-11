@@ -159,19 +159,21 @@ export function renderWork(props: WorkProps) {
   })();
 
   const uploadFile = (file: File) => {
-    const url = apiUrl(basePath, "/api/quotation/upload");
+    // Work page only needs file path quickly; skip summary generation on upload.
+    const url = apiUrl(basePath, "/api/quotation/upload?with_summary=0");
     const form = new FormData();
     form.append("file", file);
     fetch(url, { method: "POST", body: form, credentials: "same-origin" })
       .then((res) => res.json())
       .then((data: { success?: boolean; data?: { file_path?: string; file_name?: string }; file_path?: string; file_name?: string }) => {
+        if (data?.success === false) return;
         const payload = data.data ?? data;
         if (typeof payload.file_path === "string") {
           onAddFile(payload.file_path, payload.file_name ?? file.name);
         }
       })
-      .catch(() => {
-        // ignore upload error in view layer
+      .catch((err) => {
+        console.warn("[work] upload failed", err);
       });
   };
 
