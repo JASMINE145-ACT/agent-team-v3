@@ -1,7 +1,11 @@
 import json
 
+import asyncio
+from types import SimpleNamespace
 from backend.core.language_utils import detect_language, contains_chinese
 from backend.plugins.jagent.extension import JAgentExtension
+from backend.server.gateway.handlers.chat import handle_chat_send
+from backend.wecom_bot.handler import handle_wecom_message
 
 
 def test_detect_language_basic_cases():
@@ -47,6 +51,56 @@ def test_on_after_tool_appends_translation_note_for_english_preference():
     assert "Translation note" in out_en
     assert "Translation note" not in out_zh
     assert "Translation note" not in out_en_english
+
+
+class _DummyAgent:
+    def __init__(self):
+        self.last_context = None
+
+    async def execute_react(self, user_input: str, context: dict, session_id: str, **_: object) -> dict:
+        # 仅记录 context，避免真正调用 LLM
+        self.last_context = dict(context)
+        return {"answer": "ok", "thinking": None, "trace": []}
+
+
+def test_websocket_entrypoint_sets_preferred_lang_for_english_message():
+    agent = _DummyAgent()
+    ws = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(agent=agent)))
+    params = {
+        "sessionKey": "test-session",
+        "message": "please give me the inventory",
+        "context": {},
+    }
+
+    async def _fake_send_res(payload: dict) -> None:
+        return None
+
+    async def _fake_send_event(payload: dict) -> None:
+        return None
+
+    # 直接在事件循环中运行 handle_chat_send
+    asyncio.run(handle_chat_send(ws, "req-1", params, _fake_send_res, _fake_send_event))
+
+    ctx = agent.last_context or {}
+    assert ctx.get("preferred_lang") == "en"
+    assert ctx.get("detected_lang") == "en"
+
+
+def test_wecom_entrypoint_sets_preferred_lang_for_english_message():
+    agent = _DummyAgent()
+
+    msg = {
+        "msg_type": "text",
+        "from_user": "user-1",
+        "content": "please tell me the inventory status",
+    }
+
+    # 直接运行 handle_wecom_message，内部会调用 DummyAgent.execute_react
+    result = asyncio.run(handle_wecom_message(agent, msg))
+    assert isinstance(result, str)
+    ctx = agent.last_context or {}
+    assert ctx.get("preferred_lang") == "en"
+    assert ctx.get("detected_lang") == "en"
 
 
 def test_chinese_history_then_english_query_uses_english_policy():

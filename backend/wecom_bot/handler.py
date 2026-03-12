@@ -12,6 +12,7 @@ from typing import Any, Dict, Tuple
 
 from backend.config import Config
 from backend.core.agent import CoreAgent
+from backend.core.language_utils import detect_language
 from backend.tools.quotation.excel_summary import (
     ExcelSummaryEntry,
     generate_excel_summary,
@@ -114,6 +115,11 @@ async def handle_wecom_message(agent: CoreAgent, msg: StandardWeComMessage) -> s
 
     session_id = _get_current_session_id(from_user)
     context = _load_wecom_session_context(agent, session_id)
+
+    # 轻量语言检测：为企业微信通道设置 preferred_lang
+    detected = detect_language(user_text)
+    context["detected_lang"] = detected
+    context["preferred_lang"] = "en" if detected == "en" else "zh"
 
     logger.info("WeCom[%s] -> Agent: %s", session_id, user_text)
 

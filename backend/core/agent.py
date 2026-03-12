@@ -113,6 +113,16 @@ class CoreAgent:
 
         user_content = user_input.strip()
         ctx = context or {}
+        # 若上层未显式设置 preferred_lang，则在核心入口做一次轻量语言检测兜底
+        if user_input and "preferred_lang" not in ctx:
+            try:
+                from backend.core.language_utils import detect_language
+
+                detected_lang = detect_language(user_input)
+                ctx.setdefault("detected_lang", detected_lang)
+                ctx.setdefault("preferred_lang", "en" if detected_lang == "en" else "zh")
+            except Exception:
+                logger.debug("detect_language 失败，保持默认语言行为", exc_info=True)
         for ext in self._extensions:
             try:
                 user_content = ext.on_before_prompt(user_content, ctx)

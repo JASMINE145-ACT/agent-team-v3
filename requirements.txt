@@ -11,6 +11,9 @@ openai>=1.50.0
 # 可选：LangSmith 追踪（Work/Chat 的 token 消耗与调用历程）
 langsmith>=0.2.0
 
+# JSON Schema 校验（工具参数）
+jsonschema>=4.17.0
+
 # 环境与工具
 python-dotenv>=1.0.0
 

@@ -11,6 +11,7 @@ from openai import OpenAI
 from backend.agent.session import get_session_store
 from backend.agent.remember import try_handle_remember
 from backend.config import Config
+from backend.core.language_utils import detect_language
 from backend.server.gateway.run_store import register as run_register, unregister as run_unregister, cancel as run_cancel
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,12 @@ async def handle_chat_send(
         n = len(attachments)
         suffix = f"\n[用户附带了 {n} 张图片，当前版本暂不解析图片内容]"
         user_input = (user_input + suffix) if user_input else suffix.strip()
+
+    # 轻量语言检测：为 Web 控制台 Chat 设置 preferred_lang
+    if user_input:
+        detected = detect_language(user_input)
+        context["detected_lang"] = detected
+        context["preferred_lang"] = "en" if detected == "en" else "zh"
 
     # 业务知识「记住」命令 → 直接写入 MD 并回复，不跑 ReAct
     remember_reply = try_handle_remember(user_input)
