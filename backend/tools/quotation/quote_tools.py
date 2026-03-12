@@ -883,6 +883,7 @@ def get_quote_tools_openai_format() -> list[dict]:
                     },
                     "required": ["file_path"],
                 },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
             },
         },
         {
@@ -917,6 +918,7 @@ def get_quote_tools_openai_format() -> list[dict]:
                     },
                     "required": ["file_path", "fill_items"],
                 },
+                "x_tool_meta": {"access_mode": "write", "risk_level": "medium"},
             },
         },
         {
@@ -933,6 +935,7 @@ def get_quote_tools_openai_format() -> list[dict]:
                     },
                     "required": ["file_path"],
                 },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
             },
         },
         {
@@ -976,6 +979,7 @@ def get_quote_tools_openai_format() -> list[dict]:
                     },
                     "required": ["file_path", "edits"],
                 },
+                "x_tool_meta": {"access_mode": "write", "risk_level": "medium"},
             },
         },
     ]

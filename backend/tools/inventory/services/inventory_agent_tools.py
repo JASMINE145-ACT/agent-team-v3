@@ -336,6 +336,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     },
                     "required": ["keywords"],
                 },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
             },
         },
         {
@@ -361,6 +362,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     },
                     "required": ["price"],
                 },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
             },
         },
         {
@@ -375,6 +377,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     },
                     "required": ["code"],
                 },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
             },
         },
         {
@@ -390,6 +393,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     },
                     "required": ["keywords"],
                 },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
             },
         },
         {
@@ -405,6 +409,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     },
                     "required": ["keywords"],
                 },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
             },
         },
         {
@@ -420,6 +425,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     },
                     "required": ["keywords"],
                 },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
             },
         },
         {
@@ -448,6 +454,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     },
                     "required": ["keywords", "candidates"],
                 },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
             },
         },
         {
@@ -465,6 +472,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     },
                     "required": ["code", "action", "quantity"],
                 },
+                "x_tool_meta": {"access_mode": "write", "risk_level": "high"},
             },
         },
     ]

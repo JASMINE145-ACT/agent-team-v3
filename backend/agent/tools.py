@@ -38,6 +38,7 @@ EXTRA_TOOLS = [
             "name": "get_oos_list",
             "description": "【无货】获取无货产品列表，含被报无货次数与邮件发送状态。",
             "parameters": {"type": "object", "properties": {"limit": {"type": "integer", "description": "最多返回条数，默认 100，展示前 50 条"}}, "required": []},
+            "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
         },
     },
     {
@@ -46,6 +47,7 @@ EXTRA_TOOLS = [
             "name": "get_oos_stats",
             "description": "【无货】获取无货统计：总记录数、无货产品数、被报无货≥2次产品数、已发邮件产品数、今日新增。",
             "parameters": {"type": "object", "properties": {}},
+            "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
         },
     },
     {
@@ -54,6 +56,7 @@ EXTRA_TOOLS = [
             "name": "get_oos_by_file",
             "description": "【无货】按文件统计无货：每个报价单的记录数及上传时间。",
             "parameters": {"type": "object", "properties": {"limit": {"type": "integer", "description": "最多展示文件数，默认 50"}}, "required": []},
+            "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
         },
     },
     {
@@ -62,6 +65,7 @@ EXTRA_TOOLS = [
             "name": "get_oos_by_time",
             "description": "【无货】按时间统计无货：按日汇总最近 N 天新增记录数。",
             "parameters": {"type": "object", "properties": {"last_n_days": {"type": "integer", "description": "统计最近几天，默认 30"}}, "required": []},
+            "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
         },
     },
     {
@@ -77,6 +81,7 @@ EXTRA_TOOLS = [
                 },
                 "required": ["file_path"],
             },
+            "x_tool_meta": {"access_mode": "write", "risk_level": "high"},
         },
     },
     {
@@ -94,6 +99,7 @@ EXTRA_TOOLS = [
                 },
                 "required": ["product_name"],
             },
+            "x_tool_meta": {"access_mode": "write", "risk_level": "high"},
         },
     },
     {
@@ -109,6 +115,7 @@ EXTRA_TOOLS = [
                 },
                 "required": ["file_path"],
             },
+            "x_tool_meta": {"access_mode": "write", "risk_level": "high"},
         },
     },
     {
@@ -124,6 +131,7 @@ EXTRA_TOOLS = [
                 },
                 "required": ["questions"],
             },
+            "x_tool_meta": {"access_mode": "write", "risk_level": "medium"},
         },
     },
     {
@@ -138,6 +146,7 @@ EXTRA_TOOLS = [
                 },
                 "required": ["content"],
             },
+            "x_tool_meta": {"access_mode": "write", "risk_level": "medium"},
         },
     },
 ]
