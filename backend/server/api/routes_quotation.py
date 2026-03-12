@@ -51,6 +51,25 @@ async def quotation_drafts_create(body: Dict[str, Any] = Body(...)) -> Dict[str,
     try:
         ds = get_oos_data_service()
         result = ds.insert_quotation_draft(name=name, source=source, file_path=file_path, lines=lines)
+        try:
+            from backend.server.services.activity_log import log_activity
+
+            log_activity(
+                kind="quotation_draft",
+                action="saved",
+                entity_type="quotation_draft",
+                entity_id=str(result.get("draft_id") or result.get("id") or ""),
+                summary=f"保存报价草稿 {result.get('draft_no') or ''}".strip() or "保存报价草稿",
+                details={
+                    "name": name,
+                    "source": source,
+                    "file_path": file_path,
+                    "draft_no": result.get("draft_no"),
+                },
+            )
+        except Exception:
+            # 记录活动失败不影响报价保存
+            pass
         # 仅对「纯无货」行做无货登记：匹配不到任何产品、code 固定为 \"无货\"。
         # 库存不足（已有 code 但 available_qty < qty）的行只写 shortage_records，不再重复写入 out_of_stock_records。
         oos_lines = [ln for ln in lines if _is_pure_oos_line(ln)]

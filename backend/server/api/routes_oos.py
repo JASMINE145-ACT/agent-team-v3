@@ -121,6 +121,19 @@ async def oos_add(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         }
         out = persist_out_of_stock_records("看板手动添加", [record], "")
         if out.get("success"):
+            try:
+                from backend.server.services.activity_log import log_activity
+
+                log_activity(
+                    kind="oos",
+                    action="created",
+                    entity_type="oos_record",
+                    entity_id=None,
+                    summary="无货看板手动添加一条记录",
+                    details={"product_name": product_name, "specification": record.get("specification"), "quantity": qty},
+                )
+            except Exception:
+                pass
             return {"success": True, "data": {"message": out.get("result", "已添加")}}
         raise HTTPException(status_code=400, detail=out.get("error", "添加失败"))
     except HTTPException:
@@ -267,6 +280,19 @@ async def shortage_add(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         ds = get_oos_data_service()
         n = ds.insert_shortage_records("看板手动添加", [record], max_rows=1)
         if n:
+            try:
+                from backend.server.services.activity_log import log_activity
+
+                log_activity(
+                    kind="shortage",
+                    action="created",
+                    entity_type="shortage_record",
+                    entity_id=None,
+                    summary="缺货看板手动添加一条记录",
+                    details={"product_name": product_name, "specification": record.get("specification"), "quantity": qty, "available_qty": avail},
+                )
+            except Exception:
+                pass
             return {"success": True, "data": {"message": "已添加"}}
         raise HTTPException(status_code=400, detail="添加失败")
     except HTTPException:

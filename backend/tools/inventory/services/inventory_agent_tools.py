@@ -52,8 +52,10 @@ def _get_sql_agent():
 
 def _execute_match_by_quotation_history(arguments: dict[str, Any]) -> dict[str, Any]:
     """
-    历史匹配：先查映射表（整理产品）按「询价名称+规格」取 top3，再用每个 code 去万鼎价格表查价并填回。
-    返回：未匹配 / single / needs_selection，其中 unit_price 来自万鼎（customer_level 默认 B）。
+    历史匹配（只读）：
+    - 输入：keywords（询价名称+规格）、可选 customer_level。
+    - 行为：用映射表按「名称+规格」取 top3，再按档位到万鼎价格库查价。
+    - 返回：未匹配 / single / needs_selection，其中 unit_price 来自万鼎（customer_level 默认 B），不写任何数据库。
     """
     try:
         from backend.tools.inventory.services.mapping_table_matcher import match_mapping_top_candidates
@@ -91,8 +93,10 @@ def _execute_match_by_quotation_history(arguments: dict[str, Any]) -> dict[str, 
 
 def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
     """
-    询价匹配（历史+万鼎并行取并集）：同时查报价历史与字段匹配，返回带匹配来源的候选。
-    每条候选含 source：历史报价 / 字段匹配 / 共同。用于「查code/询价/物料编号」时一次得到两类结果。
+    询价匹配（只读）：
+    - 输入：keywords（中文产品名+规格）、可选 customer_level。
+    - 行为：同时查报价历史与万鼎字段匹配，取并集并按 source（历史报价/字段匹配/共同）标记。
+    - 返回：{ single | needs_selection | unmatched, candidates[], chosen?, match_source }，用于查 code/价格/档位。
     """
     try:
         from backend.tools.inventory.services.match_and_inventory import match_quotation_union
@@ -126,8 +130,8 @@ def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
 
 def _execute_match_wanding_price(arguments: dict[str, Any]) -> dict[str, Any]:
     """
-    字段匹配（万鼎价格库）：按产品名+规格在万鼎价格库中匹配，不查映射表。
-    返回：未匹配 / single / needs_selection；多候选时由 agent 调用 select_wanding_match。
+    字段匹配（只读，万鼎价格库）：按产品名+规格在万鼎价格库中匹配，不查映射表。
+    返回：未匹配 / single / needs_selection；多候选时由上层根据需要调用 select_wanding_match。
     """
     try:
         from backend.tools.inventory.services.match_and_inventory import match_wanding_price_candidates
@@ -159,10 +163,86 @@ def _execute_match_wanding_price(arguments: dict[str, Any]) -> dict[str, Any]:
         return {"success": False, "error": str(e), "result": f"匹配失败: {e}"}
 
 
+def _execute_get_profit_by_price(arguments: dict[str, Any]) -> dict[str, Any]:
+    """
+    利润率查询（只读，万鼎价格库）：
+    - 输入：code（可选）、product_name（可选）、price（必填，成交价/报单价）。
+    - 行为：按 code 或完整名称在万鼎价格库定位行，对每行计算与给定价格最接近的档位及其利润率，并返回所有档位价格/利润率。
+    - 返回：{ success, result(自然语言总结), data: { rows[] } }，rows 每项含 code/name/matched_price_level/matched_price/matched_profit/all_levels[]。
+    """
+    from backend.tools.inventory.config import config
+    from backend.tools.inventory.services.wanding_fuzzy_matcher import (
+        get_profit_rows_by_code,
+        get_profit_rows_by_name,
+    )
+
+    code = (arguments.get("code") or "").strip()
+    product_name = (arguments.get("product_name") or "").strip()
+    if not code and not product_name:
+        return {"success": True, "result": "请提供 code 或 product_name（至少一个）。"}
+    try:
+        price = float(arguments.get("price"))
+    except (TypeError, ValueError):
+        return {"success": True, "result": "请提供有效的 price（数字）。"}
+
+    path = config.PRICE_LIBRARY_PATH
+    try:
+        rows: list[dict[str, Any]] = []
+        if code:
+            rows = get_profit_rows_by_code(code, price, path)
+        elif product_name:
+            rows = get_profit_rows_by_name(product_name, price, path)
+    except Exception as e:
+        logger.exception("get_profit_by_price 失败")
+        return {"success": False, "error": str(e), "result": f"查询利润率失败: {e}"}
+
+    if not rows:
+        key_desc = code or product_name
+        return {
+            "success": True,
+            "result": f"未在万鼎价格库中找到与「{key_desc}」匹配的产品。",
+            "data": {"rows": []},
+        }
+
+    # 组装自然语言 summary
+    lines: list[str] = []
+    for r in rows:
+        code_str = r.get("code") or code or "-"
+        name_str = r.get("name") or product_name or "-"
+        matched_level = r.get("matched_price_level")
+        matched_price = r.get("matched_price")
+        matched_profit = r.get("matched_profit")
+        if matched_level:
+            level_display = f"{matched_level}"
+            try:
+                from backend.tools.inventory.services.wanding_fuzzy_matcher import PRICE_LEVEL_DISPLAY_NAMES
+
+                level_display = PRICE_LEVEL_DISPLAY_NAMES.get(matched_level, matched_level)
+            except Exception:
+                pass
+            profit_pct = f"{matched_profit:.2%}" if isinstance(matched_profit, (int, float)) else "未知"
+            lines.append(
+                f"编号 {code_str}（{name_str}）在万鼎价格库中，按你给的价格 {matched_price:g}，"
+                f"最接近 {level_display}，对应利润率约 {profit_pct}。"
+            )
+        else:
+            lines.append(
+                f"编号 {code_str}（{name_str}）在万鼎价格库中找到了记录，但无法根据价格 {price:g} 匹配到具体档位。"
+            )
+    if len(rows) > 1:
+        lines.insert(0, f"在万鼎价格库中找到 {len(rows)} 条记录：")
+
+    return {
+        "success": True,
+        "result": "\n".join(lines),
+        "data": {"rows": rows},
+    }
+
+
 def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
     """
-    执行 select_wanding_match：从 match_wanding_price 的候选中用 LLM 选 1 个。
-    接收 keywords + candidates，返回选中的 {code, matched_name, unit_price} 或 None。
+    执行 select_wanding_match（只读）：从 match_wanding_price/match_quotation 的候选中用 LLM 选 1 个。
+    接收 keywords + candidates，返回选中的 {code, matched_name, unit_price} 或 None，或返回 _needs_human_choice 供 Work 使用。
     """
     try:
         from backend.tools.inventory.services.llm_selector import llm_select_best
@@ -255,6 +335,31 @@ def get_inventory_tools_openai_format() -> list[dict]:
                         "keywords": {"type": "string", "description": "产品名称或规格关键词"},
                     },
                     "required": ["keywords"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_profit_by_price",
+                "description": "根据万鼎价格库，按 code 或完整产品名称 + 价格查询对应档位的利润率，并返回所有档位的价格/利润率。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string",
+                            "description": "10 位物料编号，如 8020020755；与 product_name 至少提供一个，两者同时提供时优先使用 code。",
+                        },
+                        "product_name": {
+                            "type": "string",
+                            "description": "完整产品名称（与万鼎价格库中 Describrition 列一致或非常接近）。",
+                        },
+                        "price": {
+                            "type": "number",
+                            "description": "报价员给出的成交价/报单价，用于锁定最接近的档位价格并读取对应利润率。",
+                        },
+                    },
+                    "required": ["price"],
                 },
             },
         },
@@ -376,6 +481,8 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any]) -> dict[s
         return _execute_match_wanding_price(arguments)
     if name == "select_wanding_match":
         return _execute_select_wanding_match(arguments)
+    if name == "get_profit_by_price":
+        return _execute_get_profit_by_price(arguments)
     if name == "modify_inventory":
         try:
             from backend.tools.inventory.services.inventory_modify_service import modify_inventory as do_modify

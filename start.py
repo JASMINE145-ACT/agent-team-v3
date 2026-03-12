@@ -58,7 +58,7 @@ def main():
     except Exception as e:
         print(f"错误: 加载配置失败 — {e}")
         print("请确认：1) 在「Agent Team version3」目录下执行 python start.py；2) 已安装依赖 pip install -r requirements.txt")
-        _pause_before_exit()
+        _pause_before_exit() 
         sys.exit(1)
 
     port = Config.API_PORT

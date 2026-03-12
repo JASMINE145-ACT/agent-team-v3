@@ -71,6 +71,12 @@ class Config:
     WORK_USE_PIPELINE = (os.getenv("WORK_USE_PIPELINE", "true") or "").strip().lower() in ("1", "true", "yes")
     WORK_RUN_ID_TTL_SECONDS = int(os.getenv("WORK_RUN_ID_TTL_SECONDS", str(60 * 60)))
 
+    # Run Log：长流程运行日志基目录（相对 base_dir 的 data/run-logs，或通过环境变量覆盖）
+    RUN_LOG_BASE_DIR = Path(os.getenv("RUN_LOG_BASE_DIR", str(base_dir / "data" / "run-logs")))
+
+    # 报价草稿规格双列：是否用一次批量 LLM 提取「询价规格」与「报价产品规」（默认 true；false 则仅用规则+回退）
+    QUOTATION_SPEC_LLM = (os.getenv("QUOTATION_SPEC_LLM", "true") or "").strip().lower() in ("1", "true", "yes")
+
     # 企业微信（WeCom）集成相关配置：Phase 1 仅用于 URL 验证与明文回调
     WECOM_TOKEN = os.getenv("WECOM_TOKEN", "")
     WECOM_AES_KEY = os.getenv("WECOM_AES_KEY", "")

@@ -534,7 +534,7 @@ async def _run_pipeline_fill_and_oos(
     閸︺劌鍑￠張?match_result 閻ㄥ嫬澧犻幓鎰瑓閿涘奔璐熼崡鏇氶嚋閺傚洣娆㈤幍褑?婵?銆?+ 缂傞缚鎻ｉ幎銉ユ啞 + 閺冪姾鎻ｉ惂鏄?閵?    娣?鏁?trace閿涘n_step 婢跺秶鏁ら崢鐔告箒鐠?绠熼敍鍫滅返 /run-stream 閹恒劏绻橀梼鑸?閿涘鈧?    """
     step_count = len([t for t in trace if t.get("type") == "tool_call"])
 
-    fill_items = match_result.get("fill_items_merged") or []
+    fill_items = match_result.get("fill_items_for_excel") or match_result.get("fill_items_merged") or []
     if fill_items:
         fill_args: Dict[str, Any] = {
             "file_path": file_path,
@@ -757,7 +757,7 @@ async def _process_files_pipeline(
             pending_quotation_draft = parsed.get("pending_quotation_draft")
 
         if parsed.get("needs_human_choice") and parsed.get("pending_choices"):
-            # 閺嗗倸浠犻敍宀€鐡戝鍛眽瀹搞儵鈧瀚?            run_id = str(uuid.uuid4())
+            run_id = str(uuid.uuid4())
             _work_pipeline_state[run_id] = {
                 "file_paths": list(file_paths),
                 "customer_level": customer_level,
@@ -914,6 +914,7 @@ async def run_work_flow(
     model: Optional[str] = None,
     on_step: Optional[Callable[[int, str, dict, str], None]] = None,
     max_steps: int = 80,
+    work_run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     缂佺喍绔撮崗銉ュ經閿涙岸绮拋銈堣泲缁狅繝浜惧蹇斿⒔鐞涘苯娅掗敍娑樼秼闁板秶鐤?WORK_USE_PIPELINE=false 閺冭泛娲栭柅鈧崚鐗堟＋ ReAct 濞翠胶鈻奸妴?    """
@@ -925,27 +926,101 @@ async def run_work_flow(
     except Exception:
         use_pipeline = True
 
-    if use_pipeline:
-        return await _run_work_flow_pipeline(
-            file_paths=file_paths,
-            customer_level=customer_level,
-            do_register_oos=do_register_oos,
-            api_key=api_key,
-            base_url=base_url,
-            model=model,
-            on_step=on_step,
-            max_steps=max_steps,
-        )
-    return await _run_work_flow_react(
-        file_paths=file_paths,
-        customer_level=customer_level,
-        do_register_oos=do_register_oos,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
-        on_step=on_step,
-        max_steps=max_steps,
-    )
+    from backend.server.run_log_store import RunLogHandle, append_log, begin_run_log, finalize_log
+
+    log_handle: Optional[RunLogHandle] = None
+    if work_run_id:
+        try:
+            context = {
+                "file_paths": list(file_paths),
+                "customer_level": customer_level,
+                "do_register_oos": do_register_oos,
+                "mode": "pipeline" if use_pipeline else "react",
+            }
+            log_handle = begin_run_log("work", work_run_id, context)
+        except Exception:
+            # Run Log 失败不能影响主流程
+            log_handle = None
+
+    result: Dict[str, Any]
+    try:
+        if use_pipeline:
+            result = await _run_work_flow_pipeline(
+                file_paths=file_paths,
+                customer_level=customer_level,
+                do_register_oos=do_register_oos,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                on_step=on_step,
+                max_steps=max_steps,
+            )
+        else:
+            result = await _run_work_flow_react(
+                file_paths=file_paths,
+                customer_level=customer_level,
+                do_register_oos=do_register_oos,
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                on_step=on_step,
+                max_steps=max_steps,
+            )
+
+        # 将 metrics 摘要写入 Run Log，避免重复解析整段 trace。
+        if log_handle is not None:
+            try:
+                trace_entries = result.get("trace") or []
+                if isinstance(trace_entries, list):
+                    for entry in trace_entries:
+                        if not isinstance(entry, dict):
+                            continue
+                        if entry.get("type") != "metrics":
+                            continue
+                        stage = str(entry.get("stage") or "")
+                        details = {k: v for k, v in entry.items() if k not in ("type", "stage")}
+                        append_log(
+                            log_handle,
+                            stream="info",
+                            message=f"stage_metrics:{stage or 'unknown'}",
+                            stage=stage or None,
+                            details=details,
+                        )
+            except Exception:
+                # metrics 日志失败不影响主流程
+                pass
+
+        return result
+    except Exception as e:
+        if log_handle is not None:
+            try:
+                append_log(
+                    log_handle,
+                    stream="error",
+                    message="work_run_failed",
+                    details={"error": str(e)},
+                )
+                finalize_log(log_handle, status="error", error=str(e))
+            except Exception:
+                pass
+        raise
+    finally:
+        if log_handle is not None:
+            # 如果前面已经在异常分支 finalize 过，这里再次调用也只是多写一行 summary，不影响流程。
+            try:
+                status = "success"
+                error_text: Optional[str] = None
+                try:
+                    ok = bool(result.get("success", True))  # type: ignore[name-defined]
+                    if not ok:
+                        status = "error"
+                        error_text = str(result.get("error") or "")  # type: ignore[name-defined]
+                except Exception:
+                    # result 可能在异常分支未定义
+                    status = "error"
+                finalize_log(log_handle, status=status, error=error_text)
+            except Exception:
+                pass
 
 
 async def run_work_flow_resume(

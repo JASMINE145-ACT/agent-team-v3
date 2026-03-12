@@ -17,8 +17,8 @@
 ## 2. 固定流程（每文件重复）
 
 1. **识别表数据**：`work_quotation_extract(file_path)` → 得到 items。
-2. **查价格与库存（无货登记、缺货记录）**：`work_quotation_match(file_path, customer_level)` → to_fill、shortage、unmatched、fill_items_merged；`work_quotation_shortage_report(shortage_items)` 生成缺货报告；可选 `register_oos(file_path)` 无货登记。**选不出来就无货**：匹配不到的行、以及多候选需人工选型但用户未选或选择「按无货」的项，一律按无货处理（填表时 code 写「无货」）；resume 时对某 item 传 `selected_code: "__OOS__"` 或省略该 item 即按无货。
-3. **填表**：`work_quotation_fill(file_path, fill_items)`，fill_items 来自上一步的 fill_items_merged。
+2. **查价格与库存（无货登记、缺货记录）**：`work_quotation_match(file_path, customer_level)` → to_fill、shortage、unmatched、fill_items_merged，以及**规范行单点构建**产出的 `pending_quotation_draft`、`fill_items_for_excel`；`work_quotation_shortage_report(shortage_items)` 生成缺货报告；可选 `register_oos(file_path)` 无货登记。**选不出来就无货**：匹配不到的行、以及多候选需人工选型但用户未选或选择「按无货」的项，一律按无货处理（填表时 code 写「无货」）；resume 时对某 item 传 `selected_code: "__OOS__"` 或省略该 item 即按无货。
+3. **填表**：`work_quotation_fill(file_path, fill_items)`。fill_items 优先使用 match 产出的 `fill_items_for_excel`（由规范行导出，与草稿规格一致），若无则使用 `fill_items_merged`。
 
 对每个文件依次完成 1→2→3，再处理下一个文件。
 
@@ -45,8 +45,8 @@
 | 工具名 | 说明 |
 |--------|------|
 | work_quotation_extract | 从报价单提取询价行 |
-| work_quotation_match | 匹配+库存，返回 to_fill/shortage/unmatched/fill_items_merged |
-| work_quotation_fill | 用 fill_items_merged 回填 Excel |
+| work_quotation_match | 匹配+库存，返回 to_fill/shortage/unmatched/fill_items_merged、fill_items_for_excel、pending_quotation_draft |
+| work_quotation_fill | 用 fill_items（优先 fill_items_for_excel）回填 Excel |
 | work_quotation_shortage_report | 根据 shortage 生成缺货报告 |
 | register_oos | 无货登记 |
 

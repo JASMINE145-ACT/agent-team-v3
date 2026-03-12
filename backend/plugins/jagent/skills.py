@@ -12,6 +12,7 @@ SKILL_INVENTORY_PRICE = """\
 - **match_by_quotation_history(keywords)**：仅历史匹配（单独用较少，一般用 match_quotation）。
 - **match_wanding_price(keywords, customer_level?)**：仅字段匹配（万鼎）。用户明确说「**用万鼎查**」「**不要历史**」「**直接万鼎**」时**只调用本工具**，不调 match_quotation。
 - **select_wanding_match(keywords, candidates)**：LLM 选型。needs_selection 且用户要「选一个」时调用；传入 match_source（来自上一步 observation）。
+- **get_profit_by_price(code?, product_name?, price)**：报价员已知道「万鼎商品编号或完整产品名 + 实际成交价/报单价」时，用本工具在万鼎价格库中锁定对应行与最接近的价格档位，返回该档位的利润率以及所有档位的价格/利润率列表，便于比较。
 - **何时用**：用户已明确「库存/可售」或「价格/报价/万鼎/档位」时选用；只说「查XX」未指明 → 用 ask_clarification 澄清。
 - **查库存的调用顺序（重要）**：① 用户用**中文**说产品名且要查库存（如「50三通的库存」「DN40弯头还有多少」）→ **禁止**直接用 search_inventory（仅适配英文）。应先 **match_quotation(keywords)** 得到 code/候选，再用 **get_inventory_by_code(code)** 查库存；单条候选时直接用其 code，多候选时先选型或取首条。**match_wanding_price** 仅当用户明确要求「只用万鼎/仅字段匹配/不要历史」时使用。② 用户用**英文**产品名查库存 → 可用 search_inventory(keywords)。③ 用户已给出 10 位物料编号 → 直接用 get_inventory_by_code(code)。
 - **keywords 关键词保护（重要）**：中文管件/产品名称词——「直接（接头）」「直通」「弯头」「三通」「变径」「大小头」「堵头」「管帽」「活接」「由令」「套管」「法兰」「管卡」「管夹」等——**即使语法上看似副词或助词，也必须原样保留在 keywords 中，禁止去除**。例：「直接dn50」→ keywords=「直接dn50」（❌ 不得简化为「dn50」）；「三通 dn25 价格」→ keywords=「三通 dn25」；「弯头dn40库存」→ keywords=「弯头 dn40」。
@@ -50,9 +51,8 @@ SKILL_FILL = """\
 # Chat 仅保留普适 Excel，不包含报价单流水线；整单相关引导至 Work
 SKILL_EXCEL_CHAT = """\
 **3. Excel（普适，Chat）**
-- **parse_excel_smart(file_path, sheet_name?, max_rows?)**：解析任意 Excel，返回 Markdown 表。
-- **edit_excel(file_path, edits, ...)**：普适编辑 Excel（cell+value 或 range+values）。
-- **何时用**：用户要「解析这个 Excel」「改这个格子」且 context 有 file_path 时用。**整单询价填充、报价单提取/按表填表请到 Work 页操作。**"""
+- **parse_excel_smart(file_path, sheet_name?, max_rows?)**：解析任意 Excel，返回 Markdown 表（只读查看）。若用户要实际填表/批量修改，应引导到 Work 页或使用后端 API，而不是在 Chat 中用复杂编辑工具。
+- **何时用**：用户要「解析这个 Excel」「看一下这张表的内容」且 context 有 file_path 时用。**整单询价填充、报价单提取/按表填表请到 Work 页操作。**"""
 
 SKILL_CLARIFY = """\
 **5. 澄清**
@@ -85,10 +85,9 @@ ALL_SKILL_PROMPT = "\n\n".join([
     SKILL_KNOWLEDGE,
 ])
 
-# Chat 用：不含报价单专用提取/填表与整单询价填充，体现与 Work 的区分
+# Chat 用：不含报价单专用提取/填表与整单询价填充，也不包含无货 Skill，体现与 Work/Neon 的区分
 CHAT_SKILL_PROMPT = "\n\n".join([
     SKILL_INVENTORY_PRICE,
-    SKILL_OOS,
     SKILL_EXCEL_CHAT,
     SKILL_CLARIFY,
     SKILL_KNOWLEDGE,

@@ -11,9 +11,11 @@ logger = logging.getLogger(__name__)
 
 TEXT_TO_INQUIRY_SYSTEM = """你是一个报价单解析助手。用户会输入一段文字，描述需要报价的产品清单（可能多行、用分号/逗号/换行分隔，含产品名、规格、数量等）。
 请将文字解析为结构化的「询价行」列表，每条包含：
-- product_name: 产品名称（必填，字符串）
-- specification: 规格型号（可选，无则空字符串）
+- product_name: 产品名称（必填，仅品名部分，不含规格数字与单位）
+- specification: 规格型号（必填；从原文中解析出的规格，如 DN25、dn20、3*2.5、20/56、4M/根、Φ25、8" 等；无则空字符串）
 - qty: 数量（整数，无法识别时填 0）
+
+规则：规格信息尽量单独放入 specification，不要混在 product_name 里。例如「直接50 100个」→ product_name:"直接", specification:"50", qty:100；「PVC管 dn20 10支」→ product_name:"PVC管", specification:"dn20", qty:10。
 
 只输出一个 JSON 数组，不要其他说明。格式示例：
 [{"product_name":"电缆","specification":"3*2.5","qty":100},{"product_name":"开关","specification":"","qty":20}]
@@ -110,17 +112,43 @@ def text_to_inquiry_items(
     return out
 
 
+# 规则兜底：从片段中拆出规格（dn20、DN25、3*2.5、20/56、4M/根、Φ25 等）
+_SPEC_PATTERNS = [
+    (re.compile(r"(?:dn|DN)\s*\d+", re.I), lambda s: s.strip()),
+    (re.compile(r"\d+\s*/\s*\d+"), lambda s: s.strip()),
+    (re.compile(r"\d+\s*\*\s*\d+(?:\.\d+)?"), lambda s: s.strip()),
+    (re.compile(r"\d+\s*[mM]\s*/\s*根"), lambda s: s.strip()),
+    (re.compile(r"Φ\s*\d+"), lambda s: s.strip()),
+    (re.compile(r'\d+\s*["\']?\s*(?:寸|英寸|")?', re.I), lambda s: s.strip()),
+    (re.compile(r"\d+\s*[xX×]\s*\d+"), lambda s: s.strip()),
+]
+
+
+def _split_name_spec_rule(name_spec: str) -> tuple[str, str]:
+    """从「名称+规格」片段中拆出规格，返回 (product_name, specification)。"""
+    name_spec = (name_spec or "").strip()
+    if not name_spec:
+        return "", ""
+    spec = ""
+    rest = name_spec
+    for pat, norm in _SPEC_PATTERNS:
+        m = pat.search(rest)
+        if m:
+            spec = norm(m.group(0))
+            rest = (rest[: m.start()] + " " + rest[m.end() :]).strip()
+    rest = re.sub(r"\s+", " ", rest).strip().rstrip("，, ")
+    return rest or "", spec
+
+
 def _text_to_inquiry_fallback(text: str) -> List[dict[str, Any]]:
-    """规则解析：按行/分号/逗号拆分，尝试从每段提取数量，其余作为名称/规格。"""
+    """规则解析：按行/分号/逗号拆分，尝试从每段提取数量，其余拆名称/规格。"""
     out: List[dict[str, Any]] = []
-    # 统一换行与分号为分隔符，再按逗号拆（保留逗号在段内，仅对明显多段拆分）
     raw = (text or "").replace("；", ";").replace("\r\n", "\n").strip()
     segments = re.split(r"[\n;]+", raw)
     for seg in segments:
         seg = seg.strip()
         if not seg:
             continue
-        # 尝试匹配末尾数量：数字+可选单位（个、米、根、支、箱等）
         m = re.search(r"(\d+)\s*(?:个|米|根|支|箱|件|套|台|只)?\s*$", seg)
         qty = 0
         name_spec = seg
@@ -129,6 +157,8 @@ def _text_to_inquiry_fallback(text: str) -> List[dict[str, Any]]:
             name_spec = seg[: m.start()].strip().rstrip("，, ")
         if not name_spec:
             continue
-        # 名称与规格：若含明显规格（如 3*2.5、dn25、20/56），可拆；这里简化为整段作 product_name，规格空
-        out.append({"product_name": name_spec, "specification": "", "qty": qty})
+        product_name, specification = _split_name_spec_rule(name_spec)
+        if not product_name and specification:
+            product_name = name_spec
+        out.append({"product_name": product_name or name_spec, "specification": specification, "qty": qty})
     return out

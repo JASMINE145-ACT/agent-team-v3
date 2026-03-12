@@ -22,19 +22,49 @@ PRICE_COLS = {
     "FACTORY_INC_TAX": 4,
     "FACTORY_EXC_TAX": 5,
     "PURCHASE_EXC_TAX": 6,
-    "A_MARGIN": 8, "A_QUOTE": 8,
-    "B_MARGIN": 10, "B_QUOTE": 10,
-    "C_MARGIN": 12, "C_QUOTE": 12,
-    "D_MARGIN": 14, "D_QUOTE": 14,
+    # 下列索引基于「万鼎价格库_管材与国标管件_标准格式.xlsx」表头：
+    # 7/8: A 档 利润率/报单价格；9/10: B 档；11/12: C 档；13/14: D 档；15/16: D 低利润率；17/18: E 档。
+    "A_MARGIN": 8,
+    "A_QUOTE": 8,
+    "B_MARGIN": 10,
+    "B_QUOTE": 10,
+    "C_MARGIN": 12,
+    "C_QUOTE": 12,
+    "D_MARGIN": 14,
+    "D_QUOTE": 14,
     "D_LOW": 16,
-    "E_MARGIN": 18, "E_QUOTE": 18,
+    "E_MARGIN": 18,
+    "E_QUOTE": 18,
     # 兼容旧代码
-    "A": 8, "A_TURN": 8, "A_ANNUAL": 8,
-    "B": 10, "B_TURN": 10, "B_ANNUAL": 10, "B_QUOTE": 10,
-    "C": 12, "C_TURN": 12, "C_QUOTE": 12,
-    "D": 14, "D_NOADJ": 14,
+    "A": 8,
+    "A_TURN": 8,
+    "A_ANNUAL": 8,
+    "B": 10,
+    "B_TURN": 10,
+    "B_ANNUAL": 10,
+    "B_QUOTE": 10,
+    "C": 12,
+    "C_TURN": 12,
+    "C_QUOTE": 12,
+    "D": 14,
+    "D_NOADJ": 14,
     "D_WHOLESALE": 16,
     "E": 18,
+}
+
+# 对应每个档位价格列的「利润率」列索引（0-based）。
+PROFIT_COLS: dict[str, int] = {
+    "A_MARGIN": 7,
+    "A_QUOTE": 7,
+    "B_MARGIN": 9,
+    "B_QUOTE": 9,
+    "C_MARGIN": 11,
+    "C_QUOTE": 11,
+    "D_MARGIN": 13,
+    "D_QUOTE": 13,
+    "D_LOW": 15,
+    "E_MARGIN": 17,
+    "E_QUOTE": 17,
 }
 
 
@@ -300,6 +330,17 @@ def _expand_keyword_with_synonyms(keyword: str) -> List[str]:
     return list(queries)
 
 
+def _safe_to_float(val: Any) -> Optional[float]:
+    """将单元格值安全转为 float；非法或空值返回 None。"""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return None
+    return f
+
+
 def search_fuzzy(
     df: pd.DataFrame,
     keyword: str,
@@ -476,6 +517,116 @@ def _get_cached_df(path, customer_level: str) -> pd.DataFrame:
         if cache_key not in _df_cache:
             _df_cache[cache_key] = load_wanding_df(path, customer_level=level)
     return _df_cache[cache_key]
+
+
+# --------- 利润率查询（按 code / 完整名称 + 价格）---------
+
+_full_df_cache: Optional[pd.DataFrame] = None
+_full_df_lock = threading.Lock()
+
+
+def _load_full_price_df(path: str | Path) -> pd.DataFrame:
+    """加载完整万鼎价格库 DataFrame（包含所有价格与利润率列），供利润率查询使用。"""
+    global _full_df_cache
+    if _full_df_cache is not None:
+        return _full_df_cache
+    with _full_df_lock:
+        if _full_df_cache is not None:
+            return _full_df_cache
+        p = Path(path)
+        if not p.is_absolute():
+            root = Path(__file__).resolve().parent.parent.parent
+            p = root / p
+        if not p.exists():
+            logger.warning("万鼎价格库不存在: %s", p)
+            _full_df_cache = pd.DataFrame()
+            return _full_df_cache
+        try:
+            # 同时加载「管材」与「国标管件」两个 sheet 并合并
+            sheets = pd.read_excel(p, sheet_name=None)
+            frames: list[pd.DataFrame] = []
+            for name, df in sheets.items():
+                if name in ("管材", "国标管件") or not frames:
+                    frames.append(df)
+            df_all = pd.concat(frames, ignore_index=True)
+            _full_df_cache = df_all
+            return _full_df_cache
+        except Exception as e:
+            logger.warning("加载完整万鼎价格库失败: %s", e)
+            _full_df_cache = pd.DataFrame()
+            return _full_df_cache
+
+
+def _compute_profit_for_price(row: pd.Series, price: float) -> dict[str, Any]:
+    """给定一行价格库记录与用户价，计算最接近档位及其利润率，并返回所有档位价格+利润率。"""
+    all_levels: list[dict[str, Any]] = []
+    for level in ("A_QUOTE", "B_QUOTE", "C_QUOTE", "D_QUOTE", "D_LOW", "E_QUOTE"):
+        price_col = PRICE_COLS.get(level)
+        profit_col = PROFIT_COLS.get(level)
+        if price_col is None:
+            continue
+        price_val = None
+        if len(row) > price_col:
+            price_val = _safe_to_float(row.iloc[price_col])
+        if price_val is None or price_val == 0:
+            continue
+        profit_val = None
+        if profit_col is not None and len(row) > profit_col:
+            profit_val = _safe_to_float(row.iloc[profit_col])
+        all_levels.append(
+            {
+                "level": level,
+                "price": price_val,
+                "profit": profit_val,
+                "level_display": PRICE_LEVEL_DISPLAY_NAMES.get(level, level),
+            }
+        )
+    matched_level = None
+    matched_price = None
+    matched_profit = None
+    if all_levels:
+        target = float(price)
+        # 先找精确匹配，再按差值排序
+        exact = [entry for entry in all_levels if abs(entry["price"] - target) < 1e-6]
+        candidates = exact or all_levels
+        best = min(candidates, key=lambda e: abs(e["price"] - target))
+        matched_level = best["level"]
+        matched_price = best["price"]
+        matched_profit = best["profit"]
+    return {
+        "code": str(row.get("Material") or row.get("code") or "").strip(),
+        "name": str(row.get("Describrition") or row.get("Description") or "").strip(),
+        "matched_price_level": matched_level,
+        "matched_price": matched_price,
+        "matched_profit": matched_profit,
+        "all_levels": all_levels,
+    }
+
+
+def get_profit_rows_by_code(code: str, price: float, path: str | Path) -> list[dict[str, Any]]:
+    """按 Material code 精确过滤价格库，并为每行计算与给定价格对应的利润率。"""
+    df = _load_full_price_df(path)
+    if df.empty:
+        return []
+    code_str = str(code).strip()
+    if "Material" in df.columns:
+        mask = df["Material"].astype(str).str.strip() == code_str
+        rows = df[mask]
+    else:
+        rows = pd.DataFrame()
+    return [_compute_profit_for_price(row, price) for _, row in rows.iterrows()]
+
+
+def get_profit_rows_by_name(name: str, price: float, path: str | Path) -> list[dict[str, Any]]:
+    """按完整中文名称过滤价格库，并为每行计算与给定价格对应的利润率。"""
+    df = _load_full_price_df(path)
+    if df.empty:
+        return []
+    name_norm = _normalize(name)
+    col = "Describrition" if "Describrition" in df.columns else "Description"
+    series = df[col].astype(str).apply(_normalize)
+    rows = df[series == name_norm]
+    return [_compute_profit_for_price(row, price) for _, row in rows.iterrows()]
 
 
 def match_fuzzy(

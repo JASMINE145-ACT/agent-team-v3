@@ -783,21 +783,46 @@ export async function generateWorkFileFromText(state: WorkState): Promise<boolea
       return false;
     }
     const payload = (json && typeof json.data === "object" ? json.data : json) as Record<string, unknown>;
-    const filePath = typeof payload.file_path === "string" ? payload.file_path : "";
-    const fileName = typeof payload.file_name === "string" ? payload.file_name : "文字报价.xlsx";
-    if (!filePath) {
-      state.workTextError = "接口未返回 file_path";
+    const filePaths: string[] = [];
+    const fileNamesByPath: Record<string, string> = {};
+
+    if (Array.isArray(payload.file_paths)) {
+      const names = Array.isArray(payload.file_names) ? payload.file_names : [];
+      payload.file_paths.forEach((p, idx) => {
+        if (typeof p !== "string" || !p.trim()) return;
+        const path = p.trim();
+        filePaths.push(path);
+        const n = typeof names[idx] === "string" ? (names[idx] as string) : "";
+        fileNamesByPath[path] = n || path.split(/[/\\]/).pop() || path;
+      });
+    }
+
+    if (typeof payload.file_path === "string" && payload.file_path.trim()) {
+      const path = payload.file_path.trim();
+      if (!filePaths.includes(path)) {
+        filePaths.push(path);
+      }
+      const n = typeof payload.file_name === "string" ? payload.file_name : "";
+      fileNamesByPath[path] = n || path.split(/[/\\]/).pop() || path;
+    }
+
+    if (!filePaths.length) {
+      state.workTextError = "接口未返回 file_path/file_paths";
       return false;
     }
-    if (!state.workFilePaths.includes(filePath)) {
-      state.workFilePaths = [...state.workFilePaths, filePath];
-    }
-    const key = normalizePathKey(filePath);
-    if (key) {
-      state.workOriginalFileNamesByPath = {
-        ...state.workOriginalFileNamesByPath,
-        [key]: (fileName || "").trim() || filePath.split(/[/\\]/).pop() || filePath,
-      };
+
+    for (const path of filePaths) {
+      if (!state.workFilePaths.includes(path)) {
+        state.workFilePaths = [...state.workFilePaths, path];
+      }
+      const key = normalizePathKey(path);
+      if (key) {
+        const displayName = (fileNamesByPath[path] || "").trim() || path.split(/[/\\]/).pop() || path;
+        state.workOriginalFileNamesByPath = {
+          ...state.workOriginalFileNamesByPath,
+          [key]: displayName,
+        };
+      }
     }
     state.workTextError = null;
     return true;

@@ -10,6 +10,7 @@ from backend.server.api.routes_oos import router as router_oos
 from backend.server.api.routes_procurement import router as router_procurement
 from backend.server.api.routes_quotation import router as router_quotation
 from backend.server.api.routes_work import router as router_work
+from backend.server.api.routes_activity import router as router_activity
 
 router = APIRouter()
 router.include_router(router_health, tags=["health"])
@@ -19,3 +20,4 @@ router.include_router(router_oos, tags=["oos"])
 router.include_router(router_procurement, tags=["procurement"])
 router.include_router(router_quotation, tags=["quotation"])
 router.include_router(router_work, tags=["work"])
+router.include_router(router_activity, tags=["activity"])

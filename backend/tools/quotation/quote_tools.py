@@ -52,6 +52,19 @@ def _copy_cell_style(source_cell, dest_cell) -> None:
     except (TypeError, AttributeError):
         logger.debug("复制单元格样式时部分属性失败", exc_info=True)
 
+
+def _normalize_sheet_view(ws) -> None:
+    """
+    Normalize worksheet view for exported files.
+    Some templates are saved in page-break preview mode, which users perceive
+    as dashed lines and large tinted areas in Excel/WPS.
+    """
+    try:
+        if getattr(ws, "sheet_view", None) is not None:
+            ws.sheet_view.view = "normal"
+    except Exception:
+        logger.debug("normalize sheet view failed", exc_info=True)
+
 # 边界行标识（用户指定：报价数据列到该行为止）
 TOTAL_ROW_MARKER = "Total Excluding PPN不含税总价"
 
@@ -66,6 +79,75 @@ def _cell_value(cell) -> str:
     if v is None:
         return ""
     return str(v).strip()
+
+
+def _to_int_or_none(value: Any) -> int | None:
+    """Best-effort int conversion; return None on invalid input."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    s = str(value).strip().replace(",", "")
+    if not s:
+        return None
+    try:
+        return int(float(s))
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_float_or_none(value: Any) -> float | None:
+    """Best-effort float conversion; return None on invalid input."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return float(int(value))
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip().replace(",", "")
+    if not s:
+        return None
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def _set_cell_value_merged_safe(ws, row: int, col: int, value: Any) -> None:
+    """
+    在处理合并单元格时安全地写入值：
+    - 若目标单元格为普通单元格，直接写入；
+    - 若为合并区域中的「非左上角」MergedCell，则改为写入该合并区域的左上角单元格，
+      避免 openpyxl 抛出 "'MergedCell' object attribute 'value' is read-only"。
+    """
+    try:
+        from openpyxl.cell.cell import MergedCell  # type: ignore
+    except Exception:  # pragma: no cover - 仅防御性兜底
+        ws.cell(row=row, column=col, value=value)
+        return
+
+    cell = ws.cell(row=row, column=col)
+    if not isinstance(cell, MergedCell):
+        cell.value = value
+        return
+
+    # 定位包含该 MergedCell 的合并区域，并将值写入左上角单元格
+    try:
+        for merged_range in getattr(ws, "merged_cells", []).ranges:  # type: ignore[attr-defined]
+            if (merged_range.min_row <= row <= merged_range.max_row) and (
+                merged_range.min_col <= col <= merged_range.max_col
+            ):
+                master = ws.cell(row=merged_range.min_row, column=merged_range.min_col)
+                master.value = value
+                return
+    except Exception:
+        # 回退到直接写入目标单元格，若再次触发异常则交由调用方处理
+        pass
+    cell.value = value
 
 
 def extract_quotation_data(file_path: str, sheet_name: str | None = None) -> dict[str, Any]:
@@ -461,16 +543,18 @@ def fill_template_with_inquiry_items(
     items: List[dict[str, Any]],
     output_path: str,
     sheet_name: str = "询价单",
+    allow_insert_rows: bool = False,
 ) -> dict[str, Any]:
     """
     用「询价行」列表填写案例报价单模板，生成可被 extract_inquiry_items / Work 流程处理的 Excel。
 
     - 复制模板到 output_path，不修改原模板。
     - 从第 3 行起写入：A=序号(1-based)，B=product_name，C=specification，E=qty。
-    - 若 items 数量超过模板现有数据行，在「Total Excluding PPN」行之前插入空行再写。
+    - 默认不插行（allow_insert_rows=False），只在模板可用行内写入，确保文档样式稳定。
+    - 如需扩展行数可启用 allow_insert_rows=True（复杂模板可能导致样式/结构异常）。
 
     Returns:
-        {"success": bool, "output_path": str, "filled_count": int, "error": str | None}
+        {"success": bool, "output_path": str, "filled_count": int, "error": str | None, "capacity": int, "truncated_count": int}
     """
     import shutil
     try:
@@ -494,7 +578,14 @@ def fill_template_with_inquiry_items(
 
     items = [x for x in items if isinstance(x, dict) and (x.get("product_name") or x.get("name"))]
     if not items:
-        return {"success": True, "output_path": str(out_p), "filled_count": 0, "error": None}
+        return {
+            "success": True,
+            "output_path": str(out_p),
+            "filled_count": 0,
+            "error": None,
+            "capacity": 0,
+            "truncated_count": 0,
+        }
 
     try:
         wb = openpyxl.load_workbook(out_p)
@@ -515,32 +606,94 @@ def fill_template_with_inquiry_items(
             total_row_1based = ws.max_row + 1
         data_start = INQUIRY_DATA_START_ROW
         available = max(0, total_row_1based - data_start)
-        insert_count = max(0, len(items) - available)
-        if insert_count > 0:
-            ws.insert_rows(total_row_1based, insert_count)
-            # 新插入行从上一行复制样式，避免出现默认虚线/绿底
-            style_row = total_row_1based - 1
-            for new_row in range(total_row_1based, total_row_1based + insert_count):
-                for col in range(1, min(ws.max_column + 1, 20)):
-                    _copy_cell_style(ws.cell(row=style_row, column=col), ws.cell(row=new_row, column=col))
+        truncated_count = 0
+        if len(items) > available:
+            if allow_insert_rows:
+                insert_count = len(items) - available
+                ws.insert_rows(total_row_1based, insert_count)
+                # 新插入行从上一行复制样式，避免出现默认虚线/绿底
+                style_row = total_row_1based - 1
+                for new_row in range(total_row_1based, total_row_1based + insert_count):
+                    for col in range(1, min(ws.max_column + 1, 20)):
+                        _copy_cell_style(ws.cell(row=style_row, column=col), ws.cell(row=new_row, column=col))
+            else:
+                truncated_count = len(items) - available
+                items = items[:available]
         filled = 0
         for i, it in enumerate(items):
             row_num = data_start + i
             name = (it.get("product_name") or it.get("name") or "").strip()
             spec = (it.get("specification") or it.get("spec") or "").strip()
-            try:
-                qty = int(it.get("qty", 0) or 0)
-            except (TypeError, ValueError):
+            qty = _to_int_or_none(it.get("qty", 0))
+            if qty is None:
                 qty = 0
             ws.cell(row=row_num, column=INQUIRY_COL_SEQ, value=i + 1)
             ws.cell(row=row_num, column=INQUIRY_COL_NAME, value=name)
             ws.cell(row=row_num, column=INQUIRY_COL_SPEC, value=spec)
             ws.cell(row=row_num, column=INQUIRY_COL_QTY, value=max(0, qty))
             filled += 1
+        _normalize_sheet_view(ws)
         wb.save(out_p)
-        return {"success": True, "output_path": str(out_p), "filled_count": filled, "error": None}
+        return {
+            "success": True,
+            "output_path": str(out_p),
+            "filled_count": filled,
+            "error": None,
+            "capacity": available,
+            "truncated_count": truncated_count,
+        }
     except Exception as e:
-        return {"success": False, "output_path": "", "filled_count": 0, "error": str(e)}
+        return {
+            "success": False,
+            "output_path": "",
+            "filled_count": 0,
+            "error": str(e),
+            "capacity": 0,
+            "truncated_count": 0,
+        }
+
+
+def get_template_inquiry_capacity(
+    template_path: str,
+    sheet_name: str = "询价单",
+) -> dict[str, Any]:
+    """
+    读取询价模板在不插行模式下的可填写容量（可写行数）。
+    capacity = Total 行号 - INQUIRY_DATA_START_ROW
+    """
+    try:
+        import openpyxl
+    except ImportError:
+        return {"success": False, "capacity": 0, "error": "请安装 openpyxl"}
+
+    path = Path(template_path)
+    if not path.is_absolute():
+        path = Path(os.getcwd()) / path
+    if not path.exists():
+        return {"success": False, "capacity": 0, "error": f"模板不存在: {path}"}
+
+    try:
+        wb = openpyxl.load_workbook(path)
+        if sheet_name and sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+        else:
+            ws = wb.active or wb[wb.sheetnames[0]]
+        total_row_1based = None
+        for row in ws.iter_rows():
+            row_idx = row[0].row if row else 0
+            for cell in row:
+                if TOTAL_ROW_MARKER in _cell_value(cell):
+                    total_row_1based = row_idx
+                    break
+            if total_row_1based is not None:
+                break
+        if total_row_1based is None:
+            total_row_1based = ws.max_row + 1
+        capacity = max(0, total_row_1based - INQUIRY_DATA_START_ROW)
+        wb.close()
+        return {"success": True, "capacity": capacity, "error": None}
+    except Exception as e:
+        return {"success": False, "capacity": 0, "error": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -839,7 +992,6 @@ COL_TOTAL = 15       # O 总价
 # 4 个价格计算行（在 Total Excluding PPN 所在行及其后 3 行），金额写入列与 COL_TOTAL 一致
 TOTALS_VALUE_COL = COL_TOTAL  # O 列
 
-
 def fill_quotation(
     file_path: str,
     fill_items: list[dict[str, Any]],
@@ -853,6 +1005,10 @@ def fill_quotation(
     将匹配到的产品信息回填到报价单 Excel。
     每行保证填写的列：G=产品编号, H=报价名称, J=报价产品规格(无 specification 时用 quote_name), L=数量, N=单价, O=总价；
     未匹配项写「无货」；写完后更新底部 4 个价格计算行；并按表头填写「交货日期」「报价日期」。
+
+    推荐入参：fill_items 来自「规范行」导出的 fill_items（见 canonical_lines.fill_items_from_canonical_lines），
+    以保证 Excel 列 J（报价产品规）与草稿一致。fill_items 每项需含 row, code, quote_name, unit_price, qty, specification；
+    写入列 J 时使用传入的 specification（即应由调用方传入规范行中的 quote_spec 或 specification）。
 
     Args:
         file_path: 原始报价单路径
@@ -904,67 +1060,80 @@ def fill_quotation(
         delivery_col = _find_delivery_date_column(ws)
         quotation_date_cell = _find_quotation_date_cell(ws, total_row_1based or 0) if total_row_1based else None
 
-        # 数据区写入列（用于填表后统一从模板行复制样式，避免出现虚线边框或绿色底纹）
-        data_cols = [COL_PRODUCT_NO, COL_QUOTE_NAME, COL_QUOTE_SPEC, COL_QTY_OUT, COL_UNIT_PRICE, COL_TOTAL]
-        if delivery_col and delivery_col not in data_cols:
-            data_cols.append(delivery_col)
-        style_source_row = min((it.get("row") for it in fill_items if it.get("row")), default=None)
+        # Safe document-fill mode:
+        # - only write values into target cells
+        # - keep existing workbook styles as-is to avoid accidental style corruption
+        #   (dashed borders, unexpected fills, etc.)
+        freight_value = _to_float_or_none(freight)
+        if freight_value is None:
+            freight_value = 0.0
 
         filled = 0
         total_excluding_ppn = 0.0
         for it in fill_items:
-            row_num = it.get("row")
-            if not row_num:
+            row_num = _to_int_or_none(it.get("row"))
+            if row_num is None or row_num <= 0:
                 continue
             code = it.get("code")
             if code:
-                ws.cell(row=row_num, column=COL_PRODUCT_NO, value=str(code))
+                _set_cell_value_merged_safe(ws, row=row_num, col=COL_PRODUCT_NO, value=str(code))
                 filled += 1
             if it.get("quote_name"):
-                ws.cell(row=row_num, column=COL_QUOTE_NAME, value=str(it["quote_name"]))
-            if it.get("unit_price") is not None:
-                ws.cell(row=row_num, column=COL_UNIT_PRICE, value=float(it["unit_price"]))
-            if it.get("qty") is not None:
-                ws.cell(row=row_num, column=COL_QTY_OUT, value=int(it["qty"]))
+                _set_cell_value_merged_safe(ws, row=row_num, col=COL_QUOTE_NAME, value=str(it["quote_name"]))
+            up = _to_float_or_none(it.get("unit_price"))
+            q = _to_int_or_none(it.get("qty"))
+            if up is not None:
+                _set_cell_value_merged_safe(ws, row=row_num, col=COL_UNIT_PRICE, value=up)
+            if q is not None:
+                _set_cell_value_merged_safe(ws, row=row_num, col=COL_QTY_OUT, value=q)
             # 报价产品规格：有 specification 用 specification，否则用 quote_name，保证该列有内容（避免留空）
             spec_val = (it.get("specification") or it.get("quote_name") or "").strip()
-            ws.cell(row=row_num, column=COL_QUOTE_SPEC, value=spec_val if spec_val else None)
-            up = it.get("unit_price")
-            q = it.get("qty")
+            _set_cell_value_merged_safe(
+                ws,
+                row=row_num,
+                col=COL_QUOTE_SPEC,
+                value=spec_val if spec_val else None,
+            )
             if up is not None and q is not None and code and str(code) != "无货":
-                row_total = float(up) * int(q)
-                ws.cell(row=row_num, column=COL_TOTAL, value=round(row_total, 2))
+                row_total = up * q
+                _set_cell_value_merged_safe(ws, row=row_num, col=COL_TOTAL, value=round(row_total, 2))
                 total_excluding_ppn += row_total
             elif up is not None and q is not None and (not code or str(code) == "无货"):
-                ws.cell(row=row_num, column=COL_TOTAL, value=0)
+                _set_cell_value_merged_safe(ws, row=row_num, col=COL_TOTAL, value=0)
             if delivery_col:
-                ws.cell(row=row_num, column=delivery_col, value=ddate_str)
-            # 每行写完后从模板行复制样式，保证边框/底纹与模板一致（实线、白底）
-            if style_source_row is not None:
-                for col in data_cols:
-                    _copy_cell_style(
-                        ws.cell(row=style_source_row, column=col),
-                        ws.cell(row=row_num, column=col),
-                    )
+                _set_cell_value_merged_safe(ws, row=row_num, col=delivery_col, value=ddate_str)
 
         ppn = round(total_excluding_ppn * 0.11, 2)
-        total_including = round(total_excluding_ppn + ppn + float(freight), 2)
+        total_including = round(total_excluding_ppn + ppn + freight_value, 2)
         if total_row_1based is not None:
-            ws.cell(row=total_row_1based, column=TOTALS_VALUE_COL, value=round(total_excluding_ppn, 2))
-            ws.cell(row=total_row_1based + 1, column=TOTALS_VALUE_COL, value=ppn)
-            ws.cell(row=total_row_1based + 2, column=TOTALS_VALUE_COL, value=float(freight))
-            ws.cell(row=total_row_1based + 3, column=TOTALS_VALUE_COL, value=total_including)
-            # 合计区 4 行样式与第一行合计行一致
-            for i in range(4):
-                _copy_cell_style(
-                    ws.cell(row=total_row_1based, column=TOTALS_VALUE_COL),
-                    ws.cell(row=total_row_1based + i, column=TOTALS_VALUE_COL),
-                )
+            _set_cell_value_merged_safe(
+                ws,
+                row=total_row_1based,
+                col=TOTALS_VALUE_COL,
+                value=round(total_excluding_ppn, 2),
+            )
+            _set_cell_value_merged_safe(
+                ws,
+                row=total_row_1based + 1,
+                col=TOTALS_VALUE_COL,
+                value=ppn,
+            )
+            _set_cell_value_merged_safe(
+                ws,
+                row=total_row_1based + 2,
+                col=TOTALS_VALUE_COL,
+                value=freight_value,
+            )
+            _set_cell_value_merged_safe(
+                ws,
+                row=total_row_1based + 3,
+                col=TOTALS_VALUE_COL,
+                value=total_including,
+            )
         if quotation_date_cell:
             qr, qc = quotation_date_cell
-            ws.cell(row=qr, column=qc, value=qdate_str)
-            if qc > 1:
-                _copy_cell_style(ws.cell(row=qr, column=qc - 1), ws.cell(row=qr, column=qc))
+            _set_cell_value_merged_safe(ws, row=qr, col=qc, value=qdate_str)
+        _normalize_sheet_view(ws)
         wb.save(out_p)
         return {"success": True, "output_path": str(out_p), "filled_count": filled, "error": None}
     except Exception as e:

@@ -142,6 +142,46 @@ Agent Team version3/
     - `client.py`：当前实现 `DummyWeComBotClient`，通过命令行 stdin 模拟 WeCom 文本消息，`run_wecom_bot(agent)` 负责加载配置并启动 Dummy 客户端；未来接入企业微信长连接 SDK 时，只需在此处用真实 WeComBotClient 替换 Dummy 即可。
   - 启动入口：`start_wecom_bot.py`，与 HTTP 后端保持同一套 `Config` 与 `CoreAgent` 初始化逻辑，启动后会提示「当前为 Dummy 模式，使用命令行模拟 WeCom 消息」，支持在本地直接输入文本观察 `session_id="wecom:debug-user"` 下的对话行为。Render 等平台上可将该脚本作为单独 worker 进程运行，后续接上真实长连接实现即可对接企业微信 Bot。
 
-### 前端 Work 页测试补充
+### 前端 Work 页测试与下载按钮补充
 
 - 在 `control-ui/src/ui/work.test.ts` 中新增 Vitest 浏览器测试，用于回归验证 Work 页结果区的 Excel 下载按钮行为：当 `workResult.trace` 中包含 Excel 输出路径时，会渲染 `/api/quotation/download?path=...` 的下载按钮；当 trace 中不存在输出路径时，不应渲染该按钮，避免误导用户。
+- 为兼容不同后端 trace 结构与字段命名，`control-ui/src/ui/views/work.ts` 中的 `getOutputFileBasenamesFromTrace` 现除了优先解析 JSON 内的 `output_path`/`filled_path` 字段外，还会在 observation 文本中用正则兜底扫描任意 `*.xlsx` 子串，从而在后端仅返回原始字符串路径时也能识别出可下载的 Excel 文件名并展示按钮。
+
+### Paperclip 工程模式借鉴文档
+
+- 在 `doc/AgentTeamV3_借鉴Paperclip思路.md` 中整理了从本仓库 Paperclip 子项目可迁移到 Agent Team version3 的工程模式与演进建议，涵盖：统一 Adapter/Agent registry 与配置版本治理、Run Log + Activity Log 观测体系、WebSocket 控制面实时事件与前端状态同步、配置/部署模式工程化以及 CLI context/profile 与运维工具等，供后续大规模重构或多 Agent 化时参考。 
+
+### Run Log + Activity Log 改造补充
+
+- 新增 `backend/server/run_log_store.py` 与 `Config.RUN_LOG_BASE_DIR`，以 NDJSON 形式将 Work 流等长流程的运行日志按 run_id 落到 `data/run-logs/work/`，`run_work_flow` 会在开始/结束时记录 meta 与 summary，并根据 trace 中的 `type=metrics` 事件追加阶段摘要；`/api/work/run` 与 `/api/work/run-stream` 现会生成 `work_run_id` 并传入执行器，同时通过 `GET /api/work/run-logs/{run_id}` 暴露只读查询接口，支持 offset/limit 简单分页。
+- 在 `backend/tools/oos/services/data_service.py` 中引入 `ActivityLogDB` 表与 `DataService.log_activity/list_activity`，并在 `backend/server/services/activity_log.py` 封装为简洁的 `log_activity/list_activity` 服务；关键业务路由（`routes_work.py`、`routes_quotation.py`、`routes_oos.py`）在 Work 运行、报价草稿保存、无货/缺货手动新增等节点调用 `log_activity` 写入活动流水。
+- 新增 `backend/server/api/routes_activity.py` 并在 `routes.py` 聚合为 `GET /api/activity` 接口，按时间倒序返回最近的 Activity Log（可按 kind 过滤），为后续 Control UI 加“最近活动”视图或接入 WebSocket 实时事件打基础。
+
+### 报价 Excel 填充样式测试补充
+
+- 在 `tests/test_quotation_pipeline.py` 的 `test_fill_quotation_writes_dates_and_spec_fallback` 中增加了 1 条轻量断言：在 `fill_quotation` 运行后，数据行的某个非 G/H/J/L/N/O 列（当前选 E 列）的 `border` 与 `fill` 与模板行保持一致，用于回归保护「整行样式复制」行为（避免未来只复制少数数据列导致样式退化），不依赖具体颜色或边框配置。
+
+### 报价 Excel 合并单元格安全写入补充
+
+- 为避免在含合并单元格的模板上回填时报出 `'MergedCell' object attribute 'value' is read-only`，在 `backend/tools/quotation/quote_tools.py` 中新增 `_set_cell_value_merged_safe` 工具函数：若目标单元格为合并区域中的非左上角 `MergedCell`，则自动改为向该合并区域左上角单元格写入值。
+- `fill_quotation` 里所有写值的位置（产品编号、报价名称、规格、数量、单价、总价、交货日期、下方合计 4 行金额以及报价日期）均改用该安全写入函数，保证在「文字 → Excel 模板 → Work 填表」链路中即便模板存在合并单元格也不会因只写到合并区域内部单元格而抛错。
+
+### 报价产出格式与规格解析（对齐第二张图、无图片、规格解析）
+
+- **产出格式**：待确认报价草稿表格已按「第二张图」样式对齐：列顺序为 序、询价货物名称、询价规格型号、数量、产品编号、报价名称、**报价产品规**、单价、总价、可用、缺口、缺货；**不含图片列**。表头文案在 i18n 中为 `work.lineProduct`（询价货物名称）、`work.lineSpec`（询价规格型号）、`work.lineQuoteSpec`（报价产品规）等。
+- **规格解析**：  
+  - **文字→询价行**：`backend/tools/quotation/text_to_inquiry.py` 优先用 **LLM** 解析 product_name / specification / qty，prompt 已加强「规格尽量单独放入 specification」；**规则兜底** `_text_to_inquiry_fallback` 会按行/分号拆分，并从每段用正则拆出规格（dn/DN、20/56、3*2.5、4M/根、Φ25 等）到 `specification`，避免整段堆在 product_name。  
+  - **报价名称→报价产品规**：Match 后若仅有长 `quote_name` 而无 specification，会用 `backend/tools/quotation/spec_extract.py` 的 `extract_spec_from_quote_name`（规则：DN、英寸、4M/根、Φ 等）抽出「报价产品规」写入 draft 行的 `quote_spec`，供前端单独列展示；可选 `extract_spec_from_quote_name_llm` 可在需要时用 LLM 再提稳定性。
+- **是否用 LLM 提升解析稳定性**：  
+  - **文字解析**：当前已用 LLM 为主、规则兜底，建议**保留并优先 LLM**；若遇多语言/表述差异大，可再加强 prompt 或对少数语种单独示例。  
+  - **报价产品规**：默认规则抽取即可；若发现长报价名称中规格形式多样、规则漏提多，可**在关键路径开启** `extract_spec_from_quote_name_llm`（或配置开关），用一次短 LLM 调用从 quote_name 抽规格，失败时退回规则结果。
+- **数据库**：`QuotationDraftLineDB` 新增 `quote_spec` 列（VARCHAR(500)）。**已有库需手动迁移**：  
+  `ALTER TABLE quotation_draft_lines ADD COLUMN quote_spec VARCHAR(500);`  
+  新建库由 SQLAlchemy 建表时自动包含该列。
+- **规格双列一次 LLM 批量提取**：当 `Config.QUOTATION_SPEC_LLM=true`（默认）时，在构造待确认报价草稿的两处（merge 分支与 work_quotation_match 成功且非 needs_human_choice 分支）会调用 `extract_specs_batch_llm(lines)`，一次请求为整表产出 `requested_spec` 与 `quoted_spec`，并仅用非空结果写回 `specification`/`quote_spec`；规则仍作未启用或失败时的兜底。行数超过 50 时跳过 LLM。关闭方式：环境变量 `QUOTATION_SPEC_LLM=false`。
+
+### 报价/规格与 Work 执行器测试
+
+- **run_id 与 pipeline 状态**：`tests/test_work_executor_run_id.py` 验证当 match 结果含 `needs_human_choice` 与 `pending_choices` 时，`_process_files_pipeline` 返回的 dict 包含有效 `run_id`，且 `_work_pipeline_state[run_id]` 已写入，避免 NameError 并保证 resume 可用。
+- **报价产品规规则抽取**：`tests/test_spec_extract.py` 对 `extract_spec_from_quote_name` 做单元测试，覆盖「直通(管径)PVC-UH」「直通(管酒)PVC-U排水」「罩(PVC-H)」「30°异径三级配」、含 DN200/(8")/4M/根 的长名称等输入，断言在预期有规格时返回非空字符串。
+- **批量 LLM 规格提取**：同文件内对 `extract_specs_batch_llm` 做 mock 测试：`QUOTATION_SPEC_LLM=false` 或 API 返回非法 JSON 时返回空列表；mock 返回合法 JSON 数组时返回与行数一致的 `requested_spec`/`quoted_spec` 列表。运行：在 version3 根目录执行 `py -m pytest tests/test_spec_extract.py tests/test_work_executor_run_id.py -v`。

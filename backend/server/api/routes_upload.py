@@ -15,7 +15,10 @@ from backend.tools.quotation.excel_summary import (
     make_file_id,
     put_excel_summary,
 )
-from backend.tools.quotation.quote_tools import fill_template_with_inquiry_items
+from backend.tools.quotation.quote_tools import (
+    fill_template_with_inquiry_items,
+    get_template_inquiry_capacity,
+)
 from backend.tools.quotation.text_to_inquiry import text_to_inquiry_items
 
 logger = logging.getLogger(__name__)
@@ -85,7 +88,7 @@ async def quotation_upload(
 
 @router.post("/api/quotation/from-text")
 async def quotation_from_text(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """从文字生成报价单 Excel；返回 file_path、file_name。"""
+    """从文字生成报价单 Excel。容量不足时自动按模板容量拆分为多份文件。"""
     text = (body.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="请提供 text（产品描述文字）")
@@ -93,24 +96,57 @@ async def quotation_from_text(body: Dict[str, Any] = Body(...)) -> Dict[str, Any
     if not Path(template_path).exists():
         raise HTTPException(status_code=500, detail=f"报价单模板不存在: {template_path}")
     Config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    safe_name = f"{uuid.uuid4().hex[:12]}_文字报价.xlsx"
-    output_path = (Config.UPLOAD_DIR / safe_name).resolve()
-    try:
-        output_path.relative_to(Config.UPLOAD_DIR.resolve())
-    except ValueError:
-        raise HTTPException(status_code=400, detail="非法输出路径")
     items = text_to_inquiry_items(text)
     if not items:
         raise HTTPException(status_code=400, detail="未能从文字中解析出任何产品行")
-    out = fill_template_with_inquiry_items(
-        template_path=template_path,
-        items=items,
-        output_path=str(output_path),
-        sheet_name="询价单",
-    )
-    if not out.get("success"):
-        raise HTTPException(status_code=500, detail=out.get("error", "填写模板失败"))
-    return {"success": True, "data": {"file_path": str(output_path), "file_name": "文字报价.xlsx"}}
+
+    cap_out = get_template_inquiry_capacity(template_path=template_path, sheet_name="询价单")
+    if not cap_out.get("success"):
+        raise HTTPException(status_code=500, detail=cap_out.get("error", "读取模板容量失败"))
+    capacity = int(cap_out.get("capacity") or 0)
+    if capacity <= 0:
+        raise HTTPException(status_code=500, detail="模板无可用询价行，请检查模板结构")
+
+    file_paths: list[str] = []
+    file_names: list[str] = []
+    total_chunks = (len(items) + capacity - 1) // capacity
+    for idx in range(total_chunks):
+        chunk = items[idx * capacity : (idx + 1) * capacity]
+        suffix = "" if total_chunks == 1 else f"_part{idx + 1}"
+        safe_name = f"{uuid.uuid4().hex[:12]}_文字报价{suffix}.xlsx"
+        output_path = (Config.UPLOAD_DIR / safe_name).resolve()
+        try:
+            output_path.relative_to(Config.UPLOAD_DIR.resolve())
+        except ValueError:
+            raise HTTPException(status_code=400, detail="非法输出路径")
+        out = fill_template_with_inquiry_items(
+            template_path=template_path,
+            items=chunk,
+            output_path=str(output_path),
+            sheet_name="询价单",
+            allow_insert_rows=False,
+        )
+        if not out.get("success"):
+            raise HTTPException(status_code=500, detail=out.get("error", "填写模板失败"))
+        file_paths.append(str(output_path))
+        file_names.append(f"文字报价{suffix}.xlsx")
+
+    if len(file_paths) == 1:
+        return {"success": True, "data": {"file_path": file_paths[0], "file_name": file_names[0]}}
+
+    return {
+        "success": True,
+        "data": {
+            # Backward compatibility for clients expecting single-file keys.
+            "file_path": file_paths[0],
+            "file_name": file_names[0],
+            "file_paths": file_paths,
+            "file_names": file_names,
+            "chunk_count": len(file_paths),
+            "chunk_size": capacity,
+            "message": f"文本行数超过单模板容量，已拆分为 {len(file_paths)} 份报价文件",
+        },
+    }
 
 
 @router.get("/api/quotation/download")

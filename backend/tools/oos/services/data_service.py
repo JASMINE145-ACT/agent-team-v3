@@ -1,6 +1,7 @@
 """
 数据服务模块（数据库操作）
 """
+import json
 import re
 import logging
 from datetime import datetime
@@ -112,6 +113,7 @@ class QuotationDraftLineDB(Base):
     qty = Column(Float, nullable=False, default=0)
     code = Column(String(100), nullable=True)
     quote_name = Column(String(500), nullable=True)
+    quote_spec = Column(String(500), nullable=True)  # 报价产品规（从报价名称解析，与第二张图格式对齐）
     unit_price = Column(Float, nullable=True)
     amount = Column(Float, nullable=True)
     available_qty = Column(Float, nullable=True, default=0)
@@ -203,6 +205,24 @@ class ProcurementApprovalDB(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
 
 
+class ActivityLogDB(Base):
+    """通用活动日志表：记录 Work 运行、报价草稿、无货/缺货、采购等关键事件。"""
+
+    __tablename__ = "activity_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ts = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    actor_type = Column(String(20), nullable=False, default="system")
+    actor_id = Column(String(200), nullable=True)
+    kind = Column(String(50), nullable=False)  # work_run / quotation_draft / oos / shortage / procurement / other
+    action = Column(String(50), nullable=False)  # start / finish / saved / created / deleted / error / ...
+    entity_type = Column(String(50), nullable=True)
+    entity_id = Column(String(200), nullable=True)
+    run_id = Column(String(100), nullable=True)
+    summary = Column(String(500), nullable=True)
+    details = Column(String(2000), nullable=True)
+
+
 class DataService:
     """数据服务"""
 
@@ -258,6 +278,88 @@ class DataService:
 
         # 创建 Session
         self.SessionLocal = sessionmaker(bind=self.engine)
+
+    # ---------- Activity Log ----------
+
+    def log_activity(
+        self,
+        kind: str,
+        action: str,
+        *,
+        actor_type: str = "system",
+        actor_id: Optional[str] = None,
+        entity_type: Optional[str] = None,
+        entity_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        summary: Optional[str] = None,
+        details: Optional[Dict] = None,
+    ) -> None:
+        """
+        记录一条活动日志。
+
+        - kind: 业务类别（如 work_run / quotation_draft / oos / shortage 等）
+        - action: 操作类型（start / finish / saved / created / deleted / error 等）
+        """
+        session: Session = self.SessionLocal()
+        try:
+            payload = ActivityLogDB(
+                actor_type=(actor_type or "system")[:20],
+                actor_id=(actor_id or None),
+                kind=(kind or "other")[:50],
+                action=(action or "info")[:50],
+                entity_type=(entity_type or None),
+                entity_id=(str(entity_id) if entity_id is not None else None),
+                run_id=(run_id or None),
+                summary=(summary or None),
+                details=json.dumps(details, ensure_ascii=False) if details is not None else None,
+            )
+            session.add(payload)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.warning("log_activity 失败（忽略，不影响主流程）: %s", e)
+        finally:
+            session.close()
+
+    def list_activity(
+        self,
+        limit: int = 50,
+        *,
+        kind: Optional[str] = None,
+    ) -> List[Dict]:
+        """
+        按时间倒序返回最近的活动日志列表。
+        """
+        session: Session = self.SessionLocal()
+        try:
+            q = session.query(ActivityLogDB).order_by(ActivityLogDB.ts.desc())
+            if kind:
+                q = q.filter(ActivityLogDB.kind == kind)
+            rows = q.limit(max(1, min(limit, 200))).all()
+            out: List[Dict] = []
+            for r in rows:
+                try:
+                    details = json.loads(r.details) if r.details else None
+                except Exception:
+                    details = r.details
+                out.append(
+                    {
+                        "id": r.id,
+                        "ts": r.ts.isoformat() if r.ts else None,
+                        "actor_type": r.actor_type,
+                        "actor_id": r.actor_id,
+                        "kind": r.kind,
+                        "action": r.action,
+                        "entity_type": r.entity_type,
+                        "entity_id": r.entity_id,
+                        "run_id": r.run_id,
+                        "summary": r.summary,
+                        "details": details,
+                    }
+                )
+            return out
+        finally:
+            session.close()
 
     def _migrate_add_columns_if_needed(self) -> None:
         """为已有 out_of_stock_records 表补充新列，兼容旧数据库"""
@@ -317,6 +419,24 @@ class DataService:
                         logger.info("迁移: 已添加列 shortage_records.%s", col)
                     except Exception as e:
                         logger.warning("迁移添加列 shortage_records.%s 失败: %s", col, e)
+
+            # quotation_draft_lines 表补充 quote_spec（报价产品规，与规范行/第二张图对齐）
+            try:
+                r = conn.execute(text("PRAGMA table_info(quotation_draft_lines)"))
+                qdl_existing = {row[1] for row in r.fetchall()}
+            except Exception:
+                qdl_existing = set()
+            qdl_alters = [
+                ("quote_spec", "ALTER TABLE quotation_draft_lines ADD COLUMN quote_spec VARCHAR(500)"),
+            ]
+            for col, sql in qdl_alters:
+                if col not in qdl_existing:
+                    try:
+                        conn.execute(text(sql))
+                        conn.commit()
+                        logger.info("迁移: 已添加列 quotation_draft_lines.%s", col)
+                    except Exception as e:
+                        logger.warning("迁移添加列 quotation_draft_lines.%s 失败: %s", col, e)
 
     def _generate_product_key(self, product_name: str, specification: Optional[str]) -> str:
         """生成 product_key（规格标准化：统一小写、去除规格内部空格，使 DN40/DN 40 视为同一产品）"""
@@ -759,6 +879,7 @@ class DataService:
                     qty=qty,
                     code=str(line.get("code", ""))[:100] if line.get("code") else None,
                     quote_name=str(line.get("quote_name", ""))[:500] if line.get("quote_name") else None,
+                    quote_spec=str(line.get("quote_spec", ""))[:500] if line.get("quote_spec") else None,
                     unit_price=float(unit_price) if unit_price is not None else None,
                     amount=float(amount) if amount is not None else None,
                     available_qty=float(line.get("available_qty", 0) or 0),
@@ -842,6 +963,7 @@ class DataService:
                         "qty": ln.qty,
                         "code": ln.code,
                         "quote_name": ln.quote_name,
+                        "quote_spec": getattr(ln, "quote_spec", None),
                         "unit_price": ln.unit_price,
                         "amount": ln.amount,
                         "available_qty": ln.available_qty,

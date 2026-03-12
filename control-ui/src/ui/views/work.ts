@@ -91,6 +91,13 @@ function getOutputFileBasenamesFromTrace(trace: unknown[] | undefined): string[]
           pushBasename(inner.output_path ?? inner.filled_path);
         }
       }
+
+      // 1b) Fallback: heuristic scan for any *.xlsx substring inside observation.content,
+      //     in case backend output doesn't use output_path/filled_path keys or JSON parsing fails.
+      const m = content.match(/[A-Za-z]:[^\s"]+\.xlsx|\/[^\s"]+\.xlsx|[^\s"']+\.xlsx/);
+      if (m && m[0]) {
+        pushBasename(m[0]);
+      }
     }
 
     // 2) Future compatibility: output path directly on trace entry.
@@ -444,6 +451,7 @@ export function renderWork(props: WorkProps) {
                       <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineQty")}</th>
                       <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineCode")}</th>
                       <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineQuoteName")}</th>
+                      <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineQuoteSpec")}</th>
                       <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.linePrice")}</th>
                       <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineAmount")}</th>
                       <th style="padding: 6px 8px; text-align: left; border: 1px solid var(--border);">${t("work.lineAvailable")}</th>
@@ -467,6 +475,7 @@ export function renderWork(props: WorkProps) {
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">
                             <input type="text" .value=${line.quote_name ?? ""} @change=${(e: Event) => onQuotationLineChange(i, "quote_name", (e.target as HTMLInputElement).value)} style="width: 120px;" aria-label=${t("work.lineQuoteName")} />
                           </td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${(line as { quote_spec?: string }).quote_spec ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">
                             <input type="number" min="0" step="0.01" .value=${line.unit_price != null ? String(line.unit_price) : ""} @change=${(e: Event) => onQuotationLineChange(i, "unit_price", (e.target as HTMLInputElement).value)} style="width: 90px;" aria-label=${t("work.linePrice")} />
                           </td>
