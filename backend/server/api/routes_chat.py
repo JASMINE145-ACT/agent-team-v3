@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from typing import Any, Dict
 
 from backend.agent.remember import try_handle_remember
+from backend.core.language_utils import detect_language
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,6 +43,11 @@ async def query(
         }
     session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
     context = body.get("context") or {}
+    # 轻量语言检测，仅用于 Chat 输出语言控制
+    detected = detect_language(query_text)
+    context["detected_lang"] = detected
+    # 英文优先，其余情况默认按中文处理以保持兼容
+    context["preferred_lang"] = "en" if detected == "en" else "zh"
     agent = request.app.state.agent
     try:
         result = await agent.execute_react(query_text, context=context, session_id=session_id)
@@ -94,6 +100,9 @@ async def query_stream(
 
     session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
     context = body.get("context") or {}
+    detected = detect_language(query_text)
+    context["detected_lang"] = detected
+    context["preferred_lang"] = "en" if detected == "en" else "zh"
     agent = request.app.state.agent
 
     async def _gen():

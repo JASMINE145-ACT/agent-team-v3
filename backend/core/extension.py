@@ -35,5 +35,5 @@ class AgentExtension(ABC):
     def on_before_prompt(self, user_input: str, context: dict) -> str:
         return user_input
 
-    def on_after_tool(self, name: str, args: dict, obs: str) -> str:
+    def on_after_tool(self, name: str, args: dict, obs: str, context: dict | None = None) -> str:
         return obs

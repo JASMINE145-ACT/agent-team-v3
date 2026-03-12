@@ -4,6 +4,7 @@ import logging
 from typing import Any, Optional
 
 from backend.core.extension import AgentExtension, ExtensionContext
+from backend.core.language_utils import contains_chinese
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,23 @@ class JAgentExtension(AgentExtension):
         from backend.plugins.jagent.skills import OUTPUT_FORMAT
         return OUTPUT_FORMAT
 
-    def on_after_tool(self, name: str, args: dict, obs: str) -> str:
-        """大结果压缩：run_quotation_fill 超过 3000 字时截取前 5 条 items。"""
+    def on_before_prompt(self, user_input: str, context: dict) -> str:
+        """在进入 ReAct 之前按首轮检测结果注入语言策略说明。"""
+        preferred = (context or {}).get("preferred_lang") or "zh"
+        if preferred != "en":
+            return user_input
+
+        policy = (
+            "LANGUAGE POLICY: The user's question is in English. "
+            "You MUST answer entirely in English. If any tool outputs are in Chinese, "
+            "translate or summarize them in English before responding. Use English for "
+            "all explanations, descriptions, and table headers.\n\n"
+        )
+        return policy + (user_input or "")
+
+    def on_after_tool(self, name: str, args: dict, obs: str, context: dict | None = None) -> str:
+        """大结果压缩 + 英文场景下为中文 observation 附加翻译提示。"""
+        # 保留原有 run_quotation_fill 结果截断逻辑
         if name == "run_quotation_fill" and len(obs) > 3000:
             try:
                 data = json.loads(obs)
@@ -36,9 +52,18 @@ class JAgentExtension(AgentExtension):
                 if len(items) > 5:
                     data["items"] = items[:5]
                     data["_truncated"] = f"共 {len(items)} 条，已截至前 5 条"
-                    return json.dumps(data, ensure_ascii=False)
+                    obs = json.dumps(data, ensure_ascii=False)
             except Exception:
                 logger.warning("on_after_tool 压缩失败，返回原始 obs", exc_info=True)
+
+        preferred = (context or {}).get("preferred_lang") or "zh"
+        if preferred == "en" and contains_chinese(obs):
+            obs = (
+                f"{obs}\n\n"
+                "Translation note: The above tool output is in Chinese. When you answer "
+                "the user, translate all relevant information into English and respond "
+                "fully in English."
+            )
         return obs
 
     def register(self, ctx: ExtensionContext) -> None:

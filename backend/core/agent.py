@@ -313,7 +313,11 @@ class CoreAgent:
 
                 for ext in self._extensions:
                     try:
-                        obs = ext.on_after_tool(name, args, obs)
+                        # 优先尝试带 context 的新签名，旧实现回退到三参版本
+                        try:
+                            obs = ext.on_after_tool(name, args, obs, ctx)
+                        except TypeError:
+                            obs = ext.on_after_tool(name, args, obs)  # type: ignore[call-arg]
                     except Exception:
                         logger.warning("ext.on_after_tool 失败，已跳过 name=%s", name, exc_info=True)
 
