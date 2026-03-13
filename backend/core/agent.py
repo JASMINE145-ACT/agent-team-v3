@@ -139,7 +139,10 @@ class CoreAgent:
         if context and context.get("file_path"):
             user_content += f"\n\n[Context: 已上传报价单，file_path={context['file_path']}]"
         if context and context.get("file_id"):
-            user_content += f"\n\n[Context] file_id={context['file_id']}（用于在工具中定位同一 Excel 摘要）"
+            user_content += (
+                f"\n\n[Context] file_id={context['file_id']}（用于在工具中定位同一份 Excel 文件，"
+                "请在需要读取表格内容或进行统计/筛选/填表时调用相应的 Excel 工具，并传入该 file_id 或 file_path。）"
+            )
 
         if session_id and self._store:
             session = self._store.load(session_id)

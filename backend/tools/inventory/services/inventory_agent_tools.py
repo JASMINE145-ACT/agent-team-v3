@@ -167,23 +167,39 @@ def _execute_get_profit_by_price(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     利润率查询（只读，万鼎价格库）：
     - 输入：code（可选）、product_name（可选）、price（必填，成交价/报单价）。
-    - 行为：按 code 或完整名称在万鼎价格库定位行，对每行计算与给定价格最接近的档位及其利润率，并返回所有档位价格/利润率。
+    - 行为：按 code 或完整名称在万鼎价格库定位行，对每行计算与给定价格精确匹配的档位及其利润率，并返回所有档位价格/利润率。
     - 返回：{ success, result(自然语言总结), data: { rows[] } }，rows 每项含 code/name/matched_price_level/matched_price/matched_profit/all_levels[]。
     """
     from backend.tools.inventory.config import config
     from backend.tools.inventory.services.wanding_fuzzy_matcher import (
         get_profit_rows_by_code,
         get_profit_rows_by_name,
+        normalize_price,
     )
 
     code = (arguments.get("code") or "").strip()
     product_name = (arguments.get("product_name") or "").strip()
     if not code and not product_name:
         return {"success": True, "result": "请提供 code 或 product_name（至少一个）。"}
+
+    if "price" not in arguments:
+        return {"success": True, "result": "请提供 price（成交价/报单价）。"}
+
+    raw_price = arguments.get("price")
     try:
-        price = float(arguments.get("price"))
-    except (TypeError, ValueError):
-        return {"success": True, "result": "请提供有效的 price（数字）。"}
+        price = normalize_price(raw_price)
+    except Exception as e:
+        # 价格格式不合法或存在歧义，视为校验错误，不继续向下查库
+        return {
+            "success": True,
+            "result": f"价格格式不合法或存在歧义，请检查后重试：{raw_price!r}（{e}）",
+            "data": {
+                "error_type": "validation_error",
+                "field": "price",
+                "raw_value": raw_price,
+                "message": str(e),
+            },
+        }
 
     path = config.PRICE_LIBRARY_PATH
     try:
@@ -223,7 +239,7 @@ def _execute_get_profit_by_price(arguments: dict[str, Any]) -> dict[str, Any]:
             profit_pct = f"{matched_profit:.2%}" if isinstance(matched_profit, (int, float)) else "未知"
             lines.append(
                 f"编号 {code_str}（{name_str}）在万鼎价格库中，按你给的价格 {matched_price:g}，"
-                f"最接近 {level_display}，对应利润率约 {profit_pct}。"
+                f"对应档位 {level_display}，对应利润率约 {profit_pct}。"
             )
         else:
             lines.append(

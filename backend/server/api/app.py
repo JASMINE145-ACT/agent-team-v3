@@ -170,6 +170,12 @@ async def _warmup(agent=None) -> None:
 @app.on_event("startup")
 async def startup_event():
     Config.validate()
+    # 注册统一工具层中的后端工具（库存 / 无货登记 / 行情告警）
+    try:
+        from backend.tools.tool_registry import register_builtin_tools
+        register_builtin_tools()
+    except Exception as e:
+        logger.warning("注册内建工具失败（不影响启动）: %s", e)
     from backend.core.agent import CoreAgent
     from backend.plugins.jagent.extension import JAgentExtension
     from backend.wecom_bot.client import run_wecom_bot

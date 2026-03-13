@@ -1,9 +1,11 @@
 # Agent Team version3 — 项目说明（Claude 用）
 
-### 企业微信长连接 Bot — 超时策略补充
+### 企业微信长连接 Bot — 超时与 Excel 绑定补充
 
 - WeCom 长连接通路通过 `backend/wecom_bot/handler.py` 的 `handle_wecom_message` 将文本消息转给 `CoreAgent.execute_react`。
 - 为避免单条慢请求长期占用长连接，`handle_wecom_message` 使用 `asyncio.wait_for(_call_agent(), timeout=90)` 做超时保护：超过 **90 秒** 仍未返回时，会在日志中记录 warning，并向企业微信用户回复「处理超时，请稍后重试。」。
+- 企业微信长连接接收 Excel 报价单时走 `handle_wecom_file`：先用 `generate_excel_summary` + `put_excel_summary` 生成并缓存**精简摘要**，再在特性开关 `Config.WECHAT_EXCEL_FULL_PARSE_ENABLED` 打开时调用 `parse_excel_full` + `put_excel_context` 生成**完整结构化解析结果**（含每个 sheet 的行数/列名/预览行），并以 `file_id` 为 key 缓存在进程内，供后续工具/MCP skill 通过 `file_id`/`file_path` 访问同一份 Excel。
+- `_bind_session_file_path` 会把本次上传的 `file_path` 写入会话（`session.file_path`），`_load_wecom_session_context` 在后续文本消息中读出并返回 `{ file_path, file_id, excel_meta }`，其中 `excel_meta` 至少包含 `sheets_count` 与 `total_rows`，`CoreAgent.execute_react` 会在 user 消息末尾追加 `[Context: 已上传报价单, file_path=...]` 与 `file_id` 说明，并在有摘要时追加一条 `[ExcelSummary]` system 消息，用于提示 LLM 何时调用 Excel 工具而不是直接在 prompt 中展开整表。
 **单主 Agent 架构**：无子 Agent 委托，主 Agent 掌握全部技能，根据用户意图直接选用工具完成目标。
 
 ## 与 version2 的区别
@@ -24,6 +26,7 @@ Agent Team version3/
 │   ├── 项目结构规整方案.md       # 规整方案与 import 替换规则
 │   ├── 改造.md                   # 框架化改造计划（core + plugins + Registry）
 │   ├── ReAct范式对比.md           # version3 与 OpenCode 的 ReAct 范式对比
+│   ├── wecom_excel_逻辑说明.md   # WeCom 接收/解析 Excel 的完整流程与已知缺陷
 │   └── …（其他文档）
 ├── backend/
 │   ├── config.py                 # 后端全局配置（.env 含根目录、backend/tools/oos）
@@ -40,10 +43,15 @@ Agent Team version3/
 │   │   ├── agent.py              # SingleAgent = CoreAgent 子类，extensions=[JAgentExtension()]
 │   │   ├── tools.py              # 工具实现与 EXTRA_TOOLS（供 Extension 引用）；execute_tool 仍供 legacy 桥接
 │   │   └── session.py            # 会话存储，未动
-│   ├── tools/                    # 工具实现层（未动）
-│   │   ├── inventory/             # 库存与万鼎
-│   │   ├── quotation/            # 报价单 + 询价填充
-│   │   └── oos/                  # 无货登记/列表/统计
+│   ├── tools/                    # 工具实现层 + 统一工具抽象
+│   │   ├── base.py               # BaseTool / ToolResult（统一工具抽象）
+│   │   ├── tool_registry.py      # 后端工具注册表（call(name, **kwargs) + metrics）
+│   │   ├── inventory_tool.py     # 库存查询封装（inventory_lookup）
+│   │   ├── alert_tool.py         # 行情告警服务封装（alert.create/list/delete）
+│   │   ├── oos_register_tool.py  # 无货登记封装（文件/文字两种路径）
+│   │   ├── inventory/            # 库存与万鼎（领域实现）
+│   │   ├── quotation/            # 报价单 + 询价填充（领域实现）
+│   │   └── oos/                  # 无货登记/列表/统计（领域实现）
 │   └── server/                   # 网络层
 │       ├── api/                  # FastAPI；startup 创建 CoreAgent 放入 app.state.agent
 │       └── gateway/              # WebSocket；chat 从 ws.app.state.agent 取 agent

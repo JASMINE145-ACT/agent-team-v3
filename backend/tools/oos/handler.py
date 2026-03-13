@@ -6,6 +6,7 @@ from typing import Callable
 
 from backend.core.extension import ExtensionContext
 from backend.core.tool_utils import unwrap_tool_result
+from backend.tools.tool_registry import tool_registry
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,15 @@ def _make_no_arg_handler(fn: Callable) -> Callable:
 
 def _make_register_oos_handler(run_fn: Callable) -> Callable:
     async def handler(args: dict, context: dict) -> str:
+        # 向统一工具层发起调用，底层仍由 OosRegisterTool 委托 _run_register_oos 完成业务。
         fp = (args.get("file_path") or "").strip() or (context.get("file_path") or "").strip()
-        out = await asyncio.to_thread(run_fn, fp, context, args.get("prompt"))
-        return unwrap_tool_result(out)
+        result = await tool_registry.call(
+            "oos_register",
+            file_path=fp,
+            context=context,
+            prompt=args.get("prompt"),
+        )
+        return result.to_llm_string()
     return handler
 
 
@@ -75,24 +82,21 @@ def _make_register_oos_from_text_handler() -> Callable:
         if not product_name:
             return json.dumps({"success": False, "result": "请提供产品名称（product_name）。"}, ensure_ascii=False)
         specification = (args.get("specification") or "").strip()
-        quantity = args.get("quantity")
-        if quantity is None:
-            quantity = 0
+        quantity = args.get("quantity") or 0
         try:
             quantity = int(quantity) if isinstance(quantity, (int, float)) else 0
         except (TypeError, ValueError):
             quantity = 0
         unit = (args.get("unit") or "").strip()
-        record = {"product_name": product_name, "specification": specification, "unit": unit, "quantity": quantity}
-        try:
-            from backend.tools.oos.services.quotation_agent_tool import persist_out_of_stock_records
-            out = await asyncio.to_thread(persist_out_of_stock_records, "用户直接登记", [record], sheet_name="")
-            if out.get("success"):
-                return out.get("result", f"已登记「{product_name}{' ' + specification if specification else ''}」为无货。")
-            return json.dumps(out, ensure_ascii=False)
-        except Exception as e:
-            logger.exception("register_oos_from_text 失败")
-            return json.dumps({"success": False, "result": str(e)}, ensure_ascii=False)
+        # 同样走 OosRegisterTool，保持与 file_path 版本逻辑一致。
+        result = await tool_registry.call(
+            "oos_register",
+            product_name=product_name,
+            specification=specification,
+            quantity=quantity,
+            unit=unit,
+        )
+        return result.to_llm_string()
     return handler
 
 

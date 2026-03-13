@@ -29,6 +29,8 @@ chardet>=5.0.0
 
 # 库存 / Accurate API 请求（必选）
 requests>=2.28.0
+# 统一工具层：告警等 HTTP 客户端（异步）
+httpx>=0.27.0
 
 # 可选：Gmail API 发信（无货/缺货提醒），不使用时可不装
 google-auth>=2.0.0

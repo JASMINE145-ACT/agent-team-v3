@@ -341,6 +341,68 @@ def _safe_to_float(val: Any) -> Optional[float]:
     return f
 
 
+def normalize_price(raw_price: Any) -> float:
+    """
+    规范化用户输入的价格为 float（人民币金额）。
+
+    规则（auto_fix 风格）：
+    - 若本身是数字（int/float），直接返回 float 值。
+    - 若是字符串：
+      - 去除首尾空白、常见货币符号（¥/￥/元/RMB 等）及内部空格。
+      - 将全角逗号替换为半角，移除千分位逗号。
+      - 若存在多个小数点：保留最后一个点作为小数点，其余点视作分隔符移除（例如 "7.858.0" → "7858.0"）。
+      - 清洗后字符串必须形如 `^[+-]?\\d+(\\.\\d+)?$`，否则视为格式不合法。
+    - 解析失败或结果为 NaN/无穷大时抛出 ValueError。
+    """
+    # 已经是数字的情况，直接信任调用方
+    if isinstance(raw_price, (int, float)) and not isinstance(raw_price, bool):
+        value = float(raw_price)
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ValueError(f"价格数值非法: {raw_price!r}")
+        return value
+
+    s = str(raw_price).strip()
+    if not s:
+        raise ValueError("价格不能为空。")
+
+    # 去掉常见货币符号与全角变体
+    for sym in ("¥", "￥", "元", "RMB", "rmb"):
+        s = s.replace(sym, "")
+
+    # 统一全角/半角逗号与点
+    s = s.replace("，", ",").replace("．", ".")
+    # 去掉空格
+    s = s.replace(" ", "")
+
+    # 先移除千分位逗号
+    s = s.replace(",", "")
+
+    # 处理多个小数点：保留最后一个，其余删除
+    if s.count(".") > 1:
+        last_dot = s.rfind(".")
+        cleaned_chars = []
+        for idx, ch in enumerate(s):
+            if ch == "." and idx != last_dot:
+                continue
+            cleaned_chars.append(ch)
+        s = "".join(cleaned_chars)
+
+    # 允许前导正负号，其余必须是数字或至多一个小数点
+    import re as _re
+
+    if not _re.fullmatch(r"[+-]?\d+(\.\d+)?", s):
+        raise ValueError(f"价格格式不合法: {raw_price!r}")
+
+    try:
+        value = float(s)
+    except (TypeError, ValueError):
+        raise ValueError(f"价格无法解析: {raw_price!r}")
+
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ValueError(f"价格数值非法: {raw_price!r}")
+    return value
+
+
 def search_fuzzy(
     df: pd.DataFrame,
     keyword: str,
@@ -558,7 +620,13 @@ def _load_full_price_df(path: str | Path) -> pd.DataFrame:
 
 
 def _compute_profit_for_price(row: pd.Series, price: float) -> dict[str, Any]:
-    """给定一行价格库记录与用户价，计算最接近档位及其利润率，并返回所有档位价格+利润率。"""
+    """给定一行价格库记录与用户价，计算精确匹配档位及其利润率，并返回所有档位价格+利润率。
+
+    行为变更：
+    - 仅当某档位价格与给定 price 精确相等（绝对误差 < 1e-6）时，才设置 matched_* 字段。
+    - 若没有任何档位价格与 price 精确相等，则 matched_price_level/matched_price/matched_profit 保持为 None，
+      不再回退到“距离最小”的近似档位。
+    """
     all_levels: list[dict[str, Any]] = []
     for level in ("A_QUOTE", "B_QUOTE", "C_QUOTE", "D_QUOTE", "D_LOW", "E_QUOTE"):
         price_col = PRICE_COLS.get(level)
@@ -586,13 +654,13 @@ def _compute_profit_for_price(row: pd.Series, price: float) -> dict[str, Any]:
     matched_profit = None
     if all_levels:
         target = float(price)
-        # 先找精确匹配，再按差值排序
+        # 仅接受精确匹配的档位；不再使用“最近档位”降级
         exact = [entry for entry in all_levels if abs(entry["price"] - target) < 1e-6]
-        candidates = exact or all_levels
-        best = min(candidates, key=lambda e: abs(e["price"] - target))
-        matched_level = best["level"]
-        matched_price = best["price"]
-        matched_profit = best["profit"]
+        if exact:
+            best = exact[0]
+            matched_level = best["level"]
+            matched_price = best["price"]
+            matched_profit = best["profit"]
     return {
         "code": str(row.get("Material") or row.get("code") or "").strip(),
         "name": str(row.get("Describrition") or row.get("Description") or "").strip(),

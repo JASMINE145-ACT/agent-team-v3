@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import pandas as pd
+
 from backend.tools.quotation.quote_tools import (
     extract_inquiry_items,
     parse_excel_smart,
@@ -22,6 +24,7 @@ from backend.tools.quotation.quote_tools import (
 
 
 ExcelSummary = Dict[str, Any]
+ExcelParsed = Dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,24 @@ class ExcelSummaryEntry:
 
 
 _SUMMARY_CACHE: Dict[str, ExcelSummaryEntry] = {}
+
+
+@dataclass(frozen=True)
+class ExcelContextEntry:
+  """
+  完整上下文条目：在摘要基础上，补充结构化解析结果。
+
+  - summary: 与 ExcelSummaryEntry 中一致，便于向下兼容旧逻辑；
+  - parsed: 结构化解析结果，供 MCP / excelskill / 业务工具按需消费；
+  """
+
+  file_id: str
+  file_path: str
+  summary: Optional[ExcelSummary]
+  parsed: ExcelParsed
+
+
+_CONTEXT_CACHE: Dict[str, ExcelContextEntry] = {}
 
 
 def _normalize_path(file_path: str) -> Path:
@@ -51,6 +72,56 @@ def make_file_id(file_path: str) -> str:
   """
   norm = str(_normalize_path(file_path)).encode("utf-8", errors="ignore")
   return hashlib.sha1(norm).hexdigest()[:16]
+
+
+def parse_excel_full(
+  file_path: str,
+  max_rows_per_sheet: int = 1000,
+  max_total_rows: int = 5000,
+) -> ExcelParsed:
+  """
+  读取并结构化解析整份 Excel。
+
+  设计原则：
+  - 面向「完整上下文」而非 prompt 注入，尽量保留结构信息；
+  - 为控制体量，对每个 Sheet 以及整体行数做上限裁剪；
+  - 返回的结构仅包含 Python 内置类型，方便 JSON 序列化与远程调用。
+  """
+  path = _normalize_path(file_path)
+
+  # 使用 pandas 统一读取所有 sheet；后续如需更复杂行为，可替换为统一的 ExcelReader。
+  sheets_dict = pd.read_excel(path, sheet_name=None, engine="openpyxl")
+
+  sheets_out: List[Dict[str, Any]] = []
+  total_rows = 0
+
+  for name, df in sheets_dict.items():
+    rows_count = int(len(df))
+    total_rows += rows_count
+
+    # 控制每个 sheet 的预览行数，避免单 sheet 过大
+    preview_df = df.head(max_rows_per_sheet if max_rows_per_sheet > 0 else rows_count)
+    preview_rows = preview_df.to_dict(orient="records")
+
+    sheets_out.append(
+      {
+        "name": str(name),
+        "rows_count": rows_count,
+        "preview_rows": len(preview_rows),
+        "columns": [str(c) for c in preview_df.columns],
+        "rows": preview_rows,
+      }
+    )
+
+  parsed: ExcelParsed = {
+    "meta": {
+      "sheets_count": len(sheets_out),
+      "total_rows": total_rows,
+      "source": "parse_excel_full",
+    },
+    "sheets": sheets_out,
+  }
+  return parsed
 
 
 def generate_excel_summary(file_path: str, max_items: int = 100, max_preview_rows: int = 80) -> ExcelSummary:
@@ -103,6 +174,48 @@ def generate_excel_summary(file_path: str, max_items: int = 100, max_preview_row
   }
 
   return summary
+
+
+def put_excel_context(
+  file_path: str,
+  parsed: ExcelParsed,
+  summary: Optional[ExcelSummary] = None,
+) -> ExcelContextEntry:
+  """
+  将完整解析结果写入进程内缓存，并返回带 file_id 的上下文条目。
+
+  - 若未显式提供 summary，会尝试从现有 _SUMMARY_CACHE 中复用；
+  - 若不存在对应摘要，则 summary 置为 None，仅缓存 parsed。
+  """
+  norm_path = str(_normalize_path(file_path))
+  file_id = make_file_id(norm_path)
+
+  # 复用已有摘要（若存在），避免重复解析
+  cached_summary_entry = _SUMMARY_CACHE.get(file_id)
+  effective_summary: Optional[ExcelSummary] = summary or (cached_summary_entry.summary if cached_summary_entry else None)
+
+  entry = ExcelContextEntry(file_id=file_id, file_path=norm_path, summary=effective_summary, parsed=parsed)
+  _CONTEXT_CACHE[file_id] = entry
+  return entry
+
+
+def get_excel_context(file_id: Optional[str] = None, file_path: Optional[str] = None) -> Optional[ExcelContextEntry]:
+  """
+  读取完整 Excel 上下文：
+  - 优先按 file_id 命中；
+  - 若无 file_id 但有 file_path，则根据路径推导 file_id 再查找。
+  """
+  if file_id:
+    entry = _CONTEXT_CACHE.get(file_id)
+    if entry:
+      return entry
+
+  if file_path:
+    norm_path = str(_normalize_path(file_path))
+    derived_id = make_file_id(norm_path)
+    return _CONTEXT_CACHE.get(derived_id)
+
+  return None
 
 
 def put_excel_summary(file_path: str, summary: ExcelSummary) -> ExcelSummaryEntry:
@@ -196,11 +309,16 @@ def format_excel_summary_for_prompt(entry: ExcelSummaryEntry, max_items: int = 2
 __all__ = [
   "ExcelSummary",
   "ExcelSummaryEntry",
+  "ExcelContextEntry",
+  "ExcelParsed",
+  "parse_excel_full",
   "generate_excel_summary",
   "put_excel_summary",
   "get_excel_summary_by_id",
   "get_excel_summary_for_context",
   "format_excel_summary_for_prompt",
   "make_file_id",
+  "put_excel_context",
+  "get_excel_context",
 ]
 

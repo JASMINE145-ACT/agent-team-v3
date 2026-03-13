@@ -77,11 +77,19 @@ class Config:
     # 报价草稿规格双列：是否用一次批量 LLM 提取「询价规格」与「报价产品规」（默认 true；false 则仅用规则+回退）
     QUOTATION_SPEC_LLM = (os.getenv("QUOTATION_SPEC_LLM", "true") or "").strip().lower() in ("1", "true", "yes")
 
+    # 行情告警服务（Go ontime-detector-alert）：/alerts CRUD 的 base URL
+    ALERT_SERVICE_URL = (os.getenv("ALERT_SERVICE_URL", "https://ontime-detector-alert.onrender.com") or "").rstrip("/")
+
     # 企业微信（WeCom）集成相关配置：Phase 1 仅用于 URL 验证与明文回调
     WECOM_TOKEN = os.getenv("WECOM_TOKEN", "")
     WECOM_AES_KEY = os.getenv("WECOM_AES_KEY", "")
     WECOM_CORP_ID = os.getenv("WECOM_CORP_ID", "")
     WECOM_AGENT_ID = os.getenv("WECOM_AGENT_ID", "")
+
+    # WeCom Excel：是否在长连接链路中启用完整 Excel 解析与上下文缓存
+    WECHAT_EXCEL_FULL_PARSE_ENABLED = (
+        os.getenv("WECHAT_EXCEL_FULL_PARSE_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+    )
 
     @classmethod
     def validate(cls):

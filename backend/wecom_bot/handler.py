@@ -14,9 +14,13 @@ from backend.config import Config
 from backend.core.agent import CoreAgent
 from backend.core.language_utils import detect_language
 from backend.tools.quotation.excel_summary import (
+    ExcelContextEntry,
     ExcelSummaryEntry,
     generate_excel_summary,
+    get_excel_context,
     make_file_id,
+    parse_excel_full,
+    put_excel_context,
     put_excel_summary,
 )
 
@@ -26,6 +30,8 @@ StandardWeComMessage = Dict[str, Any]
 
 # in-memory mapping: WeCom from_user -> current session_id
 _WECHAT_SESSIONS: Dict[str, str] = {}
+# 最近一次 Excel 绑定的时间戳（秒），用于轻量判断「刚上传 + 立即发需求」场景
+_LAST_FILE_BIND_TS: Dict[str, float] = {}
 
 
 def _get_current_session_id(from_user: str) -> str:
@@ -66,10 +72,31 @@ def _load_wecom_session_context(agent: CoreAgent, session_id: str) -> Dict[str, 
 
         norm_path = str(Path(fp).resolve())
         ctx: Dict[str, Any] = {"file_path": norm_path}
+        file_id: str | None = None
         try:
-            ctx["file_id"] = make_file_id(norm_path)
+            file_id = make_file_id(norm_path)
+            ctx["file_id"] = file_id
         except Exception:
             logger.debug("make_file_id failed, keep file_path only", exc_info=True)
+
+        # 若已存在完整 Excel 上下文，则补充精简 meta，方便 Agent 做轻量提示与决策
+        try:
+            context_entry: ExcelContextEntry | None = get_excel_context(file_id=file_id, file_path=norm_path)
+        except Exception:
+            logger.debug("get_excel_context failed, keep basic ctx only", exc_info=True)
+            context_entry = None
+        if context_entry and context_entry.parsed:
+            meta = context_entry.parsed.get("meta") or {}
+            sheets_count = meta.get("sheets_count")
+            total_rows = meta.get("total_rows")
+            excel_meta: Dict[str, Any] = {}
+            if isinstance(sheets_count, int):
+                excel_meta["sheets_count"] = sheets_count
+            if isinstance(total_rows, int):
+                excel_meta["total_rows"] = total_rows
+            if excel_meta:
+                ctx["excel_meta"] = excel_meta
+
         return ctx
     except Exception:
         logger.debug("failed to load wecom session context", exc_info=True)
@@ -159,18 +186,40 @@ async def handle_wecom_file(agent: CoreAgent, from_user: str, file_path: str) ->
 
     logger.info("WeCom[%s] file handling start: %s", session_id, norm_path)
 
+    use_full_parse = bool(getattr(Config, "WECHAT_EXCEL_FULL_PARSE_ENABLED", True))
+
     try:
-        summary, entry = await asyncio.to_thread(_build_excel_summary_entry, norm_path)
+        # 仍保留摘要生成逻辑，保证旧提示与工具兼容
+        summary, summary_entry = await asyncio.to_thread(_build_excel_summary_entry, norm_path)
     except Exception as e:  # noqa: BLE001
         logger.exception("failed to build Excel summary for WeCom file: %s", e)
-        return "文件已接收，但解析 Excel 失败，请稍后重试。"
+        return "文件已接收，但解析 Excel 摘要失败，请稍后重试。"
 
-    ctx: Dict[str, Any] = {"file_path": norm_path, "file_id": entry.file_id}
+    ctx: Dict[str, Any] = {"file_path": norm_path, "file_id": summary_entry.file_id}
+
+    # 可选：在后台构建完整 Excel 上下文，供后续工具 / MCP 使用
+    if use_full_parse:
+        try:
+            parsed = await asyncio.to_thread(parse_excel_full, norm_path)
+            put_excel_context(norm_path, parsed=parsed, summary=summary)
+            logger.info(
+                "WeCom[%s] Excel full context cached: file_id=%s", session_id, summary_entry.file_id
+            )
+        except Exception:
+            logger.warning(
+                "WeCom[%s] parse_excel_full/put_excel_context failed, fallback to summary-only",
+                session_id,
+                exc_info=True,
+            )
 
     # Make follow-up text available immediately, without waiting execute_react.
     _bind_session_file_path(agent, session_id, norm_path)
+    _LAST_FILE_BIND_TS[from_user or ""] = time.time()
 
-    user_hint = "用户刚刚在企业微信上传了一份 Excel 报价单，请将这份文件绑定到当前会话上下文。"
+    user_hint = (
+        "用户刚刚在企业微信上传了一份 Excel 报价单，请将这份文件绑定到当前会话上下文，"
+        "并在之后的需求中可以通过工具按需读取完整表格内容。"
+    )
 
     async def _bind_with_agent_background() -> None:
         timeout_s = int(getattr(Config, "WECOM_FILE_BIND_TIMEOUT_SECONDS", 20) or 20)
@@ -208,7 +257,8 @@ async def handle_wecom_file(agent: CoreAgent, from_user: str, file_path: str) ->
 
     return (
         f"已成功接收并解析 Excel 报价单（{Path(norm_path).name}），{detail}。\n"
-        "接下来你可以直接回复“帮我选一个”“查一下库存”“按这份表给报价”等问题。"
+        "接下来你可以直接发送需求，例如：“帮我统计每个供应商的总金额”或“按这份表给报价”，"
+        "系统会自动基于刚才这份 Excel 进行处理。"
     )
 
 

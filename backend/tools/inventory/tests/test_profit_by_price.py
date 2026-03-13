@@ -1,6 +1,10 @@
 import json
 
 from backend.tools.inventory.services import inventory_agent_tools
+from backend.tools.inventory.services.wanding_fuzzy_matcher import (
+    _compute_profit_for_price,
+    normalize_price,
+)
 
 
 def test_get_profit_by_price_by_code_single_row_exact_match(monkeypatch):
@@ -39,6 +43,50 @@ def test_get_profit_by_price_requires_price():
     out = inventory_agent_tools._execute_get_profit_by_price({"code": "8020020755"})
     assert out.get("success") is True
     assert "price" in (out.get("result") or "")
+
+
+def test_normalize_price_basic_and_thousand_separators():
+    assert normalize_price("7858") == 7858.0
+    assert normalize_price("7858.0") == 7858.0
+    assert normalize_price("7,858.00") == 7858.0
+    assert normalize_price("7，858.00") == 7858.0
+    assert normalize_price("  7 858.00 元") == 7858.0
+
+
+def test_normalize_price_auto_fix_multiple_dots():
+    # auto_fix：保留最后一个点作为小数点，其余视作分隔符
+    assert normalize_price("7.858.0") == 7858.0
+
+
+def test_normalize_price_invalid_formats_raise():
+    import pytest
+
+    with pytest.raises(ValueError):
+        normalize_price("abc")
+
+
+def test_compute_profit_for_price_exact_match_only(monkeypatch):
+    import pandas as pd
+
+    # 构造一行虚拟数据：仅 B_QUOTE 与价格 7858.0 精确匹配
+    row_values = [None] * 19
+    # Material 在真实表中的列索引为 1，Describrition 为 2，这里仅用到价格列
+    row_values[8] = 9000.0  # A_QUOTE
+    row_values[10] = 7858.0  # B_QUOTE
+    row_values[12] = 7000.0  # C_QUOTE
+    row_values[14] = 6500.0  # D_QUOTE
+    row_values[16] = 6400.0  # D_LOW
+    row_values[18] = 6000.0  # E_QUOTE
+    row = pd.Series(row_values)
+
+    out_exact = _compute_profit_for_price(row, 7858.0)
+    assert out_exact["matched_price_level"] == "B_QUOTE"
+    assert out_exact["matched_price"] == 7858.0
+
+    # 不存在精确匹配价格时，不再返回最近档位，matched_* 应为 None
+    out_no_match = _compute_profit_for_price(row, 7800.0)
+    assert out_no_match["matched_price_level"] is None
+    assert out_no_match["matched_price"] is None
 
 
 def test_get_profit_by_price_no_match(monkeypatch):
