@@ -74,7 +74,12 @@ def handle_chat_history(params: dict) -> dict:
             "content": [{"type": "text", "text": t.answer}],
             "timestamp": ts_ms,
         })
-    return {"messages": messages, "thinkingLevel": None}
+    payload: dict[str, Any] = {"messages": messages, "thinkingLevel": None}
+    # 可选：附带会话摘要，便于前端展示概要（不改变现有字段语义）
+    summary = (session.summary or "").strip() if getattr(session, "summary", None) else ""
+    if summary:
+        payload["summary"] = summary
+    return payload
 
 
 async def handle_chat_send(

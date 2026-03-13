@@ -103,14 +103,24 @@ def _load_wecom_session_context(agent: CoreAgent, session_id: str) -> Dict[str, 
         return {}
 
 
-def _bind_session_file_path(agent: CoreAgent, session_id: str, file_path: str) -> None:
-    """Store the uploaded file path immediately for next user message."""
+def _bind_session_file_path(
+    agent: CoreAgent,
+    session_id: str,
+    file_path: str,
+    file_id: str | None = None,
+    excel_meta: Dict[str, Any] | None = None,
+) -> None:
+    """Store the uploaded file path (and related Excel meta) immediately for next user message."""
     try:
         store = getattr(agent, "_store", None)
         if store is None:
             return
         session = store.load(session_id)
         session.file_path = file_path
+        if file_id:
+            session.file_id = file_id
+        if excel_meta:
+            session.excel_meta = excel_meta
     except Exception:
         logger.debug("failed to bind session file_path", exc_info=True)
 
@@ -213,7 +223,18 @@ async def handle_wecom_file(agent: CoreAgent, from_user: str, file_path: str) ->
             )
 
     # Make follow-up text available immediately, without waiting execute_react.
-    _bind_session_file_path(agent, session_id, norm_path)
+    excel_meta = {}
+    meta = summary.get("meta") or {}
+    rows = meta.get("rows_count")
+    sheets_count = meta.get("sheets_count")
+    total_rows = meta.get("total_rows")
+    if isinstance(sheets_count, int):
+        excel_meta["sheets_count"] = sheets_count
+    if isinstance(total_rows, int):
+        excel_meta["total_rows"] = total_rows
+    elif isinstance(rows, int):
+        excel_meta["total_rows"] = rows
+    _bind_session_file_path(agent, session_id, norm_path, summary_entry.file_id, excel_meta or None)
     _LAST_FILE_BIND_TS[from_user or ""] = time.time()
 
     user_hint = (

@@ -113,6 +113,8 @@ class CoreAgent:
 
         user_content = user_input.strip()
         ctx = context or {}
+        if session_id:
+            ctx.setdefault("session_id", session_id)
         # 若上层未显式设置 preferred_lang，则在核心入口做一次轻量语言检测兜底
         if user_input and "preferred_lang" not in ctx:
             try:
@@ -155,6 +157,14 @@ class CoreAgent:
                     last_q = (session.turns[-1].query or "").strip()[:80]
                     user_content += f"\n\n【当前意图】用户本句是对上一轮「问：{last_q}」的回复，请按该主题理解，勿与更早轮次混淆。"
                 user_content += f"\n\n{injection}"
+            # 短消息场景下，额外注入最近几次工具调用的精简摘要，帮助模型延续工具链 reasoning。
+            if session.turns and len(user_input.strip()) <= 20:
+                try:
+                    tool_injection = self._store.build_tool_memory_injection(session, max_items=3)
+                    if tool_injection:
+                        user_content += f"\n\n{tool_injection}"
+                except Exception:
+                    logger.debug("build_tool_memory_injection 失败，已忽略", exc_info=True)
             # U 型注意力：把「本对话当前主题」放在 user 消息绝对末尾，便于模型绑定上一轮与本句
             if session.turns:
                 last_q = (session.turns[-1].query or "").strip()[:80]
@@ -333,6 +343,42 @@ class CoreAgent:
                             obs = ext.on_after_tool(name, args, obs)  # type: ignore[call-arg]
                     except Exception:
                         logger.warning("ext.on_after_tool 失败，已跳过 name=%s", name, exc_info=True)
+
+                # Tool Memory：记录结构化工具调用摘要，供后续轮次注入。
+                if session_id and self._store:
+                    try:
+                        record: Dict[str, Any] = {
+                            "tool": name,
+                            "ts": int(time.time() * 1000),
+                            "args": args,
+                        }
+                        # 尝试从 JSON 结果中抽取 summary + 紧凑 data
+                        summary_text = ""
+                        data_obj: Any = None
+                        try:
+                            if obs and len(obs) <= 4000:
+                                parsed = json.loads(obs)
+                                if isinstance(parsed, dict):
+                                    data_obj = parsed
+                                    s = parsed.get("summary")
+                                    if isinstance(s, str):
+                                        summary_text = s.strip()
+                                elif isinstance(parsed, list):
+                                    data_obj = parsed
+                        except Exception:
+                            # 非 JSON，退化为基于文本的简短摘要
+                            pass
+                        if not summary_text and obs:
+                            text = str(obs).strip()
+                            if len(text) > 0:
+                                summary_text = text[:180] + ("…" if len(text) > 180 else "")
+                        if summary_text:
+                            record["summary"] = summary_text
+                        if data_obj is not None:
+                            record["data"] = data_obj
+                        self._store.append_tool_memory(session_id, record)
+                    except Exception:
+                        logger.debug("append_tool_memory 失败，已忽略", exc_info=True)
 
                 if on_event:
                     try:

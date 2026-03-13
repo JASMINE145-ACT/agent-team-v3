@@ -6,7 +6,7 @@ import logging
 from typing import Callable, Dict, List, Optional
 
 # 多轮对话总上下文上限（字符数），超出时压缩历史 tool 结果
-CONTEXT_MAX_CHARS = 8_000
+CONTEXT_MAX_CHARS = 20_000
 
 logger = logging.getLogger(__name__)
 

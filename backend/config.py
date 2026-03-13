@@ -53,6 +53,11 @@ class Config:
         or (str(_v3_standard) if _v3_standard.exists() else str(_v3_old) if _v3_old.exists() else str(_v3_standard))
     )
     SESSION_STORE_DIR = Path(os.getenv("SESSION_STORE_DIR", "/tmp/sessions" if _is_vercel else str(base_dir / "data" / "sessions")))
+    # 会话与 Memory 相关参数（可选环境变量覆盖）
+    SESSION_MAX_TURNS = int(os.getenv("SESSION_MAX_TURNS", "20"))
+    SESSION_INJECT_TURNS = int(os.getenv("SESSION_INJECT_TURNS", "4"))
+    SESSION_INJECT_ANSWER_TRIM = int(os.getenv("SESSION_INJECT_ANSWER_TRIM", "2000"))
+    SESSION_ANSWER_TRIM = int(os.getenv("SESSION_ANSWER_TRIM", "2000"))
     # 文字报价：用案例报价单模板生成 Excel 的模板路径（供 /api/quotation/from-text）
     _quotation_tpl = base_dir / "报价单" / "案例报价单.xlsx"
     QUOTATION_TEMPLATE_PATH = Path(os.getenv("QUOTATION_TEMPLATE_PATH", str(_quotation_tpl)))
