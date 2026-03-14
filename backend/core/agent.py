@@ -205,10 +205,10 @@ class CoreAgent:
 
         try:
             from backend.config import Config
-            max_tokens = getattr(Config, "LLM_MAX_TOKENS", 10000)
+            max_tokens = getattr(Config, "LLM_MAX_TOKENS", 20000)
         except Exception:
-            logger.warning("读取 LLM_MAX_TOKENS 失败，使用默认 10000", exc_info=True)
-            max_tokens = 10000
+            logger.warning("读取 LLM_MAX_TOKENS 失败，使用默认 20000", exc_info=True)
+            max_tokens = 20000
 
         for step in range(max_steps):
             _raise_if_cancelled()
@@ -222,6 +222,7 @@ class CoreAgent:
                 kwargs["tool_choice"] = "auto"
 
             step_usage = None
+            step_finish_reason = None
             if on_token is not None:
                 # 流式调用：先用主模型，若因网络/超时失败且配置了 fallback，则自动切到 fallback 模型重试一次
                 llm_task = asyncio.create_task(
@@ -231,7 +232,7 @@ class CoreAgent:
                     while not llm_task.done():
                         _raise_if_cancelled()
                         await asyncio.sleep(0.05)
-                    content, tool_calls, step_usage = await llm_task
+                    content, tool_calls, step_usage, step_finish_reason = await llm_task
                 except asyncio.CancelledError:
                     if not llm_task.done():
                         llm_task.cancel()
@@ -246,7 +247,7 @@ class CoreAgent:
                         while not fb_task.done():
                             _raise_if_cancelled()
                             await asyncio.sleep(0.05)
-                        content, tool_calls, step_usage = await fb_task
+                        content, tool_calls, step_usage, step_finish_reason = await fb_task
                         trace.append({"step": step + 1, "type": "fallback", "model": self._fallback_model})
                     else:
                         logger.exception("主模型调用失败（无 fallback 配置）")
@@ -272,8 +273,20 @@ class CoreAgent:
                 u = getattr(resp, "usage", None)
                 if u:
                     step_usage = {"prompt_tokens": u.prompt_tokens or 0, "completion_tokens": u.completion_tokens or 0}
+                if resp.choices:
+                    step_finish_reason = getattr(resp.choices[0], "finish_reason", None)
             if step_usage:
                 last_usage = step_usage
+                pt = step_usage.get("prompt_tokens") or 0
+                ct = step_usage.get("completion_tokens") or 0
+                logger.info(
+                    "LLM tokens step=%s prompt=%s completion=%s max_tokens=%s finish_reason=%s",
+                    step + 1, pt, ct, max_tokens, step_finish_reason
+                )
+                if step_finish_reason == "length":
+                    logger.warning(
+                        "LLM 输出因达到 max_tokens 被截断（finish_reason=length），可增大 LLM_MAX_TOKENS 后重试"
+                    )
 
             content, thought = _extract_tag(content, "think")
             if thought:

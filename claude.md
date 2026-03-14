@@ -27,6 +27,7 @@ Agent Team version3/
 │   ├── 改造.md                   # 框架化改造计划（core + plugins + Registry）
 │   ├── ReAct范式对比.md           # version3 与 OpenCode 的 ReAct 范式对比
 │   ├── wecom_excel_逻辑说明.md   # WeCom 接收/解析 Excel 的完整流程与已知缺陷
+│   ├── agent-injected-content.md # 影响推理执行的全部注入内容（system prompt、工具描述、每轮注入、会话/工具记忆）
 │   └── …（其他文档）
 ├── backend/
 │   ├── config.py                 # 后端全局配置（.env 含根目录、backend/tools/oos）
@@ -82,7 +83,7 @@ Agent Team version3/
 技能描述现位于 `backend/plugins/jagent/skills.py`（ALL_SKILL_PROMPT、OUTPUT_FORMAT）；`backend/agent/agent.py` 为薄封装，实际逻辑在 `backend/core/agent.py` + JAgentExtension。**OpenClaw 配置**：`doc/openclaw/AGENTS.md`、`doc/openclaw/TOOLS.md` 与上述逻辑对齐，供 OpenClaw 工作区使用或复制到 `~/.openclaw/workspace`；用法见 `doc/openclaw/README.md`。
 
 **工具入参校验**：`backend/core/tool_utils.py` 提供 `tool_error(msg)`、`validate_file_path(path, tool_name)`；报价单工具与 run_quotation_fill 的 file_path/customer_level 校验在 `backend/plugins/jagent/extension.py` 各 handler 内（_QUOTE_WITH_FILE、_VALID_CUSTOMER_LEVELS）。`backend/agent/tools.py` 仅保留 EXTRA_TOOLS 定义、_run_oos_* / _run_register_oos 及 get_all_tools（供预热回退）；工具分发已全部在 Registry + JAgentExtension 内完成，无 execute_tool 分发链。  
-- **Token 优化**：`session.py` 中 INJECT_TURNS=2、INJECT_ANSWER_TRIM=500（注入最近 2 轮、每轮答 500 字，可再按需下调）；core/agent 中 TOOL_RESULT_MAX_CHARS=8_000（单次工具结果上限）、_CONTEXT_MAX_CHARS=8_000（多轮总上下文超则压缩历史 tool 结果）；`inventory_agent_tools.py` 工具 description 仅保留「做什么」，决策以 system prompt 为准。若几句对话就接近 3 万 token，可优先再降 TOOL_RESULT_MAX_CHARS / _CONTEXT_MAX_CHARS 或 INJECT_*。
+- **Token 优化**：`session.py` 中 INJECT_TURNS=2、INJECT_ANSWER_TRIM=500（注入最近 2 轮、每轮答 500 字，可再按需下调）；core/agent 中 TOOL_RESULT_MAX_CHARS=8_000（单次工具结果上限）、_CONTEXT_MAX_CHARS=8_000（多轮总上下文超则压缩历史 tool 结果）；`inventory_agent_tools.py` 工具 description 仅保留「做什么」，决策以 system prompt 为准。若几句对话就接近 3 万 token，可优先再降 TOOL_RESULT_MAX_CHARS / _CONTEXT_MAX_CHARS 或 INJECT_*。**单次回复长度**：`Config.LLM_MAX_TOKENS` 默认 **20000**（.env 可设 `LLM_MAX_TOKENS`）；表格/利润率等长回复易截断时可增大该值。**Token 使用日志**：每次 ReAct 调用 LLM 后会在**后端日志/终端**输出 `LLM tokens step=... prompt=... completion=... max_tokens=... finish_reason=...`（仅后端，不加到前端）；若 `finish_reason=length` 会额外打一条 warning 提示因达到 max_tokens 被截断、可增大 LLM_MAX_TOKENS。
 - **上下文压缩**：多轮总 context 超 _CONTEXT_MAX_CHARS 时，历史 tool 结果不再整段替换为「已压缩，原长 N 字符」，改为用 **gpt-4o-mini**（或 SUMMARY_LLM_MODEL）生成短摘要（约 400 字）；实现见 `backend/core/context_compression.py`（LLM + 规则 fallback），`_trim_context` 在 core/agent 中调用；配置见 Config.SUMMARY_LLM_MODEL / SUMMARY_LLM_BASE_URL / SUMMARY_LLM_API_KEY（不设则用主 LLM 同 endpoint）。
 - **会话上下文绑定**：为避免用户短回复（如「价格」「库存」）被误绑到更早轮次（如上一次查询的其它产品），`session.py` 的 `build_injection` 末尾增加说明「当前用户下一条消息是对上述最近一轮的回复，请以最近一轮的『问』为主题理解」；`core/agent.py` 在注入会话前，若当前用户消息长度 ≤15 字符且存在上一轮，会追加「【当前意图】用户本句是对上一轮「问：…」的回复，请按该主题理解」，减少澄清后短回复与更早轮次混淆。
 

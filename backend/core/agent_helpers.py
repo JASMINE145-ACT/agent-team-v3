@@ -33,20 +33,24 @@ def build_system_prompt(skill_prompt: str, output_format: str) -> str:
     )
 
 
-def call_llm_streaming_sync(client, kwargs: Dict[str, Any], on_token) -> Tuple[str, List, Any]:
-    """同步流式调用 LLM，返回 (content, tool_calls, last_usage)。"""
+def call_llm_streaming_sync(client, kwargs: Dict[str, Any], on_token) -> Tuple[str, List, Any, Any]:
+    """同步流式调用 LLM，返回 (content, tool_calls, last_usage, finish_reason)。"""
     create_kw = {**kwargs, "stream": True, "stream_options": {"include_usage": True}}
     stream = client.chat.completions.create(**create_kw)
     content_parts: List[str] = []
     tool_calls_raw: Dict[int, dict] = {}
     last_usage = None
+    last_finish_reason = None
     for chunk in stream:
         if getattr(chunk, "usage", None):
             u = chunk.usage
             last_usage = {"prompt_tokens": u.prompt_tokens or 0, "completion_tokens": u.completion_tokens or 0}
         if not chunk.choices:
             continue
-        delta = chunk.choices[0].delta
+        c0 = chunk.choices[0]
+        if getattr(c0, "finish_reason", None):
+            last_finish_reason = c0.finish_reason
+        delta = c0.delta
         if delta.content:
             on_token(delta.content)
             content_parts.append(delta.content)
@@ -69,4 +73,4 @@ def call_llm_streaming_sync(client, kwargs: Dict[str, Any], on_token) -> Tuple[s
         )
         for k in sorted(tool_calls_raw)
     ]
-    return content, tool_calls, last_usage
+    return content, tool_calls, last_usage, last_finish_reason
