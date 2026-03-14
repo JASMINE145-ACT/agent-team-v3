@@ -162,7 +162,7 @@
 ### 4.1 build_injection(session) 产出
 
 - **[会话摘要]**：`session.summary`（若存在）。
-- **[会话上下文 — 最近 N 轮]**：最近 `INJECT_TURNS`（默认 4）轮，每轮：轮次、时间、agent、问、答（答截断到 `INJECT_ANSWER_TRIM`=2000 字，超出加「…（已截断）」）。
+- **[会话上下文 — 最近 N 轮]**：最近 `INJECT_TURNS`（默认 4）轮，每轮：轮次、时间、agent、问、答（答**不截断**，完整注入，保证模型能看到上一轮完整表格/明细）。
 - **[已上传文件]**：`session.file_path` 的文件名与路径。
 - **[用户偏好]**：`session.user_facts` 中非 `_` 开头的 key=value。
 - 结尾一句：**【说明】当前用户下一条消息是对上述「最近一轮」的回复...**
@@ -189,7 +189,7 @@
 | TOOL_RESULT_EXCEL_MAX_CHARS | 48_000（可环境变量） | Excel 解析类工具结果上限 |
 | _CONTEXT_MAX_CHARS | agent.py，8_000 | 多轮总上下文超此值时压缩历史 tool 结果（_trim_context） |
 | INJECT_TURNS | SessionStore，默认 4 | 注入的最近轮次数 |
-| INJECT_ANSWER_TRIM | SessionStore，默认 2000 | 每轮「答」注入时的最大字符 |
+| INJECT_ANSWER_TRIM | SessionStore，默认 2000 | 当前未用于注入（答完整注入）；保留常量供日后可选截断 |
 | format_excel_summary max_items / max_chars | 20 / 2000 | Excel 摘要条数与总长 |
 
 ---

@@ -149,7 +149,8 @@ class SessionStore:
         output_tokens: Optional[int] = None,
     ):
         session = self.load(session_id)
-        session.turns.append(Turn(query=query[:200], agent=agent or "", answer=(answer or "")[:self.ANSWER_TRIM], ts=time.time()))
+        # 存盘保留完整 answer，不截断；build_injection 也注入完整回答，保证模型能看到上一轮完整表格/明细
+        session.turns.append(Turn(query=query[:200], agent=agent or "", answer=(answer or ""), ts=time.time()))
         if len(session.turns) > self.MAX_TURNS:
             session.turns = session.turns[-self.MAX_TURNS:]
         if file_path:
@@ -190,8 +191,8 @@ class SessionStore:
         lines.append(f"[会话上下文 — 最近 {len(recent)} 轮]")
         for i, turn in enumerate(recent, 1):
             ts_str = time.strftime("%H:%M", time.localtime(turn.ts)) if turn.ts else "??"
-            ans = turn.answer[:self.INJECT_ANSWER_TRIM] + ("…（已截断）" if len(turn.answer) > self.INJECT_ANSWER_TRIM else "")
-            lines.append(f"\n轮次 {i} [{ts_str}] agent={turn.agent or '?'}\n  问: {turn.query}\n  答: {ans}")
+            # 注入完整回答，不截断，保证模型能看到上一轮完整表格/明细
+            lines.append(f"\n轮次 {i} [{ts_str}] agent={turn.agent or '?'}\n  问: {turn.query}\n  答: {turn.answer}")
         if session.file_path:
             lines.append(f"\n[已上传文件]: {Path(session.file_path).name} → {session.file_path}")
 
