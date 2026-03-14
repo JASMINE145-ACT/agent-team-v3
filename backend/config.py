@@ -28,7 +28,8 @@ class Config:
     )
     # 主 LLM（默认智谱 GLM，可通过 .env 中的 LLM_MODEL 覆盖）
     LLM_MODEL = os.getenv("LLM_MODEL", "glm-4-flash")
-    LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "5000"))
+    # 单次回复最大 token 数；表格/利润率等长回复需 8k+，否则末尾会被截断
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "10000"))
     # 上下文压缩：用轻量模型对历史 tool 结果做摘要，默认 gpt-4o-mini；未设则用主模型同 endpoint
     SUMMARY_LLM_MODEL = os.getenv("SUMMARY_LLM_MODEL", "gpt-4o-mini")
     SUMMARY_LLM_BASE_URL = (os.getenv("SUMMARY_LLM_BASE_URL") or "").strip() or None  # None 则用 OPENAI_BASE_URL

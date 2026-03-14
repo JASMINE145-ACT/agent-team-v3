@@ -205,10 +205,10 @@ class CoreAgent:
 
         try:
             from backend.config import Config
-            max_tokens = getattr(Config, "LLM_MAX_TOKENS", 5000)
+            max_tokens = getattr(Config, "LLM_MAX_TOKENS", 10000)
         except Exception:
-            logger.warning("读取 LLM_MAX_TOKENS 失败，使用默认 5000", exc_info=True)
-            max_tokens = 5000
+            logger.warning("读取 LLM_MAX_TOKENS 失败，使用默认 10000", exc_info=True)
+            max_tokens = 10000
 
         for step in range(max_steps):
             _raise_if_cancelled()
