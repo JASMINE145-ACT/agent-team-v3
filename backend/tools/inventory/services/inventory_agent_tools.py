@@ -258,11 +258,17 @@ def _execute_get_profit_by_price(arguments: dict[str, Any]) -> dict[str, Any]:
 BATCH_PROFIT_MAX_ITEMS = 50
 
 
+# skip_reason 仅三种枚举，不写自然语言
+SKIP_REASON_MISSING_CODE = "missing_code"
+SKIP_REASON_MISSING_PRICE = "missing_price"
+SKIP_REASON_INVALID_PRICE = "invalid_price"
+
+
 def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     批量利润率查询（只读，万鼎价格库）：对多组 code+price 一次性查万鼎利润率。
     - 入参：items 为 list[dict]，每项 {"code": str, "price": number}；单次最多 50 条，超出仅处理前 50 条。
-    - 返回：与 get_profit_by_price 一致结构 { success, result, data: { rows } }，result 为整批汇总文案。
+    - 返回：{ success, result, data: { rows, stats, items } }。data.items 与输入 1:1，每项含 input_index、code、price、item_status、name；matched 时有 matched_price/matched_profit/matched_price_level；skipped 时有 skip_reason（仅 missing_code|missing_price|invalid_price）。
     """
     from backend.tools.inventory.config import config
     from backend.tools.inventory.services.wanding_fuzzy_matcher import (
@@ -273,13 +279,14 @@ def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, A
 
     raw_items = arguments.get("items")
     if not isinstance(raw_items, list) or not raw_items:
-        return {"success": True, "result": "请提供 items（至少一组 code+price）。", "data": {"rows": []}}
+        return {"success": True, "result": "请提供 items（至少一组 code+price）。", "data": {"rows": [], "items": []}}
 
     items = raw_items[:BATCH_PROFIT_MAX_ITEMS]
     truncated = len(raw_items) > BATCH_PROFIT_MAX_ITEMS
     path = config.PRICE_LIBRARY_PATH
 
     all_rows: list[dict[str, Any]] = []
+    items_with_status: list[dict[str, Any]] = []
     matched_lines: list[str] = []
     price_miss_lines: list[str] = []
     code_not_found_lines: list[str] = []
@@ -291,18 +298,50 @@ def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, A
 
     for idx, it in enumerate(items):
         if not isinstance(it, dict):
+            items_with_status.append({
+                "input_index": idx,
+                "code": "",
+                "price": None,
+                "item_status": "skipped",
+                "name": "",
+                "skip_reason": SKIP_REASON_INVALID_PRICE,
+            })
             skipped_lines.append(f"第 {idx + 1} 条：条目不是对象，已跳过。")
             continue
         code = (it.get("code") or "").strip()
         if not code:
+            items_with_status.append({
+                "input_index": idx,
+                "code": "",
+                "price": None,
+                "item_status": "skipped",
+                "name": "",
+                "skip_reason": SKIP_REASON_MISSING_CODE,
+            })
             skipped_lines.append(f"第 {idx + 1} 条：缺少 code，已跳过。")
             continue
         if "price" not in it:
+            items_with_status.append({
+                "input_index": idx,
+                "code": code,
+                "price": None,
+                "item_status": "skipped",
+                "name": "",
+                "skip_reason": SKIP_REASON_MISSING_PRICE,
+            })
             skipped_lines.append(f"编号 {code}：未提供 price，已跳过。")
             continue
         try:
             price = normalize_price(it.get("price"))
         except Exception as e:
+            items_with_status.append({
+                "input_index": idx,
+                "code": code,
+                "price": None,
+                "item_status": "skipped",
+                "name": "",
+                "skip_reason": SKIP_REASON_INVALID_PRICE,
+            })
             skipped_lines.append(f"编号 {code}：价格格式不合法（{e}），已跳过。")
             continue
         processed_items += 1
@@ -310,10 +349,25 @@ def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, A
             rows = get_profit_rows_by_code(code, price, path)
         except Exception as e:
             logger.debug("get_profit_by_price_batch 单条失败 code=%s: %s", code, e)
+            items_with_status.append({
+                "input_index": idx,
+                "code": code,
+                "price": price,
+                "item_status": "skipped",
+                "name": "",
+                "skip_reason": SKIP_REASON_INVALID_PRICE,
+            })
             skipped_lines.append(f"编号 {code}：查询失败，已跳过。")
             continue
         if not rows:
             code_not_found_items += 1
+            items_with_status.append({
+                "input_index": idx,
+                "code": code,
+                "price": price,
+                "item_status": "code_not_found",
+                "name": "",
+            })
             code_not_found_lines.append(f"编号 {code}（报价 {price:g}）：未在万鼎价格库中找到该编号。")
             continue
 
@@ -323,9 +377,21 @@ def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, A
         matched_rows = [r for r in rows if r.get("matched_price_level")]
         if matched_rows:
             matched_items += 1
+            r0 = matched_rows[0]
+            name_str = (r0.get("name") or "").strip() or ""
+            items_with_status.append({
+                "input_index": idx,
+                "code": code,
+                "price": price,
+                "item_status": "matched",
+                "name": name_str,
+                "matched_price": r0.get("matched_price"),
+                "matched_profit": r0.get("matched_profit"),
+                "matched_price_level": r0.get("matched_price_level"),
+            })
             for r in matched_rows:
                 code_str = r.get("code") or code or "-"
-                name_str = (r.get("name") or "").strip() or "-"
+                name_display = (r.get("name") or "").strip() or "-"
                 matched_level = r.get("matched_price_level")
                 matched_price = r.get("matched_price")
                 matched_profit = r.get("matched_profit")
@@ -336,17 +402,25 @@ def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, A
                 )
                 profit_pct = f"{matched_profit:.2%}" if isinstance(matched_profit, (int, float)) else "未知"
                 matched_lines.append(
-                    f"编号 {code_str}（{name_str}）：报价 {price:g} 命中档位 {level_display}"
+                    f"编号 {code_str}（{name_display}）：报价 {price:g} 命中档位 {level_display}"
                     f"（档位价 {matched_price:g}，利润率 {profit_pct}）。"
                 )
             continue
 
         price_miss_items += 1
+        name_str = (rows[0].get("name") or "").strip() if rows else ""
+        items_with_status.append({
+            "input_index": idx,
+            "code": code,
+            "price": price,
+            "item_status": "price_miss",
+            "name": name_str,
+        })
         for r in rows:
             code_str = r.get("code") or code or "-"
-            name_str = (r.get("name") or "").strip() or "-"
+            name_display = (r.get("name") or "").strip() or "-"
             price_miss_lines.append(
-                f"编号 {code_str}（{name_str}）：在库中有记录，但报价 {price:g} 未命中任何档位。"
+                f"编号 {code_str}（{name_display}）：在库中有记录，但报价 {price:g} 未命中任何档位。"
             )
 
     lines: list[str] = []
@@ -361,7 +435,7 @@ def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, A
             lines.extend(skipped_lines)
         else:
             lines.append("未解析到有效的 code+price 条目。")
-        return {"success": True, "result": "\n".join(lines), "data": {"rows": []}}
+        return {"success": True, "result": "\n".join(lines), "data": {"rows": [], "items": items_with_status}}
 
     lines.append("三类统计（按输入条目分类）：")
     lines.append(f"- 命中（编号存在且价格命中档位）：{matched_items}")
@@ -403,6 +477,7 @@ def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, A
                 "truncated": truncated,
                 "input_total": len(raw_items),
             },
+            "items": items_with_status,
         },
     }
 

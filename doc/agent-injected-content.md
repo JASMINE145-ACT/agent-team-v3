@@ -33,7 +33,7 @@
 
 - **SKILL_INVENTORY_PRICE**：库存与询价/价格——search_inventory、get_inventory_by_code、modify_inventory、match_quotation、match_by_quotation_history、match_wanding_price、select_wanding_match、get_profit_by_price、get_profit_by_price_batch；何时用、查库存调用顺序、keywords 保护、档位与自然语言对应、回复档位全名、needs_selection 行为。
 - **SKILL_OOS**：无货——get_oos_list、get_oos_stats、get_oos_by_file、get_oos_by_time、register_oos、register_oos_from_text；Chat 不注入。
-- **SKILL_QUOTE**：报价单提取/填表/普适 Excel——parse_excel_smart 优先、extract_quotation_data、fill_quotation_sheet、edit_excel；工具选择规则、字段语义、表格必须逐行一致、不得在单元格填「数据被截断」；Chat 不注入。
+- **SKILL_QUOTE**：报价单提取/填表/普适 Excel——parse_excel_smart（统一解析）、fill_quotation_sheet、edit_excel；同一 file_path 同一轮只调一次解析、字段语义、表格必须逐行一致、不得在单元格填「数据被截断」；Chat 不注入。
 - **SKILL_FILL**：询价填充整单流水线——run_quotation_fill；Chat 不注入。
 - **SKILL_EXCEL_CHAT**：Chat 用 Excel——parse_excel_smart、回复与工具表逐行一致、不得在单元格填「数据被截断」、已截断时说明方式。
 - **SKILL_CLARIFY**：澄清——ask_clarification；意图不明确时必用、库存/价格关键词才可跳过。
@@ -58,9 +58,8 @@
 
 | 工具名 | description 概要 | 定义位置 |
 |--------|------------------|----------|
-| extract_quotation_data | 【报价区专用】第2行～Total 上一行；总价行较前则行数偏少；全表请用 parse_excel_smart | quote_tools.get_quote_tools_openai_format |
+| parse_excel_smart | 【统一 Excel 解析】按行读全表，最多 500 行；提取/查看报价单或 Excel 均用此工具 | quote_tools.get_quote_tools_openai_format |
 | fill_quotation_sheet | 【报价单导向】按 fill_items 写入 G/H/J/L/N/O 等列，交货/报价日期 | 同上 |
-| parse_excel_smart | 【普适性，推荐】按行读全表，最多 500 行；提取/查看 Excel 优先用此工具 | 同上 |
 | edit_excel | 【普适性】cell+value 单格或 range+values 区域写入 | 同上 |
 
 ### 2.2 库存/询价/价格（inventory_agent_tools）
@@ -141,14 +140,14 @@
 | 内容 | 条件 | 位置 |
 |------|------|------|
 | 通用工具 | `len(obs) > TOOL_RESULT_MAX_CHARS`（8_000） | agent.py：obs 截断后追加「…（以上结果因长度限制已截断。行数已按解析结果完整计算，请基于已有内容回答，勿重复调用解析工具。）」 |
-| Excel 类工具 | `len(obs) > TOOL_RESULT_EXCEL_MAX_CHARS`（默认 48_000） | 同上，仅对 extract_quotation_data / parse_excel_smart 使用更高上限 |
+| Excel 类工具 | `len(obs) > TOOL_RESULT_EXCEL_MAX_CHARS`（默认 48_000） | 同上，仅对 parse_excel_smart 使用更高上限 |
 
 ### 3.6 工具缓存命中时的“假” observation
 
 | 内容 | 条件 | 位置 |
 |------|------|------|
 | 同一工具+同参已调用过 | tool_obs_cache 已有该 key | agent.py：返回缓存 obs +「提示：同一工具和参数在本轮已调用过，请直接基于已有结果继续，不要重复调用。」 |
-| Excel 解析类 + 刚完成批量利润率（≥20 条） | name 为 extract_quotation_data 或 parse_excel_smart，且 last_profit_batch_items>=20 且有 last_profit_batch_obs | agent.py：直接返回 last_profit_batch_obs + 提示不要再次调用 Excel 解析工具 |
+| Excel 解析类 + 刚完成批量利润率（≥20 条） | name 为 parse_excel_smart，且 last_profit_batch_items>=20 且有 last_profit_batch_obs | agent.py：直接返回 last_profit_batch_obs + 提示不要再次调用 Excel 解析工具 |
 
 ### 3.7 扩展对工具结果的后处理
 

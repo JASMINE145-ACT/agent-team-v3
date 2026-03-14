@@ -49,14 +49,14 @@
 
 ## 3. 报价单
 
-- **extract_quotation_data(file_path, sheet_name?)**  
-  从报价单提取第 2 行到「Total Excluding PPN」上一行。需 context 有 file_path。
+- **parse_excel_smart(file_path, sheet_name?, max_rows?)**  
+  解析任意 Excel，按行读全表（默认最多 500 行），返回 Markdown 表。**提取/查看报价单或 Excel 数据时统一使用此工具**，需 context 有 file_path。
 
 - **fill_quotation_sheet(file_path, fill_items, ...)**  
   将匹配结果按行回填报价单。
 
-- **parse_excel_smart(file_path, sheet_name?, max_rows?)** / **edit_excel(file_path, edits, ...)**  
-  普适 Excel 解析与编辑。
+- **edit_excel(file_path, edits, ...)**  
+  普适 Excel 按单元格/区域编辑。
 
 - **何时用**  
   用户要「提取报价数据」「看报价单」「填表」「解析/编辑这个 Excel」且 context 有 file_path 时用；**整单询价填充**用 run_quotation_fill。

@@ -10,7 +10,7 @@ from backend.agent.tools import EXTRA_TOOLS
 
 logger = logging.getLogger(__name__)
 
-_QUOTE_WITH_FILE = {"extract_quotation_data", "fill_quotation_sheet", "parse_excel_smart", "edit_excel"}
+_QUOTE_WITH_FILE = {"fill_quotation_sheet", "parse_excel_smart", "edit_excel"}
 _VALID_CUSTOMER_LEVELS = {"A", "B", "C", "D"}
 
 

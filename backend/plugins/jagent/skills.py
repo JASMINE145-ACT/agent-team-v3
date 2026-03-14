@@ -38,13 +38,10 @@ SKILL_OOS = """\
 SKILL_QUOTE = """\
 **3. 报价单（提取/填表/普适 Excel）**
 - **目标**：从报价单取数据、往报价单填数据、或任意 Excel 解析/编辑。
-- **parse_excel_smart(file_path, sheet_name?, max_rows?)**：普适解析任意 Excel，按行读取全表（默认最多 500 行），返回完整 Markdown 表。**提取/查看 Excel 数据时优先使用此工具**，避免因「Total」行位置导致只拿到部分行。
-- **extract_quotation_data(file_path, sheet_name?)**：仅提取「第 2 行～Total Excluding PPN 上一行」的报价区；若总价行在表内较前会出现行数偏少，仅当用户明确要「只要报价区、不要 Total 之后」时再用。
+- **parse_excel_smart(file_path, sheet_name?, max_rows?)**：解析任意 Excel，按行读取全表（默认最多 500 行），返回完整 Markdown 表。**提取/查看报价单或 Excel 数据时统一使用此工具**，不受「Total」行位置影响。
 - **fill_quotation_sheet(file_path, fill_items, ...)**：将匹配结果按行回填报价单（row, code, quote_name, unit_price, qty 等）。
 - **edit_excel(file_path, edits, ...)**：普适编辑任意 Excel（cell+value 或 range+values）。
-- **工具选择规则**：
-  - 用户要「提取/查看报价单/Excel 数据」「有多少行」「完整商品信息」时，**一律优先 parse_excel_smart**，确保拿到全表行数。
-  - 同一 `file_path` 在同一轮内不要反复切换解析工具；若返回中含「已截断」，请直接基于已有内容回答，勿再次调用解析工具。
+- **规则**：同一 `file_path` 在同一轮内只调用一次 parse_excel_smart；若返回中含「已截断」，请直接基于已有内容回答，勿再次调用解析工具。
 - **字段语义规则**：
   - 报价单里的 `Qty` 是「询价数量/采购数量」，**不是库存**；库存只能来自库存工具（`get_inventory_by_code` / `search_inventory`）。
   - 用户要求「提取 Excel 数据/商品信息」时，**回复中的表格必须与工具返回的表逐行一致**：照抄全部行、不得只列部分、不得把同一行重复多遍凑行数、不得自行编造行。若篇幅所限只能展示部分，须明确写「仅展示前 N 行，共 M 行」。**不得在表格单元格内填写「数据被截断」等占位符**；仅当工具返回明确含「已截断」提示时，方可在回复末尾用一句话说明「部分内容因长度被截断」，且不得在具体单元格内填「数据被截断」。

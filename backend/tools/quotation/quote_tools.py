@@ -891,30 +891,8 @@ def edit_excel(
 
 
 def get_quote_tools_openai_format() -> list[dict]:
-    """OpenAI function calling 格式：报价 Agent 工具。"""
+    """OpenAI function calling 格式：报价 Agent 工具。仅暴露 parse_excel_smart 做 Excel 解析，不再暴露 extract_quotation_data。"""
     return [
-        {
-            "type": "function",
-            "function": {
-                "name": "extract_quotation_data",
-                "description": "【报价区专用】仅提取第2行到「Total Excluding PPN不含税总价」上一行；若总价行在表中较前则返回行数会偏少。提取/查看 Excel 全表数据时请优先用 parse_excel_smart。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "报价单 Excel 的完整路径，通常从 context.file_path 获取",
-                        },
-                        "sheet_name": {
-                            "type": "string",
-                            "description": "工作表名称，不传则使用第一个/当前工作表",
-                        },
-                    },
-                    "required": ["file_path"],
-                },
-                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
-            },
-        },
         {
             "type": "function",
             "function": {

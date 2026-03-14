@@ -101,3 +101,89 @@ def test_get_profit_by_price_no_match(monkeypatch):
     assert out.get("success") is True
     assert "未在万鼎价格库中找到" in (out.get("result") or "")
 
+
+# --- data.items + input_index 批量逐条结构化（1:1）---
+
+VALID_SKIP_REASONS = {"missing_code", "missing_price", "invalid_price"}
+
+
+def test_batch_data_items_len_equals_input_len(monkeypatch):
+    """data.items 与输入严格 1:1：len(data.items) == len(input items)。"""
+    def fake_get_profit_rows_by_code(code, price, path):
+        if code == "MATCH":
+            return [{"code": code, "name": "Matched Product", "matched_price_level": "B_QUOTE", "matched_price": price, "matched_profit": 0.1, "all_levels": []}]
+        if code == "NOTFOUND":
+            return []
+        return [{"code": code, "name": "", "matched_price_level": None, "matched_price": None, "matched_profit": None, "all_levels": []}]
+
+    monkeypatch.setattr(
+        "backend.tools.inventory.services.wanding_fuzzy_matcher.get_profit_rows_by_code",
+        fake_get_profit_rows_by_code,
+    )
+    items = [
+        {"code": "MATCH", "price": 100},
+        {"code": "NOTFOUND", "price": 200},
+        {"code": "MISS"},  # missing price -> skipped
+        {"code": "", "price": 300},  # missing code -> skipped
+    ]
+    out = inventory_agent_tools._execute_get_profit_by_price_batch({"items": items})
+    assert out.get("success") is True
+    data = out.get("data") or {}
+    data_items = data.get("items") or []
+    assert len(data_items) == len(items), "data.items 必须与输入 1:1"
+
+
+def test_batch_data_items_input_index_and_status(monkeypatch):
+    """data.items 每项含 input_index（连续、与输入下标一致）与 item_status；skip_reason 仅三种枚举。"""
+    def fake_get_profit_rows_by_code(code, price, path):
+        if code == "MATCH":
+            return [{"code": code, "name": "Product", "matched_price_level": "B_QUOTE", "matched_price": price, "matched_profit": 0.1, "all_levels": []}]
+        if code == "NOTFOUND":
+            return []
+        return [{"code": code, "name": "", "matched_price_level": None, "matched_price": None, "matched_profit": None, "all_levels": []}]
+
+    monkeypatch.setattr(
+        "backend.tools.inventory.services.wanding_fuzzy_matcher.get_profit_rows_by_code",
+        fake_get_profit_rows_by_code,
+    )
+    items = [
+        {"code": "MATCH", "price": 100},
+        {"code": "NOTFOUND", "price": 200},
+        {"code": "NOPRICE"},  # missing price
+        {"code": "", "price": 1},  # missing code
+    ]
+    out = inventory_agent_tools._execute_get_profit_by_price_batch({"items": items})
+    data_items = (out.get("data") or {}).get("items") or []
+    assert len(data_items) == 4
+    assert data_items[0]["input_index"] == 0 and data_items[0]["item_status"] == "matched"
+    assert data_items[1]["input_index"] == 1 and data_items[1]["item_status"] == "code_not_found"
+    assert data_items[2]["input_index"] == 2 and data_items[2]["item_status"] == "skipped"
+    assert data_items[3]["input_index"] == 3 and data_items[3]["item_status"] == "skipped"
+    for it in data_items:
+        if it.get("item_status") == "skipped":
+            assert it.get("skip_reason") in VALID_SKIP_REASONS
+    assert data_items[2].get("skip_reason") == "missing_price"
+    assert data_items[3].get("skip_reason") == "missing_code"
+
+
+def test_batch_data_items_matched_has_name_and_level(monkeypatch):
+    """matched 项含 name（必填）、matched_price、matched_profit、matched_price_level。"""
+    def fake_get_profit_rows_by_code(code, price, path):
+        return [{"code": code, "name": "外螺纹管接头", "matched_price_level": "B_QUOTE", "matched_price": price, "matched_profit": 0.1, "all_levels": []}]
+
+    monkeypatch.setattr(
+        "backend.tools.inventory.services.wanding_fuzzy_matcher.get_profit_rows_by_code",
+        fake_get_profit_rows_by_code,
+    )
+    out = inventory_agent_tools._execute_get_profit_by_price_batch({"items": [{"code": "A001", "price": 85001}]})
+    data_items = (out.get("data") or {}).get("items") or []
+    assert len(data_items) == 1
+    it = data_items[0]
+    assert it["item_status"] == "matched"
+    assert "name" in it
+    assert it["name"] == "外螺纹管接头"
+    assert it.get("matched_price_level") == "B_QUOTE"
+    assert it.get("matched_price") == 85001
+    assert it.get("matched_profit") == 0.1
+    assert "matched_price_level_display" not in it
+

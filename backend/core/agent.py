@@ -334,7 +334,7 @@ class CoreAgent:
                 cached_obs = tool_obs_cache.get(cache_key)
                 if (
                     cached_obs is None
-                    and name in ("extract_quotation_data", "parse_excel_smart")
+                    and name == "parse_excel_smart"
                     and last_profit_batch_items >= 20
                     and last_profit_batch_obs
                 ):
@@ -403,7 +403,7 @@ class CoreAgent:
                         raise
                     max_chars = (
                         TOOL_RESULT_EXCEL_MAX_CHARS
-                        if name in ("extract_quotation_data", "parse_excel_smart")
+                        if name == "parse_excel_smart"
                         else TOOL_RESULT_MAX_CHARS
                     )
                     if len(obs) > max_chars:
