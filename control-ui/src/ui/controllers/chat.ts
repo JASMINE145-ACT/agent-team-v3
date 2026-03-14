@@ -123,14 +123,15 @@ export async function sendChatMessage(
   }
   const msg = message.trim();
   const hasAttachments = attachments && attachments.length > 0;
-  if (!msg && !hasAttachments) {
+  const hasUploadedFile = Boolean(uploadedFile?.file_name);
+  if (!msg && !hasAttachments && !hasUploadedFile) {
     return null;
   }
 
   const now = Date.now();
 
-  // Build user message content blocks
-  const contentBlocks: Array<{ type: string; text?: string; source?: unknown }> = [];
+  // Build user message content blocks (text + images + uploaded Excel/PDF so they show in chat)
+  const contentBlocks: Array<{ type: string; text?: string; source?: unknown; file_name?: string; file_path?: string; summaryMeta?: ChatUploadedFile["summaryMeta"] }> = [];
   if (msg) {
     contentBlocks.push({ type: "text", text: msg });
   }
@@ -142,6 +143,15 @@ export async function sendChatMessage(
         source: { type: "base64", media_type: att.mimeType, data: att.dataUrl },
       });
     }
+  }
+  // Add uploaded Excel/PDF so it appears in the conversation bubble, not only above input
+  if (uploadedFile?.file_name) {
+    contentBlocks.push({
+      type: "file",
+      file_name: uploadedFile.file_name,
+      file_path: uploadedFile.file_path,
+      summaryMeta: uploadedFile.summaryMeta,
+    });
   }
 
   state.chatMessages = [
@@ -193,6 +203,8 @@ export async function sendChatMessage(
       attachments: apiAttachments,
       ...(context ? { context, file_path: uploadedFile!.file_path } : {}),
     });
+    // 发送成功后清空上传文件，避免该附件一直挂在输入框并连带后续输入
+    state.chatUploadedFile = null;
     return runId;
   } catch (err) {
     const error = String(err);

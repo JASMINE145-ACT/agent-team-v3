@@ -255,6 +255,158 @@ def _execute_get_profit_by_price(arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+BATCH_PROFIT_MAX_ITEMS = 50
+
+
+def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, Any]:
+    """
+    批量利润率查询（只读，万鼎价格库）：对多组 code+price 一次性查万鼎利润率。
+    - 入参：items 为 list[dict]，每项 {"code": str, "price": number}；单次最多 50 条，超出仅处理前 50 条。
+    - 返回：与 get_profit_by_price 一致结构 { success, result, data: { rows } }，result 为整批汇总文案。
+    """
+    from backend.tools.inventory.config import config
+    from backend.tools.inventory.services.wanding_fuzzy_matcher import (
+        get_profit_rows_by_code,
+        normalize_price,
+        PRICE_LEVEL_DISPLAY_NAMES,
+    )
+
+    raw_items = arguments.get("items")
+    if not isinstance(raw_items, list) or not raw_items:
+        return {"success": True, "result": "请提供 items（至少一组 code+price）。", "data": {"rows": []}}
+
+    items = raw_items[:BATCH_PROFIT_MAX_ITEMS]
+    truncated = len(raw_items) > BATCH_PROFIT_MAX_ITEMS
+    path = config.PRICE_LIBRARY_PATH
+
+    all_rows: list[dict[str, Any]] = []
+    matched_lines: list[str] = []
+    price_miss_lines: list[str] = []
+    code_not_found_lines: list[str] = []
+    skipped_lines: list[str] = []
+    processed_items = 0
+    matched_items = 0
+    price_miss_items = 0
+    code_not_found_items = 0
+
+    for idx, it in enumerate(items):
+        if not isinstance(it, dict):
+            skipped_lines.append(f"第 {idx + 1} 条：条目不是对象，已跳过。")
+            continue
+        code = (it.get("code") or "").strip()
+        if not code:
+            skipped_lines.append(f"第 {idx + 1} 条：缺少 code，已跳过。")
+            continue
+        if "price" not in it:
+            skipped_lines.append(f"编号 {code}：未提供 price，已跳过。")
+            continue
+        try:
+            price = normalize_price(it.get("price"))
+        except Exception as e:
+            skipped_lines.append(f"编号 {code}：价格格式不合法（{e}），已跳过。")
+            continue
+        processed_items += 1
+        try:
+            rows = get_profit_rows_by_code(code, price, path)
+        except Exception as e:
+            logger.debug("get_profit_by_price_batch 单条失败 code=%s: %s", code, e)
+            skipped_lines.append(f"编号 {code}：查询失败，已跳过。")
+            continue
+        if not rows:
+            code_not_found_items += 1
+            code_not_found_lines.append(f"编号 {code}（报价 {price:g}）：未在万鼎价格库中找到该编号。")
+            continue
+
+        for r in rows:
+            all_rows.append(r)
+
+        matched_rows = [r for r in rows if r.get("matched_price_level")]
+        if matched_rows:
+            matched_items += 1
+            for r in matched_rows:
+                code_str = r.get("code") or code or "-"
+                name_str = (r.get("name") or "").strip() or "-"
+                matched_level = r.get("matched_price_level")
+                matched_price = r.get("matched_price")
+                matched_profit = r.get("matched_profit")
+                level_display = (
+                    PRICE_LEVEL_DISPLAY_NAMES.get(matched_level, matched_level)
+                    if PRICE_LEVEL_DISPLAY_NAMES
+                    else matched_level
+                )
+                profit_pct = f"{matched_profit:.2%}" if isinstance(matched_profit, (int, float)) else "未知"
+                matched_lines.append(
+                    f"编号 {code_str}（{name_str}）：报价 {price:g} 命中档位 {level_display}"
+                    f"（档位价 {matched_price:g}，利润率 {profit_pct}）。"
+                )
+            continue
+
+        price_miss_items += 1
+        for r in rows:
+            code_str = r.get("code") or code or "-"
+            name_str = (r.get("name") or "").strip() or "-"
+            price_miss_lines.append(
+                f"编号 {code_str}（{name_str}）：在库中有记录，但报价 {price:g} 未命中任何档位。"
+            )
+
+    lines: list[str] = []
+    if truncated:
+        lines.insert(0, f"（本次仅处理前 {BATCH_PROFIT_MAX_ITEMS} 条，共 {len(raw_items)} 条请求；其余请分批调用。）")
+    if processed_items == 0:
+        if skipped_lines:
+            lines.append("三类统计：命中 0；价格未命中 0；编号未找到 0。")
+            lines.append(f"跳过条目：{len(skipped_lines)}。")
+            lines.append("")
+            lines.append("【跳过明细】")
+            lines.extend(skipped_lines)
+        else:
+            lines.append("未解析到有效的 code+price 条目。")
+        return {"success": True, "result": "\n".join(lines), "data": {"rows": []}}
+
+    lines.append("三类统计（按输入条目分类）：")
+    lines.append(f"- 命中（编号存在且价格命中档位）：{matched_items}")
+    lines.append(f"- 价格未命中（编号存在但价格未命中档位）：{price_miss_items}")
+    lines.append(f"- 编号未找到（价格库中无该编号）：{code_not_found_items}")
+    lines.append(f"- 已处理条目：{processed_items}")
+    if skipped_lines:
+        lines.append(f"- 跳过条目：{len(skipped_lines)}")
+
+    if matched_lines:
+        lines.append("")
+        lines.append("【命中明细】")
+        lines.extend(matched_lines)
+    if price_miss_lines:
+        lines.append("")
+        lines.append("【价格未命中明细】")
+        lines.extend(price_miss_lines)
+    if code_not_found_lines:
+        lines.append("")
+        lines.append("【编号未找到明细】")
+        lines.extend(code_not_found_lines)
+    if skipped_lines:
+        lines.append("")
+        lines.append("【跳过明细】")
+        lines.extend(skipped_lines)
+
+    return {
+        "success": True,
+        "result": "\n".join(lines),
+        "data": {
+            "rows": all_rows,
+            "stats": {
+                "matched": matched_items,
+                "price_miss": price_miss_items,
+                "code_not_found": code_not_found_items,
+                "processed": processed_items,
+                "skipped": len(skipped_lines),
+                "input_count": len(items),
+                "truncated": truncated,
+                "input_total": len(raw_items),
+            },
+        },
+    }
+
+
 def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     执行 select_wanding_match（只读）：从 match_wanding_price/match_quotation 的候选中用 LLM 选 1 个。
@@ -377,6 +529,32 @@ def get_inventory_tools_openai_format() -> list[dict]:
                         },
                     },
                     "required": ["price"],
+                },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_profit_by_price_batch",
+                "description": "对多组 code+price 一次性查万鼎利润率；当用户对多产品（如整表或 5 个以上编号）问利润率时优先使用本工具，避免逐条调用 get_profit_by_price。单次最多 50 条，更多请分批调用。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "code": {"type": "string", "description": "10 位物料编号"},
+                                    "price": {"type": "number", "description": "成交价/报单价"},
+                                },
+                                "required": ["code", "price"],
+                            },
+                            "description": "多组 { code, price }，单次最多 50 条",
+                        },
+                    },
+                    "required": ["items"],
                 },
                 "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
             },
@@ -507,6 +685,8 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any]) -> dict[s
         return _execute_select_wanding_match(arguments)
     if name == "get_profit_by_price":
         return _execute_get_profit_by_price(arguments)
+    if name == "get_profit_by_price_batch":
+        return _execute_get_profit_by_price_batch(arguments)
     if name == "modify_inventory":
         try:
             from backend.tools.inventory.services.inventory_modify_service import modify_inventory as do_modify

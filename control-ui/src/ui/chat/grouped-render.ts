@@ -18,6 +18,37 @@ type ImageBlock = {
   alt?: string;
 };
 
+export type AttachedFileBlock = {
+  file_name: string;
+  file_path?: string;
+  rows_count?: number;
+  preview_count?: number;
+  truncated?: boolean;
+};
+
+function extractAttachedFiles(message: unknown): AttachedFileBlock[] {
+  const m = message as Record<string, unknown>;
+  const content = m.content;
+  const files: AttachedFileBlock[] = [];
+  if (!Array.isArray(content)) {
+    return files;
+  }
+  for (const block of content) {
+    if (typeof block !== "object" || block === null) continue;
+    const b = block as Record<string, unknown>;
+    if (b.type !== "file" || typeof b.file_name !== "string") continue;
+    const meta = b.summaryMeta as { rows_count?: number; preview_count?: number; truncated?: boolean } | undefined;
+    files.push({
+      file_name: b.file_name,
+      file_path: typeof b.file_path === "string" ? b.file_path : undefined,
+      rows_count: meta?.rows_count,
+      preview_count: meta?.preview_count,
+      truncated: meta?.truncated,
+    });
+  }
+  return files;
+}
+
 function extractImages(message: unknown): ImageBlock[] {
   const m = message as Record<string, unknown>;
   const content = m.content;
@@ -216,6 +247,28 @@ function renderMessageImages(images: ImageBlock[]) {
   `;
 }
 
+function renderAttachedFiles(files: AttachedFileBlock[]) {
+  if (files.length === 0) {
+    return nothing;
+  }
+  return html`
+    <div class="chat-message-files">
+      ${files.map(
+        (f) => html`
+          <span class="chat-message-file" title=${f.file_path ?? f.file_name}>
+            <span class="chat-message-file__name">${f.file_name}</span>
+            ${[f.rows_count != null ? `rows=${f.rows_count}` : "", f.preview_count != null ? `preview=${f.preview_count}` : "", f.truncated ? "…truncated" : ""].filter(Boolean).length
+              ? html`<span class="chat-message-file__meta">
+                  ${[f.rows_count != null ? `rows=${f.rows_count}` : "", f.preview_count != null ? `preview=${f.preview_count}` : "", f.truncated ? "…truncated" : ""].filter(Boolean).join(" / ")}
+                </span>`
+              : nothing}
+          </span>
+        `,
+      )}
+    </div>
+  `;
+}
+
 function renderGroupedMessage(
   message: unknown,
   opts: { isStreaming: boolean; showReasoning: boolean },
@@ -234,6 +287,8 @@ function renderGroupedMessage(
   const hasToolCards = toolCards.length > 0;
   const images = extractImages(message);
   const hasImages = images.length > 0;
+  const attachedFiles = extractAttachedFiles(message);
+  const hasFiles = attachedFiles.length > 0;
 
   const extractedText = extractTextCached(message);
   const extractedThinking =
@@ -256,7 +311,7 @@ function renderGroupedMessage(
     return html`${toolCards.map((card) => renderToolCardSidebar(card, onOpenSidebar))}`;
   }
 
-  if (!markdown && !hasToolCards && !hasImages) {
+  if (!markdown && !hasToolCards && !hasImages && !hasFiles) {
     return nothing;
   }
 
@@ -264,6 +319,7 @@ function renderGroupedMessage(
     <div class="${bubbleClasses}">
       ${canCopyMarkdown ? renderCopyAsMarkdownButton(markdown!) : nothing}
       ${renderMessageImages(images)}
+      ${renderAttachedFiles(attachedFiles)}
       ${
         reasoningMarkdown
           ? html`<div class="chat-thinking">${unsafeHTML(

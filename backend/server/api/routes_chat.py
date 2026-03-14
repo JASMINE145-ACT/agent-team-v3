@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from typing import Any, Dict
 
 from backend.agent.remember import try_handle_remember
+from backend.agent.session import get_session_store
 from backend.core.language_utils import detect_language
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,23 @@ async def query(
     logger.info("[/api/query] received: %r  session_id=%r", query_text, body.get("session_id"))
     if not query_text:
         return {"success": False, "error": "请提供 query 或 message。"}
+    if query_text.lower() in ("/new", "/reset"):
+        old_sid = (body.get("session_id") or "").strip()
+        if old_sid:
+            try:
+                get_session_store().delete_session(old_sid)
+            except Exception:
+                logger.debug("failed to delete old session on /new", exc_info=True)
+        new_sid = str(uuid.uuid4())
+        return {
+            "success": True,
+            "data": {
+                "answer": "已开始新会话。请继续发送你的问题。",
+                "thinking": None,
+                "trace": [],
+                "session_id": new_sid,
+            },
+        }
     remember_reply = try_handle_remember(query_text)
     if remember_reply is not None:
         session_id = (body.get("session_id") or "").strip() or str(uuid.uuid4())
@@ -91,6 +109,17 @@ async def query_stream(
         async def _empty():
             yield f'data: {json.dumps({"type": "error", "message": "请提供 query"}, ensure_ascii=False)}\n\n'
         return StreamingResponse(_empty(), media_type="text/event-stream")
+    if query_text.lower() in ("/new", "/reset"):
+        old_sid = (body.get("session_id") or "").strip()
+        if old_sid:
+            try:
+                get_session_store().delete_session(old_sid)
+            except Exception:
+                logger.debug("failed to delete old session on /new(stream)", exc_info=True)
+        new_sid = str(uuid.uuid4())
+        async def _reset_stream():
+            yield f'data: {json.dumps({"type": "done", "answer": "已开始新会话。请继续发送你的问题。", "thinking": None, "session_id": new_sid}, ensure_ascii=False)}\n\n'
+        return StreamingResponse(_reset_stream(), media_type="text/event-stream")
 
     remember_reply = try_handle_remember(query_text)
     if remember_reply is not None:

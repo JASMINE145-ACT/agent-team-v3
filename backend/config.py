@@ -76,6 +76,9 @@ class Config:
     WORK_USE_PIPELINE = (os.getenv("WORK_USE_PIPELINE", "true") or "").strip().lower() in ("1", "true", "yes")
     WORK_RUN_ID_TTL_SECONDS = int(os.getenv("WORK_RUN_ID_TTL_SECONDS", str(60 * 60)))
 
+    # Chat/WeCom ReAct 单轮最大步数（每步一次 LLM 调用）；默认 12，可通过 REACT_MAX_STEPS 覆盖
+    REACT_MAX_STEPS = int(os.getenv("REACT_MAX_STEPS", "12"))
+
     # Run Log：长流程运行日志基目录（相对 base_dir 的 data/run-logs，或通过环境变量覆盖）
     RUN_LOG_BASE_DIR = Path(os.getenv("RUN_LOG_BASE_DIR", str(base_dir / "data" / "run-logs")))
 

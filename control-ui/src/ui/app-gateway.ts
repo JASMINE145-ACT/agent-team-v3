@@ -206,7 +206,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
   }
 
   if (evt.event === "chat") {
-    const payload = evt.payload as ChatEventPayload | undefined;
+    const payload = evt.payload as (ChatEventPayload & { newSessionKey?: string }) | undefined;
     if (payload?.sessionKey) {
       setLastActiveSessionKey(
         host as unknown as Parameters<typeof setLastActiveSessionKey>[0],
@@ -225,6 +225,26 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
             activeMinutes: CHAT_SESSIONS_ACTIVE_MINUTES,
           });
         }
+      }
+      // /new 或 /reset 后后端返回 newSessionKey，切到新会话并刷新
+      if (state === "final" && payload?.newSessionKey) {
+        host.sessionKey = payload.newSessionKey;
+        host.chatMessage = "";
+        host.chatAttachments = [];
+        host.chatUploadedFile = null;
+        host.chatStream = null;
+        host.chatStreamStartedAt = null;
+        host.chatRunId = null;
+        host.chatQueue = [];
+        host.resetToolStream();
+        host.resetChatScroll();
+        host.applySettings({
+          ...host.settings,
+          sessionKey: payload.newSessionKey,
+          lastActiveSessionKey: payload.newSessionKey,
+        });
+        void host.loadAssistantIdentity();
+        void loadChatHistory(host as unknown as OpenClawApp);
       }
     }
     if (state === "final" || state === "foreign_final") {

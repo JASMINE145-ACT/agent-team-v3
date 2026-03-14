@@ -237,7 +237,12 @@ def extract_quotation_data(file_path: str, sheet_name: str | None = None) -> dic
         r_padded = r + [""] * (col_count - len(r))
         lines.append("| " + " | ".join(escape_md(c) for c in r_padded) + " |")
 
-    result_text = "报价数据（第2行至「Total Excluding PPN不含税总价」上一行）：\n\n" + "\n".join(lines)
+    result_text = (
+        f"报价数据（第2行至「Total Excluding PPN不含税总价」上一行，共 {len(data_rows)} 行；"
+        "其中 Qty=询价数量/采购数量，不是库存）：\n\n"
+        + "\n".join(lines)
+        + f"\n\n（共 {len(data_rows)} 行。回复用户时请列出上表**全部**数据行，勿只列部分。）"
+    )
     return {
         "success": True,
         "result": result_text,
@@ -763,7 +768,31 @@ def parse_excel_smart(
         r_padded = list(r) + [""] * (col_count - len(r))
         lines.append("| " + " | ".join(escape_md(str(c)) for c in r_padded) + " |")
     sep = "| " + " | ".join(["---"] * col_count) + " |"
-    result_text = f"工作表「{used_sheet}」共 {len(rows)} 行（普适解析，未限定列）：\n\n| " + " | ".join(escape_md(str(i + 1)) for i in range(col_count)) + " |\n" + sep + "\n" + "\n".join(lines)
+    header_block = (
+        f"工作表「{used_sheet}」共 {len(rows)} 行（普适解析，未限定列）：\n\n"
+        + "| " + " | ".join(escape_md(str(i + 1)) for i in range(col_count)) + " |\n"
+        + sep + "\n"
+    )
+    # 若结果过长，在完整行边界处截断，避免下游在行中间截断导致模型在单元格填「数据被截断」
+    _max_result_chars = 40_000
+    if len(header_block) + sum(len(ln) + 1 for ln in lines) + 200 > _max_result_chars:
+        n_show = 0
+        acc = len(header_block) + 200
+        for ln in lines:
+            if acc + len(ln) + 1 > _max_result_chars:
+                break
+            acc += len(ln) + 1
+            n_show += 1
+        lines_show = lines[:n_show] if n_show else lines[:1]
+        result_text = (
+            header_block + "\n".join(lines_show)
+            + f"\n\n（因长度限制仅展示前 {len(lines_show)} 行，共 {len(rows)} 行。回复时按上表逐行照抄，勿在单元格内填「数据被截断」。）"
+        )
+    else:
+        result_text = (
+            header_block + "\n".join(lines)
+            + f"\n\n（共 {len(rows)} 行。回复时**必须按上表逐行照抄**，不得只列部分、不得将同一行重复多遍凑数、不得自行编造行、勿在单元格内填「数据被截断」。）"
+        )
     return {"success": True, "result": result_text, "error": None, "sheet_name": used_sheet, "rows_read": len(rows)}
 
 
@@ -868,7 +897,7 @@ def get_quote_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "extract_quotation_data",
-                "description": "【报价单导向】从原始报价单 Excel 中提取报价数据。数据范围：从第2行起到「Total Excluding PPN不含税总价」所在行的上一行止，第1行为表头。返回 Markdown 表格供后续分析。调用前需确保 context 中已有 file_path（用户上传后的路径）。",
+                "description": "【报价区专用】仅提取第2行到「Total Excluding PPN不含税总价」上一行；若总价行在表中较前则返回行数会偏少。提取/查看 Excel 全表数据时请优先用 parse_excel_smart。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -925,7 +954,7 @@ def get_quote_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "parse_excel_smart",
-                "description": "【普适性】智能解析任意 Excel 文件：自动读取指定工作表的单元格（不限定列/行结构），适合多表头、合并单元格、不规则布局。零硬编码，返回 Markdown 表格供分析。与 MCP parse_excel_smart 语义一致。",
+                "description": "【普适性，推荐】解析任意 Excel：按行读取全表（默认最多 500 行），返回完整 Markdown 表。提取/查看报价单或 Excel 数据时优先使用此工具，可拿到全表行数，不受「Total」行位置影响。",
                 "parameters": {
                     "type": "object",
                     "properties": {

@@ -5,6 +5,7 @@ CoreAgent — 纯 ReAct 引擎，不含任何业务逻辑。
 import asyncio
 import json
 import logging
+import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -31,9 +32,14 @@ logger = logging.getLogger(__name__)
 
 # 单次工具结果最大字符数（过大会导致多轮 ReAct 时 prompt 迅速膨胀）
 TOOL_RESULT_MAX_CHARS = 8_000
+# Excel 解析类工具：30+ 行表易超 8k，单独放宽避免截断后模型误以为“没拿全”或末行被截成半行导致模型填「数据被截断」
+TOOL_RESULT_EXCEL_MAX_CHARS = int(os.environ.get("TOOL_RESULT_EXCEL_MAX_CHARS", "48_000").replace("_", ""))
 # 多轮对话总上下文上限，超出时压缩历史 tool 结果
 _CONTEXT_MAX_CHARS = 8_000
-_MAX_STEPS_HINT = "（已达最大步数）请根据目前已获取的信息直接给出最终回答，不再调用任何工具。"
+_MAX_STEPS_HINT = (
+    "（本轮推理步数已达上限。）请根据目前已获取的信息直接给出最终回答，不再调用任何工具。"
+    "若尚有未处理完的项目，请在回复中友好说明：例如「已计算前 N 个产品的利润率；其余可继续说『继续算剩余产品』或分批询问」，不要向用户展示「步数限制」等系统术语。"
+)
 
 
 class CoreAgent:
@@ -83,7 +89,7 @@ class CoreAgent:
         self,
         user_input: str,
         context: Optional[Dict] = None,
-        max_steps: int = 8,
+        max_steps: Optional[int] = None,
         session_id: Optional[str] = None,
         on_token: Optional[Callable] = None,
         on_tool_start: Optional[Callable] = None,
@@ -91,6 +97,12 @@ class CoreAgent:
         on_event: Optional[Callable] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
+        if max_steps is None:
+            try:
+                from backend.config import Config
+                max_steps = getattr(Config, "REACT_MAX_STEPS", 12)
+            except Exception:
+                max_steps = 12
         def _fire(event_type, payload):
             if on_event:
                 try:
@@ -158,7 +170,8 @@ class CoreAgent:
                     user_content += f"\n\n【当前意图】用户本句是对上一轮「问：{last_q}」的回复，请按该主题理解，勿与更早轮次混淆。"
                 user_content += f"\n\n{injection}"
             # 短消息场景下，额外注入最近几次工具调用的精简摘要，帮助模型延续工具链 reasoning。
-            if session.turns and len(user_input.strip()) <= 20:
+            # 但当当前轮已绑定文件上下文时，避免注入旧工具记忆干扰（尤其是历史 file_path）。
+            if session.turns and len(user_input.strip()) <= 20 and not (ctx.get("file_path") or ctx.get("file_id")):
                 try:
                     tool_injection = self._store.build_tool_memory_injection(session, max_items=3)
                     if tool_injection:
@@ -186,6 +199,9 @@ class CoreAgent:
         trace: List[dict] = []
         last_answer = ""
         last_usage = None
+        tool_obs_cache: Dict[str, str] = {}
+        last_profit_batch_obs: Optional[str] = None
+        last_profit_batch_items: int = 0
 
         try:
             from backend.config import Config
@@ -291,112 +307,169 @@ class CoreAgent:
                 _raise_if_cancelled()
                 name = getattr(tc.function, "name", "") or ""
                 tool_call_id = tool_calls_for_msg[i]["id"]
-                if on_tool_start:
-                    try:
-                        on_tool_start(name, i + 1, n)
-                    except Exception:
-                        logger.debug("on_tool_start callback failed", exc_info=True)
                 try:
                     args = json.loads(getattr(tc.function, "arguments", "{}") or "{}")
                 except json.JSONDecodeError:
                     logger.debug("工具参数 JSON 解析失败，使用空 dict", exc_info=True)
                     args = {}
 
-                if on_event:
-                    try:
-                        on_event(
-                            "agent",
-                            {
-                                "stream": "tool",
-                                "ts": int(time.time() * 1000),
-                                "data": {
-                                    "phase": "start",
-                                    "name": name,
-                                    "toolCallId": tool_call_id,
-                                    "args": args,
-                                },
-                            },
-                        )
-                    except Exception:
-                        logger.debug("on_event callback failed", exc_info=True)
-
-                trace.append({"step": step + 1, "type": "tool_call", "name": name, "arguments": args})
-                tool_task = asyncio.create_task(self._registry.execute(name, args, ctx))
                 try:
-                    while not tool_task.done():
-                        _raise_if_cancelled()
-                        await asyncio.sleep(0.05)
-                    obs = await tool_task
-                except asyncio.CancelledError:
-                    if not tool_task.done():
-                        tool_task.cancel()
-                    raise
-                if len(obs) > TOOL_RESULT_MAX_CHARS:
-                    obs = obs[:TOOL_RESULT_MAX_CHARS] + "\n…（已截断）"
-
-                for ext in self._extensions:
-                    try:
-                        # 优先尝试带 context 的新签名，旧实现回退到三参版本
-                        try:
-                            obs = ext.on_after_tool(name, args, obs, ctx)
-                        except TypeError:
-                            obs = ext.on_after_tool(name, args, obs)  # type: ignore[call-arg]
-                    except Exception:
-                        logger.warning("ext.on_after_tool 失败，已跳过 name=%s", name, exc_info=True)
-
-                # Tool Memory：记录结构化工具调用摘要，供后续轮次注入。
-                if session_id and self._store:
-                    try:
-                        record: Dict[str, Any] = {
-                            "tool": name,
-                            "ts": int(time.time() * 1000),
-                            "args": args,
+                    args_key = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+                except Exception:
+                    args_key = str(args)
+                cache_key = f"{name}|{args_key}"
+                cached_obs = tool_obs_cache.get(cache_key)
+                if (
+                    cached_obs is None
+                    and name in ("extract_quotation_data", "parse_excel_smart")
+                    and last_profit_batch_items >= 20
+                    and last_profit_batch_obs
+                ):
+                    cached_obs = (
+                        f"{last_profit_batch_obs}\n\n"
+                        "提示：本轮已完成批量利润率查询（>=20 条），请直接基于该结果整理最终答复，"
+                        "不要再次调用 Excel 解析工具。"
+                    )
+                    trace.append(
+                        {
+                            "step": step + 1,
+                            "type": "tool_guard_hit",
+                            "name": name,
+                            "arguments": args,
                         }
-                        # 尝试从 JSON 结果中抽取 summary + 紧凑 data
-                        summary_text = ""
-                        data_obj: Any = None
-                        try:
-                            if obs and len(obs) <= 4000:
-                                parsed = json.loads(obs)
-                                if isinstance(parsed, dict):
-                                    data_obj = parsed
-                                    s = parsed.get("summary")
-                                    if isinstance(s, str):
-                                        summary_text = s.strip()
-                                elif isinstance(parsed, list):
-                                    data_obj = parsed
-                        except Exception:
-                            # 非 JSON，退化为基于文本的简短摘要
-                            pass
-                        if not summary_text and obs:
-                            text = str(obs).strip()
-                            if len(text) > 0:
-                                summary_text = text[:180] + ("…" if len(text) > 180 else "")
-                        if summary_text:
-                            record["summary"] = summary_text
-                        if data_obj is not None:
-                            record["data"] = data_obj
-                        self._store.append_tool_memory(session_id, record)
-                    except Exception:
-                        logger.debug("append_tool_memory 失败，已忽略", exc_info=True)
+                    )
 
-                if on_event:
-                    try:
-                        on_event(
-                            "agent",
-                            {
-                                "stream": "tool",
-                                "ts": int(time.time() * 1000),
-                                "data": {
-                                    "phase": "result",
-                                    "name": name,
-                                    "toolCallId": tool_call_id,
-                                    "result": obs,
+                if cached_obs is not None:
+                    obs = (
+                        f"{cached_obs}\n\n"
+                        "提示：同一工具和参数在本轮已调用过，请直接基于已有结果继续，不要重复调用。"
+                    )
+                    trace.append(
+                        {
+                            "step": step + 1,
+                            "type": "tool_cache_hit",
+                            "name": name,
+                            "arguments": args,
+                        }
+                    )
+                else:
+                    if on_tool_start:
+                        try:
+                            on_tool_start(name, i + 1, n)
+                        except Exception:
+                            logger.debug("on_tool_start callback failed", exc_info=True)
+
+                    if on_event:
+                        try:
+                            on_event(
+                                "agent",
+                                {
+                                    "stream": "tool",
+                                    "ts": int(time.time() * 1000),
+                                    "data": {
+                                        "phase": "start",
+                                        "name": name,
+                                        "toolCallId": tool_call_id,
+                                        "args": args,
+                                    },
                                 },
-                            },
+                            )
+                        except Exception:
+                            logger.debug("on_event callback failed", exc_info=True)
+
+                    trace.append({"step": step + 1, "type": "tool_call", "name": name, "arguments": args})
+                    tool_task = asyncio.create_task(self._registry.execute(name, args, ctx))
+                    try:
+                        while not tool_task.done():
+                            _raise_if_cancelled()
+                            await asyncio.sleep(0.05)
+                        obs = await tool_task
+                    except asyncio.CancelledError:
+                        if not tool_task.done():
+                            tool_task.cancel()
+                        raise
+                    max_chars = (
+                        TOOL_RESULT_EXCEL_MAX_CHARS
+                        if name in ("extract_quotation_data", "parse_excel_smart")
+                        else TOOL_RESULT_MAX_CHARS
+                    )
+                    if len(obs) > max_chars:
+                        obs = (
+                            obs[:max_chars]
+                            + "\n\n…（以上结果因长度限制已截断。行数已按解析结果完整计算，请基于已有内容回答，勿重复调用解析工具。）"
                         )
-                    except Exception:
-                        logger.debug("on_event callback failed", exc_info=True)
+
+                    for ext in self._extensions:
+                        try:
+                            # 优先尝试带 context 的新签名，旧实现回退到三参版本
+                            try:
+                                obs = ext.on_after_tool(name, args, obs, ctx)
+                            except TypeError:
+                                obs = ext.on_after_tool(name, args, obs)  # type: ignore[call-arg]
+                        except Exception:
+                            logger.warning("ext.on_after_tool 失败，已跳过 name=%s", name, exc_info=True)
+
+                    tool_obs_cache[cache_key] = obs
+                    if name == "get_profit_by_price_batch":
+                        items_arg = args.get("items")
+                        if isinstance(items_arg, list):
+                            last_profit_batch_items = len(items_arg)
+                        if "三类统计（按输入条目分类）" in obs:
+                            last_profit_batch_obs = obs
+
+                    # Tool Memory：记录结构化工具调用摘要，供后续轮次注入。
+                    if session_id and self._store:
+                        try:
+                            record: Dict[str, Any] = {
+                                "tool": name,
+                                "ts": int(time.time() * 1000),
+                                "args": args,
+                            }
+                            # 尝试从 JSON 结果中抽取 summary + 紧凑 data
+                            summary_text = ""
+                            data_obj: Any = None
+                            try:
+                                if obs and len(obs) <= 4000:
+                                    parsed = json.loads(obs)
+                                    if isinstance(parsed, dict):
+                                        data_obj = parsed
+                                        s = parsed.get("summary")
+                                        if isinstance(s, str):
+                                            summary_text = s.strip()
+                                    elif isinstance(parsed, list):
+                                        data_obj = parsed
+                            except Exception:
+                                # 非 JSON，退化为基于文本的简短摘要
+                                pass
+                            if not summary_text and obs:
+                                text = str(obs).strip()
+                                if len(text) > 0:
+                                    summary_text = text[:180] + ("…" if len(text) > 180 else "")
+                            if summary_text:
+                                record["summary"] = summary_text
+                            if data_obj is not None:
+                                record["data"] = data_obj
+                            self._store.append_tool_memory(session_id, record)
+                        except Exception:
+                            logger.debug("append_tool_memory 失败，已忽略", exc_info=True)
+
+                    if on_event:
+                        try:
+                            on_event(
+                                "agent",
+                                {
+                                    "stream": "tool",
+                                    "ts": int(time.time() * 1000),
+                                    "data": {
+                                        "phase": "result",
+                                        "name": name,
+                                        "toolCallId": tool_call_id,
+                                        "result": obs,
+                                    },
+                                },
+                            )
+                        except Exception:
+                            logger.debug("on_event callback failed", exc_info=True)
 
                 trace.append({"step": step + 1, "type": "observation", "content": obs})
                 messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": obs})

@@ -116,6 +116,23 @@ async def handle_chat_send(
         context["detected_lang"] = detected
         context["preferred_lang"] = "en" if detected == "en" else "zh"
 
+    # /new、/reset：创建新会话并返回新 sessionKey，供前端切换，不跑 ReAct
+    if message.strip().lower() in ("/new", "/reset"):
+        new_sid = str(uuid.uuid4())
+        await send_res({"ok": True, "runId": run_id})
+        await send_event({
+            "type": "event",
+            "event": "chat",
+            "payload": {
+                "runId": run_id,
+                "sessionKey": session_key,
+                "state": "final",
+                "newSessionKey": new_sid,
+                "message": {"role": "assistant", "content": [{"type": "text", "text": "已开始新会话，可以继续发送消息。"}]},
+            },
+        })
+        return
+
     # 业务知识「记住」命令 → 直接写入 MD 并回复，不跑 ReAct
     remember_reply = try_handle_remember(user_input)
     if remember_reply is not None:

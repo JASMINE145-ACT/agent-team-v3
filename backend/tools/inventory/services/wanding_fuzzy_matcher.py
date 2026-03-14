@@ -341,6 +341,22 @@ def _safe_to_float(val: Any) -> Optional[float]:
     return f
 
 
+def _normalize_code_for_match(val: Any) -> str:
+    """物料编号用于匹配时的规范化：数字去掉尾部的 .0，避免 8010072480.0 与 8010072480 不匹配。"""
+    if val is None or (hasattr(pd, "isna") and pd.isna(val)):
+        return ""
+    s = str(val).strip()
+    if not s:
+        return ""
+    try:
+        f = float(s)
+        if f == int(f):
+            return str(int(f))
+        return s
+    except (TypeError, ValueError):
+        return s
+
+
 def normalize_price(raw_price: Any) -> float:
     """
     规范化用户输入的价格为 float（人民币金额）。
@@ -620,11 +636,12 @@ def _load_full_price_df(path: str | Path) -> pd.DataFrame:
 
 
 def _compute_profit_for_price(row: pd.Series, price: float) -> dict[str, Any]:
-    """给定一行价格库记录与用户价，计算精确匹配档位及其利润率，并返回所有档位价格+利润率。
+    """给定一行价格库记录与用户价，计算匹配档位及其利润率，并返回所有档位价格+利润率。
 
-    行为变更：
-    - 仅当某档位价格与给定 price 精确相等（绝对误差 < 1e-6）时，才设置 matched_* 字段。
-    - 若没有任何档位价格与 price 精确相等，则 matched_price_level/matched_price/matched_profit 保持为 None，
+    行为：
+    - 仅当某档位价格与给定 price 在容差内相等（绝对误差 ≤ _tolerance，_tolerance = max(0.01, |target|×1e-5)）时，
+      才设置 matched_* 字段，避免浮点/四舍五入导致“有记录但匹配不到档位”。
+    - 若没有任何档位价格在容差内与 price 相等，则 matched_price_level/matched_price/matched_profit 保持为 None，
       不再回退到“距离最小”的近似档位。
     """
     all_levels: list[dict[str, Any]] = []
@@ -654,8 +671,9 @@ def _compute_profit_for_price(row: pd.Series, price: float) -> dict[str, Any]:
     matched_profit = None
     if all_levels:
         target = float(price)
-        # 仅接受精确匹配的档位；不再使用“最近档位”降级
-        exact = [entry for entry in all_levels if abs(entry["price"] - target) < 1e-6]
+        # 档位匹配：允许极小误差（浮点/四舍五入），避免库中 21810.0 与用户 21810 或 21809.99 判为不匹配
+        _tolerance = max(0.01, abs(target) * 1e-5)
+        exact = [entry for entry in all_levels if abs(entry["price"] - target) <= _tolerance]
         if exact:
             best = exact[0]
             matched_level = best["level"]
@@ -676,9 +694,10 @@ def get_profit_rows_by_code(code: str, price: float, path: str | Path) -> list[d
     df = _load_full_price_df(path)
     if df.empty:
         return []
-    code_str = str(code).strip()
+    code_norm = _normalize_code_for_match(code)
     if "Material" in df.columns:
-        mask = df["Material"].astype(str).str.strip() == code_str
+        # 统一规范化：库中可能是 8010072480.0，用户传 8010072480，需一致
+        mask = df["Material"].apply(lambda v: _normalize_code_for_match(v) == code_norm)
         rows = df[mask]
     else:
         rows = pd.DataFrame()
@@ -822,8 +841,8 @@ def get_wanding_price_by_code(
     df = _get_cached_df(path, customer_level)
     if df.empty or "Material" not in df.columns:
         return None
-    # Material 列为产品编号
-    row = df[df["Material"].astype(str).str.strip() == code]
+    code_norm = _normalize_code_for_match(code)
+    row = df[df["Material"].apply(lambda v: _normalize_code_for_match(v) == code_norm)]
     if row.empty:
         return None
     r = row.iloc[0]

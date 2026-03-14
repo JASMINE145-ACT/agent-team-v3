@@ -13,6 +13,7 @@ SKILL_INVENTORY_PRICE = """\
 - **match_wanding_price(keywords, customer_level?)**：仅字段匹配（万鼎）。用户明确说「**用万鼎查**」「**不要历史**」「**直接万鼎**」时**只调用本工具**，不调 match_quotation。
 - **select_wanding_match(keywords, candidates)**：LLM 选型。needs_selection 且用户要「选一个」时调用；传入 match_source（来自上一步 observation）。
 - **get_profit_by_price(code?, product_name?, price)**：报价员已知道「万鼎商品编号或完整产品名 + 实际成交价/报单价」时，用本工具在万鼎价格库中锁定对应行与最接近的价格档位，返回该档位的利润率以及所有档位的价格/利润率列表，便于比较。
+- **get_profit_by_price_batch(items)**：当用户要求对**多个**产品（如整张表、或 5 个以上编号）查利润率/档位时，**必须**使用本工具，一次传入多组 { code, price }；禁止对每个产品单独多次调用 get_profit_by_price。单次最多 50 条，更多请分批调用。
 - **何时用**：用户已明确「库存/可售」或「价格/报价/万鼎/档位」时选用；只说「查XX」未指明 → 用 ask_clarification 澄清。
 - **查库存的调用顺序（重要）**：① 用户用**中文**说产品名且要查库存（如「50三通的库存」「DN40弯头还有多少」）→ **禁止**直接用 search_inventory（仅适配英文）。应先 **match_quotation(keywords)** 得到 code/候选，再用 **get_inventory_by_code(code)** 查库存；单条候选时直接用其 code，多候选时先选型或取首条。**match_wanding_price** 仅当用户明确要求「只用万鼎/仅字段匹配/不要历史」时使用。② 用户用**英文**产品名查库存 → 可用 search_inventory(keywords)。③ 用户已给出 10 位物料编号 → 直接用 get_inventory_by_code(code)。
 - **keywords 关键词保护（重要）**：中文管件/产品名称词——「直接（接头）」「直通」「弯头」「三通」「变径」「大小头」「堵头」「管帽」「活接」「由令」「套管」「法兰」「管卡」「管夹」等——**即使语法上看似副词或助词，也必须原样保留在 keywords 中，禁止去除**。例：「直接dn50」→ keywords=「直接dn50」（❌ 不得简化为「dn50」）；「三通 dn25 价格」→ keywords=「三通 dn25」；「弯头dn40库存」→ keywords=「弯头 dn40」。
@@ -37,10 +38,16 @@ SKILL_OOS = """\
 SKILL_QUOTE = """\
 **3. 报价单（提取/填表/普适 Excel）**
 - **目标**：从报价单取数据、往报价单填数据、或任意 Excel 解析/编辑。
-- **extract_quotation_data(file_path, sheet_name?)**：从报价单提取第 2 行到「Total Excluding PPN」上一行的数据，返回 Markdown 表。需 context 有 file_path。
+- **parse_excel_smart(file_path, sheet_name?, max_rows?)**：普适解析任意 Excel，按行读取全表（默认最多 500 行），返回完整 Markdown 表。**提取/查看 Excel 数据时优先使用此工具**，避免因「Total」行位置导致只拿到部分行。
+- **extract_quotation_data(file_path, sheet_name?)**：仅提取「第 2 行～Total Excluding PPN 上一行」的报价区；若总价行在表内较前会出现行数偏少，仅当用户明确要「只要报价区、不要 Total 之后」时再用。
 - **fill_quotation_sheet(file_path, fill_items, ...)**：将匹配结果按行回填报价单（row, code, quote_name, unit_price, qty 等）。
-- **parse_excel_smart(file_path, sheet_name?, max_rows?)**：普适解析任意 Excel，零硬编码，返回 Markdown 表。
 - **edit_excel(file_path, edits, ...)**：普适编辑任意 Excel（cell+value 或 range+values）。
+- **工具选择规则**：
+  - 用户要「提取/查看报价单/Excel 数据」「有多少行」「完整商品信息」时，**一律优先 parse_excel_smart**，确保拿到全表行数。
+  - 同一 `file_path` 在同一轮内不要反复切换解析工具；若返回中含「已截断」，请直接基于已有内容回答，勿再次调用解析工具。
+- **字段语义规则**：
+  - 报价单里的 `Qty` 是「询价数量/采购数量」，**不是库存**；库存只能来自库存工具（`get_inventory_by_code` / `search_inventory`）。
+  - 用户要求「提取 Excel 数据/商品信息」时，**回复中的表格必须与工具返回的表逐行一致**：照抄全部行、不得只列部分、不得把同一行重复多遍凑行数、不得自行编造行。若篇幅所限只能展示部分，须明确写「仅展示前 N 行，共 M 行」。**不得在表格单元格内填写「数据被截断」等占位符**；仅当工具返回明确含「已截断」提示时，方可在回复末尾用一句话说明「部分内容因长度被截断」，且不得在具体单元格内填「数据被截断」。
 - **何时用**：用户要「提取报价数据」「看报价单内容」「填表」「解析/编辑这个 Excel」且 context 有 file_path 时用；**整单询价填充**用下面的 run_quotation_fill。"""
 
 SKILL_FILL = """\
@@ -52,6 +59,7 @@ SKILL_FILL = """\
 SKILL_EXCEL_CHAT = """\
 **3. Excel（普适，Chat）**
 - **parse_excel_smart(file_path, sheet_name?, max_rows?)**：解析任意 Excel，返回 Markdown 表（只读查看）。若用户要实际填表/批量修改，应引导到 Work 页或使用后端 API，而不是在 Chat 中用复杂编辑工具。
+- 回复时**必须与工具返回的表逐行一致**：照抄全部行、不得只列部分、不得把同一行重复多遍凑数、不得编造行。**不得在单元格内填写「数据被截断」**；仅当工具明确提示已截断时，可在回复末尾用一句话说明，勿在单元格内写「数据被截断」。若返回中含「已截断」，请基于已有内容回答，勿再次调用解析工具。
 - **何时用**：用户要「解析这个 Excel」「看一下这张表的内容」且 context 有 file_path 时用。**整单询价填充、报价单提取/按表填表请到 Work 页操作。**"""
 
 SKILL_CLARIFY = """\
@@ -72,6 +80,7 @@ OUTPUT_FORMAT = """\
    - 目标 / 已知 / 缺失 / 本步行动（调用哪类工具或直接回答）。
 2. 若调用工具：紧接 tool_call；工具结果返回后，若目标已完成则直接输出最终回答（无需再调工具）；否则继续下一轮工具调用。
 3. 若不调用工具（如打招呼、能力外）：在 <think> 后直接给出最终回答。
+4. **涉及多个同类项**（如多行、多编号）时，优先使用批量类工具（*_batch），减少单轮步数。
 
 **多轮指代**：用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）。用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_quotation 或 match_wanding_price，勿用用户本句的简称或错字。"""
 

@@ -336,6 +336,41 @@
   justify-content: flex-end;
 }
 
+/* Attached file chips in message bubble (Excel/PDF sent with message) */
+.chat-message-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.chat-message-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--bg-muted, rgba(255, 255, 255, 0.08));
+  font-size: 0.9em;
+  max-width: 100%;
+}
+
+.chat-message-file__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-message-file__meta {
+  color: var(--text-muted, rgba(255, 255, 255, 0.65));
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.chat-group.user .chat-message-files {
+  justify-content: flex-end;
+}
+
 /* Compose input row - horizontal layout */
 .chat-compose__row {
   display: flex;

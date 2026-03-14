@@ -175,9 +175,10 @@ export async function handleSendChat(
   const attachments = host.chatAttachments ?? [];
   const attachmentsToSend = messageOverride == null ? attachments : [];
   const hasAttachments = attachmentsToSend.length > 0;
+  const hasUploadedFile = Boolean(host.chatUploadedFile?.file_name);
 
-  // Allow sending with just attachments (no message text required)
-  if (!message && !hasAttachments) {
+  // Allow sending with message, and/or image attachments, and/or uploaded Excel/PDF
+  if (!message && !hasAttachments && !hasUploadedFile) {
     return;
   }
 
