@@ -73,6 +73,16 @@ class Config:
     FALLBACK_LLM_API_KEY = (os.getenv("FALLBACK_API_KEY") or "").strip() or None
     FALLBACK_LLM_MODEL = (os.getenv("FALLBACK_MODEL") or "").strip() or None
 
+    # 有图时仅 Step0 使用视觉模型，Step1+ 用主模型；未设则不上传图也走主模型
+    VISION_LLM_MODEL = (os.getenv("VISION_LLM_MODEL") or "").strip() or None
+    VISION_LLM_API_KEY = (os.getenv("VISION_LLM_API_KEY") or "").strip() or None
+    VISION_LLM_BASE_URL = (os.getenv("VISION_LLM_BASE_URL") or "").strip() or None
+    # 单张图片大小上限（字节），超过拒绝；默认 5MB；无效 env 时回退默认
+    try:
+        MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE_MB", "5")) * 1024 * 1024
+    except (TypeError, ValueError):
+        MAX_IMAGE_SIZE = 5 * 1024 * 1024
+
     # Work 模式：管道/ReAct 开关与 run_id TTL（秒）
     WORK_USE_PIPELINE = (os.getenv("WORK_USE_PIPELINE", "true") or "").strip().lower() in ("1", "true", "yes")
     WORK_RUN_ID_TTL_SECONDS = int(os.getenv("WORK_RUN_ID_TTL_SECONDS", str(60 * 60)))

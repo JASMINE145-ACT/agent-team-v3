@@ -64,6 +64,16 @@ class CoreAgent:
             if fb_api_key and fb_base_url and self._fallback_model
             else None
         )
+        # 视觉模型（可选）：仅 Step0 有图时使用，Step1+ 用主模型
+        vision_model = getattr(Config, "VISION_LLM_MODEL", None)
+        if vision_model:
+            v_api_key = getattr(Config, "VISION_LLM_API_KEY", None) or api_key
+            v_base_url = getattr(Config, "VISION_LLM_BASE_URL", None) or base_url
+            self._vision_client = get_openai_client(api_key=v_api_key, base_url=v_base_url)
+            self._vision_model = vision_model
+        else:
+            self._vision_client = None
+            self._vision_model = None
 
         self._extensions = extensions
 
@@ -194,7 +204,14 @@ class CoreAgent:
                 messages.append({"role": "system", "content": summary_text})
             except Exception:
                 logger.debug("format_excel_summary_for_prompt 失败，已忽略", exc_info=True)
-        messages.append({"role": "user", "content": user_content})
+        image_parts = ctx.get("image_parts") or []
+        first_user_has_image_payload = bool(image_parts)
+        if image_parts:
+            first_user_content: Any = [{"type": "text", "text": user_content}]
+            first_user_content.extend(image_parts)
+            messages.append({"role": "user", "content": first_user_content})
+        else:
+            messages.append({"role": "user", "content": user_content})
         thinking_parts: List[str] = []
         trace: List[dict] = []
         last_answer = ""
@@ -212,11 +229,22 @@ class CoreAgent:
 
         for step in range(max_steps):
             _raise_if_cancelled()
+            # 仅在首步需要图片理解；从第二步开始将首条 user 消息降级为纯文本，避免重复携带图片负担。
+            if step >= 1 and first_user_has_image_payload:
+                for m in messages:
+                    if m.get("role") == "user" and isinstance(m.get("content"), list):
+                        m["content"] = user_content
+                        break
+                first_user_has_image_payload = False
             is_last = step == max_steps - 1
             if is_last:
                 messages.append({"role": "user", "content": _MAX_STEPS_HINT})
 
-            kwargs: Dict[str, Any] = {"model": self.model, "messages": messages, "temperature": 0.1, "max_tokens": max_tokens}
+            # 仅 Step0 且 has_image 时用视觉模型，后续步用主模型（控制成本）
+            use_vision = step == 0 and ctx.get("has_image") and self._vision_client and self._vision_model
+            step_client = self._vision_client if use_vision else self.client
+            step_model = self._vision_model if use_vision else self.model
+            kwargs: Dict[str, Any] = {"model": step_model, "messages": messages, "temperature": 0.1, "max_tokens": max_tokens}
             if not is_last:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
@@ -224,9 +252,9 @@ class CoreAgent:
             step_usage = None
             step_finish_reason = None
             if on_token is not None:
-                # 流式调用：先用主模型，若因网络/超时失败且配置了 fallback，则自动切到 fallback 模型重试一次
+                # 流式调用：使用本步选定的 client（vision 或 main）
                 llm_task = asyncio.create_task(
-                    asyncio.to_thread(call_llm_streaming_sync, self.client, kwargs, on_token)
+                    asyncio.to_thread(call_llm_streaming_sync, step_client, kwargs, on_token)
                 )
                 try:
                     while not llm_task.done():
@@ -239,7 +267,7 @@ class CoreAgent:
                     raise
                 except (openai.APITimeoutError, openai.APIConnectionError):
                     if self._fallback_client and self._fallback_model:
-                        logger.warning("主模型调用超时，fallback 到备用模型: %s", self._fallback_model)
+                        logger.warning("本步模型调用超时，fallback 到备用模型: %s", self._fallback_model)
                         fb_kwargs: Dict[str, Any] = {**kwargs, "model": self._fallback_model}
                         fb_task = asyncio.create_task(
                             asyncio.to_thread(call_llm_streaming_sync, self._fallback_client, fb_kwargs, on_token)
@@ -255,10 +283,10 @@ class CoreAgent:
             else:
                 _raise_if_cancelled()
                 try:
-                    resp = self.client.chat.completions.create(**kwargs)
+                    resp = step_client.chat.completions.create(**kwargs)
                 except (openai.APITimeoutError, openai.APIConnectionError):
                     if self._fallback_client and self._fallback_model:
-                        logger.warning("主模型调用超时，fallback 到备用模型: %s", self._fallback_model)
+                        logger.warning("本步模型调用超时，fallback 到备用模型: %s", self._fallback_model)
                         fb_kwargs: Dict[str, Any] = {**kwargs, "model": self._fallback_model}
                         resp = self._fallback_client.chat.completions.create(**fb_kwargs)
                         trace.append({"step": step + 1, "type": "fallback", "model": self._fallback_model})
