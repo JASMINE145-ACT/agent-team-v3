@@ -7,12 +7,12 @@
 | 入口 | 文件 | 触发方式 | 文本 | Excel/文件 |
 |------|------|----------|------|------------|
 | **HTTP 回调** | `backend/server/api/routes_wecom.py` | 企业微信服务器 POST 到 `/api/wecom/callback` | ✅ 支持 | ❌ **不支持** |
-| **长连接 Bot** | `start_wecom_bot.py` → `backend/wecom_bot/client.py` | WebSocket（需 `wecom-aibot-sdk`）或 Dummy 命令行 | ✅ 支持 | ✅ 仅真实 SDK 支持 |
+| **长连接 Bot** | `start_wecom_bot.py` → `backend/wecom_bot/client.py` | WebSocket（需 `wecom-aibot-sdk`）或 Dummy 命令行 | ✅ 支持 | ✅ Excel + 图片（仅真实 SDK） |
 
 - **HTTP 回调**：只解析 `MsgType=text`，其它类型（含文件）统一回复「暂时只支持文本消息」。
-- **长连接 Bot**：真实 `WeComBotClient` 注册了 `message.text` 和 `message.file`，Excel 走 `handler.handle_wecom_file`；Dummy 客户端只有 stdin 文本，**没有文件输入**。
+- **长连接 Bot**：真实 `WeComBotClient` 注册了 `message.text` 和 `message.file`。**Excel**（.xlsx/.xlsm）走 `handler.handle_wecom_file`；**图片**（.png/.jpg/.jpeg/.bmp/.webp）走 GLM-OCR 识别后拼进 user 消息再 `handle_wecom_message`，与 Chat 行为一致（依赖 `GLM_OCR_ENABLED`、`GLM_OCR_API_KEY`、`GLM_OCR_BASE_URL`）。Dummy 客户端只有 stdin 文本，**没有文件输入**。
 
-因此：**通过企业微信「HTTP 回调」发来的 Excel 当前不会被处理**；只有用 **wecom-aibot-sdk 长连接** 时，Excel 才会被接收并解析。
+因此：**通过企业微信「HTTP 回调」发来的 Excel/图片当前不会被处理**；只有用 **wecom-aibot-sdk 长连接** 时，Excel 与图片才会被接收并处理。
 
 ---
 
@@ -23,10 +23,10 @@
 ### 2.1 文件消息处理（client.py）
 
 1. **事件**：`message.file` → `_on_file_message`。
-2. **校验**：只处理 `.xlsx` / `.xlsm`，其它类型直接提示「暂时只支持 Excel 报价单」。
-3. **下载**：从 `body.file.url` + `aeskey` 调用 `self._ws.download_file()`，得到 buffer。
-4. **落盘**：保存到 `Config.UPLOAD_DIR / "wecom" / {safe_user} / {timestamp}_{filename}`。
-5. **交给 handler**：`handle_wecom_file(agent, from_user, str(local_path))`。
+2. **类型分支**：按 `filename` 后缀区分：**Excel**（.xlsx/.xlsm）→ 下载、落盘、`handle_wecom_file`；**图片**（.png/.jpg/.jpeg/.bmp/.webp）→ 下载、GLM-OCR、拼成 user 消息后 `handle_wecom_message`；其它类型提示「当前仅支持 Excel 报价单或图片（.png/.jpg 等），请改用支持的类型或 Web 控制台上传。」。
+3. **下载**：从 `body.file.url` + `aeskey` 调用 `_download_file_with_retry()`（内部 `self._ws.download_file()`），**有限次重试**（2～3 次、指数退避）且仅对 `httpx.ConnectTimeout` / `httpx.ReadTimeout` / `asyncio.TimeoutError` 重试；整体超时由 `Config.WECOM_FILE_DOWNLOAD_TIMEOUT`（默认 60 秒）控制。超时或失败时向用户回复「文件下载超时，可能是网络或地域限制，请稍后重试或改用 Web 控制台上传。」或「文件下载失败…」。
+4. **Excel 落盘**：保存到 `Config.UPLOAD_DIR / "wecom" / {safe_user} / {timestamp}_{filename}`。
+5. **交给 handler**：Excel → `handle_wecom_file(agent, from_user, str(local_path))`；图片 → 不落盘，OCR 后直接 `handle_wecom_message`。
 
 ### 2.2 handle_wecom_file（handler.py）
 
@@ -82,6 +82,9 @@
 
 5. **.xls 未在长连接中支持**  
    `client.py` 里只判断 `.xlsx` / `.xlsm`，与 `routes_upload.py` 的 `.xlsx/.xls/.xlsm` 不一致；若需在 WeCom 侧支持旧版 `.xls`，需在 `_on_file_message` 中扩展后缀判断并在摘要生成处兼容。
+
+6. **文件下载 ConnectTimeout（云端部署）**  
+   若日志出现「下载 WeCom 文件失败」且异常为 `httpx.ConnectTimeout`，多为服务端（如 Render 海外节点）无法直连企业微信文件 CDN 或连接建立过慢。**排查**：优先检查网络可达性；若企业微信文件服务需经代理访问，配置 `WECOM_BOT_PROXY_URL`（wecom-aibot-sdk 若支持则文件下载会走该代理）。当前实现已对下载做有限次重试与整体超时（`WECOM_FILE_DOWNLOAD_TIMEOUT`，默认 60 秒），超时后向用户返回明确提示「文件下载超时，可能是网络或地域限制…」。
 
 ---
 

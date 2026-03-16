@@ -120,6 +120,11 @@ class Config:
     WECHAT_EXCEL_FULL_PARSE_ENABLED = (
         os.getenv("WECHAT_EXCEL_FULL_PARSE_ENABLED", "true").strip().lower() in ("1", "true", "yes")
     )
+    # WeCom 长连接：文件下载整体超时（秒），用于 asyncio.wait_for(download_file, ...)；海外部署可适当调大
+    try:
+        WECOM_FILE_DOWNLOAD_TIMEOUT = int(os.getenv("WECOM_FILE_DOWNLOAD_TIMEOUT", "60"))
+    except (TypeError, ValueError):
+        WECOM_FILE_DOWNLOAD_TIMEOUT = 60
 
     @classmethod
     def validate(cls):

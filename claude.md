@@ -275,7 +275,7 @@ Agent Team version3/
   - 模块位置：`backend/wecom_bot/`，包含：
     - `config.py`：`load_wecom_bot_config()` 从环境变量读取 `WECOM_BOT_ID/WECOM_BOT_SECRET/WECOM_BOT_PROXY_URL`，并在缺少关键配置时仅发出 warning（允许本地 Dummy 模式运行）；
     - `handler.py`：定义 `handle_wecom_message(agent, msg)`，将标准化 WeCom 消息（`msg_id/from_user/to_user/msg_type/content/raw`）转成 `session_id="wecom:{from_user}"` 调用 `CoreAgent.execute_react`，带 60s 超时与异常兜底，始终返回一段可落地给用户的文本。
-    - `client.py`：当前实现 `DummyWeComBotClient`，通过命令行 stdin 模拟 WeCom 文本消息，`run_wecom_bot(agent)` 负责加载配置并启动 Dummy 客户端；未来接入企业微信长连接 SDK 时，只需在此处用真实 WeComBotClient 替换 Dummy 即可。
+    - `client.py`：当前实现 `DummyWeComBotClient`，通过命令行 stdin 模拟 WeCom 文本消息，`run_wecom_bot(agent)` 负责加载配置并启动 Dummy 客户端；真实 `WeComBotClient` 下**长连接支持 Excel（.xlsx/.xlsm）与图片（.png/.jpg/.jpeg/.bmp/.webp）**。Excel 走 `handle_wecom_file`（摘要 + 绑定 session）；图片走 GLM-OCR 识别后拼成「【以下为上传图片的识别结果】\n…」再调用 `handle_wecom_message`，与 Chat 行为一致。图片依赖 `Config.GLM_OCR_ENABLED`、`GLM_OCR_API_KEY`、`GLM_OCR_BASE_URL` 等配置。文件下载使用**有限次重试 + 整体超时**（`Config.WECOM_FILE_DOWNLOAD_TIMEOUT`，默认 60 秒），超时类异常时向用户回复「文件下载超时，可能是网络或地域限制，请稍后重试或改用 Web 控制台上传。」海外部署若遇 `ConnectTimeout`，可配置 `WECOM_BOT_PROXY_URL`（若 SDK 支持则文件下载也会走代理）并参见 `doc/wecom_excel_逻辑说明.md` 故障排查。
   - 启动入口：`start_wecom_bot.py`，与 HTTP 后端保持同一套 `Config` 与 `CoreAgent` 初始化逻辑，启动后会提示「当前为 Dummy 模式，使用命令行模拟 WeCom 消息」，支持在本地直接输入文本观察 `session_id="wecom:debug-user"` 下的对话行为。Render 等平台上可将该脚本作为单独 worker 进程运行，后续接上真实长连接实现即可对接企业微信 Bot。
 
 ### 前端 Work 页测试与下载按钮补充

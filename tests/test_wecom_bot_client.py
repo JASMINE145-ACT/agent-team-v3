@@ -95,11 +95,11 @@ def test_on_file_message_rejects_non_excel(monkeypatch, tmp_path):
 
     asyncio.run(handler(frame))
 
-    # Should reply once with a polite "only Excel supported" message.
+    # Should reply once with a polite "Excel or image only" message.
     assert len(ws.replies) == 1
     reply_text = ws.replies[0]["text"]
-    assert "只支持 Excel 报价单文件" in reply_text
-    # Non-Excel branch must not attempt to download the file.
+    assert "Excel" in reply_text and "图片" in reply_text
+    # Non-Excel/non-image branch must not attempt to download the file.
     assert ws.download_calls == []
 
 

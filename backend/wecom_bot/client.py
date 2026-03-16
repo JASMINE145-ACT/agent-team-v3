@@ -11,6 +11,7 @@ WeCom 长连接 Bot 客户端。
 """
 
 import asyncio
+import base64
 import logging
 import os
 import re
@@ -18,7 +19,9 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
+
+import httpx
 
 from backend.config import Config
 from backend.wecom_bot.config import WeComBotConfig, load_wecom_bot_config
@@ -30,6 +33,28 @@ from backend.wecom_bot.handler import (
 
 
 logger = logging.getLogger(__name__)
+
+# 图片后缀（WeCom 文件消息按 filename 区分类型）
+_WECOM_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+
+
+def _is_wecom_image_filename(filename: str) -> bool:
+    lower = (filename or "").strip().lower()
+    return any(lower.endswith(ext) for ext in _WECOM_IMAGE_EXTENSIONS)
+
+
+def _wecom_filename_to_mime(filename: str) -> str:
+    lower = (filename or "").strip().lower()
+    if lower.endswith(".png"):
+        return "image/png"
+    if lower.endswith(".jpg") or lower.endswith(".jpeg"):
+        return "image/jpeg"
+    if lower.endswith(".bmp"):
+        return "image/bmp"
+    if lower.endswith(".webp"):
+        return "image/webp"
+    return "image/png"
+
 
 try:  # 尝试导入官方 SDK，失败时回退到 Dummy 模式
     from wecom_aibot_sdk import WSClient, generate_req_id
@@ -165,7 +190,35 @@ class WeComBotClient:
 
         self._ws.on("message.text", _on_text_message)
 
-        # 文件消息（Excel 为主）→ 下载到 UPLOAD_DIR 并生成摘要，随后提示用户
+        # 文件下载：有限次重试 + 整体超时，仅对超时类异常重试
+        async def _download_file_with_retry(url: str, aes_key: Any) -> Dict[str, Any]:
+            timeout_sec = getattr(Config, "WECOM_FILE_DOWNLOAD_TIMEOUT", 60) or 60
+            max_retries = 3
+            last_exc: Optional[Exception] = None
+            for attempt in range(max_retries):
+                try:
+                    return await asyncio.wait_for(
+                        self._ws.download_file(url, aes_key),
+                        timeout=timeout_sec,
+                    )
+                except (httpx.ConnectTimeout, httpx.ReadTimeout, asyncio.TimeoutError) as e:
+                    last_exc = e
+                    if attempt < max_retries - 1:
+                        delay = 2**attempt
+                        logger.warning("WeCom 文件下载超时或失败，%s 秒后重试（%s/%s）: %s", delay, attempt + 1, max_retries, e)
+                        await asyncio.sleep(delay)
+                    else:
+                        raise
+            assert last_exc is not None
+            raise last_exc
+
+        def _is_download_timeout(exc: Exception) -> bool:
+            return isinstance(
+                exc,
+                (httpx.ConnectTimeout, httpx.ReadTimeout, asyncio.TimeoutError),
+            )
+
+        # 文件消息：Excel → 落盘 + handle_wecom_file；图片 → OCR → handle_wecom_message；其他 → 提示
         async def _on_file_message(frame):
             body = frame.get("body", {}) or {}
             file_info = (body.get("file") or {}) or {}
@@ -184,35 +237,137 @@ class WeComBotClient:
 
             logger.info("WeCom 文件消息来自 %s: %s", from_user, filename)
 
-            # 仅处理 Excel 文件，其它类型直接提示暂不支持
-            lower_name = filename.lower()
-            if not (lower_name.endswith(".xlsx") or lower_name.endswith(".xlsm")):
-                stream_id = generate_req_id("stream")
-                msg = "当前企业微信入口暂时只支持 Excel 报价单文件（.xlsx/.xlsm），请改用 Excel 文件或在 Web 控制台上传。"
-                await self._ws.reply_stream(frame, stream_id, msg, True)
-                return
-
             if not url:
                 stream_id = generate_req_id("stream")
-                msg = "收到文件消息，但未能获取下载地址，请稍后重试或改用 Web 控制台上传报价单。"
+                msg = "收到文件消息，但未能获取下载地址，请稍后重试或改用 Web 控制台上传。"
                 await self._ws.reply_stream(frame, stream_id, msg, True)
                 return
 
-            # 下载并保存到 UPLOAD_DIR/wecom/<user>/...
-            try:
-                result = await self._ws.download_file(url, aes_key)
-                buffer = result["buffer"]
+            lower_name = filename.lower()
+            is_excel = lower_name.endswith(".xlsx") or lower_name.endswith(".xlsm")
+            is_image = _is_wecom_image_filename(filename)
+
+            if not is_excel and not is_image:
+                stream_id = generate_req_id("stream")
+                msg = "当前仅支持 Excel 报价单或图片（.png/.jpg 等），请改用支持的类型或 Web 控制台上传。"
+                await self._ws.reply_stream(frame, stream_id, msg, True)
+                return
+
+            # ---------- 图片分支：OCR 后进 Agent ----------
+            if is_image:
+                if not getattr(Config, "GLM_OCR_ENABLED", False):
+                    await self._ws.reply_stream(
+                        frame, generate_req_id("stream"),
+                        "当前未启用图片识别，请使用文字或 Excel。",
+                        True,
+                    )
+                    return
+                api_key = getattr(Config, "GLM_OCR_API_KEY", None) or Config.OPENAI_API_KEY
+                base_url = getattr(Config, "GLM_OCR_BASE_URL", "") or ""
+                ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-ocr") or "glm-ocr"
+                if not api_key or not base_url:
+                    await self._ws.reply_stream(
+                        frame, generate_req_id("stream"),
+                        "未配置视觉识图 API Key 或 Base URL。",
+                        True,
+                    )
+                    return
+                try:
+                    result = await _download_file_with_retry(url, aes_key)
+                except Exception as e:  # noqa: BLE001
+                    logger.exception("下载 WeCom 文件失败: %s", e)
+                    stream_id = generate_req_id("stream")
+                    msg = (
+                        "文件下载超时，可能是网络或地域限制，请稍后重试或改用 Web 控制台上传。"
+                        if _is_download_timeout(e)
+                        else "文件下载失败，请稍后重试或改用 Web 控制台上传。"
+                    )
+                    await self._ws.reply_stream(frame, stream_id, msg, True)
+                    return
+                buffer = result.get("buffer") or b""
+                if not buffer:
+                    stream_id = generate_req_id("stream")
+                    await self._ws.reply_stream(
+                        frame, stream_id,
+                        "未获取到图片内容，请重试或改用 Web 控制台上传。",
+                        True,
+                    )
+                    return
                 dl_name = (result.get("filename") or "").strip()
-                if dl_name:
-                    filename_local = dl_name
-                else:
-                    filename_local = filename
+                filename_local = dl_name if dl_name else filename
+                max_size = getattr(Config, "MAX_IMAGE_SIZE", 5 * 1024 * 1024)
+                if len(buffer) > max_size:
+                    stream_id = generate_req_id("stream")
+                    await self._ws.reply_stream(
+                        frame, stream_id,
+                        f"图片超过大小限制（单张不超过 {max_size // (1024 * 1024)}MB），请压缩后重试或改用 Web 控制台。",
+                        True,
+                    )
+                    return
+                mime = _wecom_filename_to_mime(filename_local)
+                image_attachments = [
+                    {"content": base64.b64encode(buffer).decode(), "mimeType": mime},
+                ]
+                from backend.core.glm_ocr import run_ocr_for_attachments
+                ocr_text, ocr_err = await asyncio.to_thread(
+                    run_ocr_for_attachments,
+                    image_attachments,
+                    max_size,
+                    api_key,
+                    base_url,
+                    ocr_model,
+                )
+                if ocr_err or not ocr_text:
+                    stream_id = generate_req_id("stream")
+                    await self._ws.reply_stream(
+                        frame, stream_id,
+                        ocr_err or "图片识别失败，请重试或改为文字/Excel。",
+                        True,
+                    )
+                    return
+                user_input = "【以下为上传图片的识别结果】\n" + ocr_text
+                ocr_msg: StandardWeComMessage = {
+                    "msg_id": frame.get("header", {}).get("msg_id") or str(uuid.uuid4()),
+                    "from_user": from_user,
+                    "to_user": frm.get("chatid") or "wecom-bot",
+                    "msg_type": "text",
+                    "content": user_input,
+                    "raw": frame,
+                }
+                try:
+                    answer = await handle_wecom_message(self._agent, ocr_msg)
+                except Exception as e:  # noqa: BLE001
+                    logger.exception("处理 WeCom 图片 OCR 后续消息失败: %s", e)
+                    answer = "系统处理消息时出错，请稍后再试。"
+                await self._ws.reply_stream(frame, generate_req_id("stream"), answer, True)
+                return
+
+            # ---------- Excel 分支：落盘 + 摘要绑定 ----------
+            try:
+                result = await _download_file_with_retry(url, aes_key)
             except Exception as e:  # noqa: BLE001
                 logger.exception("下载 WeCom 文件失败: %s", e)
                 stream_id = generate_req_id("stream")
-                msg = "文件下载失败，请稍后重试或在 Web 控制台上传 Excel 报价单。"
+                msg = (
+                    "文件下载超时，可能是网络或地域限制，请稍后重试或改用 Web 控制台上传。"
+                    if _is_download_timeout(e)
+                    else "文件下载失败，请稍后重试或在 Web 控制台上传 Excel 报价单。"
+                )
                 await self._ws.reply_stream(frame, stream_id, msg, True)
                 return
+
+            buffer = result.get("buffer")
+            if buffer is None or not isinstance(buffer, bytes):
+                logger.warning("WeCom 文件下载返回无有效 buffer: result keys=%s", list(result.keys()))
+                stream_id = generate_req_id("stream")
+                await self._ws.reply_stream(
+                    frame, stream_id,
+                    "文件下载后未获取到内容，请稍后重试或改用 Web 控制台上传。",
+                    True,
+                )
+                return
+            dl_name = (result.get("filename") or "").strip()
+            filename_local = dl_name if dl_name else filename
 
             safe_user = re.sub(r"[^\w\-]", "_", from_user)[:64] or "wecom"
             upload_root = Path(Config.UPLOAD_DIR)
@@ -226,7 +381,6 @@ class WeComBotClient:
                 await self._ws.reply_stream(frame, stream_id, msg, True)
                 return
 
-            # 防止文件名过长或异常字符
             base_name = os.path.basename(filename_local)
             if not (base_name.lower().endswith(".xlsx") or base_name.lower().endswith(".xlsm")):
                 base_name = "wecom_upload.xlsx"
