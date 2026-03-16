@@ -482,6 +482,184 @@ def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, A
     }
 
 
+def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str, Any]:
+    """
+    批量按 code 查库存（只读，ACCURATE 库存表）：
+    - 入参：codes 为 list[str]，每项为 10 位物料编号；单次最多 50 条，超出仅处理前 50 条。
+    - 返回：{ success, result, data: { items, stats } }。data.items 与输入 1:1，每项含 input_index、code、item_status、item；
+      item_status 为 found | not_found | invalid_code，item 为 table.get_item_by_code 的原始结果（未找到时为 None）。
+    """
+    from backend.tools.inventory.config import config
+
+    raw_codes = arguments.get("codes")
+    if not isinstance(raw_codes, list) or not raw_codes:
+        return {
+            "success": True,
+            "result": "请提供 codes（至少一个物料编号）。",
+            "data": {
+                "items": [],
+                "stats": {
+                    "found": 0,
+                    "not_found": 0,
+                    "invalid": 0,
+                    "input_count": 0,
+                    "truncated": False,
+                    "input_total": 0,
+                },
+            },
+        }
+
+    # 只处理前 N 条，保持与批量利润率逻辑一致
+    max_codes = getattr(config, "MAX_CODES_PER_BATCH", 50)
+    codes = raw_codes[:max_codes]
+    truncated = len(raw_codes) > max_codes
+
+    # 预处理：去重非空 code，用于真正的批量查询
+    normalized_codes: list[str] = []
+    for raw in codes:
+        c = str(raw or "").strip()
+        if not c:
+            continue
+        if c not in normalized_codes:
+            normalized_codes.append(c)
+
+    try:
+        table = _get_table_agent()
+        sql_agent = _get_sql_agent()
+    except Exception as e:
+        logger.exception("get_inventory_by_code_batch 初始化库存 Agent 失败")
+        # 全局失败时仍返回结构化 stats，便于上游处理
+        return {
+            "success": False,
+            "error": str(e),
+            "result": f"批量查库存失败: {e}",
+            "data": {
+                "items": [],
+                "stats": {
+                    "found": 0,
+                    "not_found": 0,
+                    "invalid": len(codes),
+                    "input_count": len(codes),
+                    "truncated": truncated,
+                    "input_total": len(raw_codes),
+                },
+            },
+        }
+
+    # 真正的批量查询：一次性按去重后的 codes 拉取所有 Item
+    items: list[Any] = []
+    if normalized_codes:
+        try:
+            items = table.get_items_by_codes(normalized_codes)
+        except Exception as e:
+            logger.exception("get_inventory_by_code_batch 调用 get_items_by_codes 失败: %s", e)
+            return {
+                "success": False,
+                "error": str(e),
+                "result": f"批量查库存失败: {e}",
+                "data": {
+                    "items": [],
+                    "stats": {
+                        "found": 0,
+                        "not_found": 0,
+                        "invalid": len(codes),
+                        "input_count": len(codes),
+                        "truncated": truncated,
+                        "input_total": len(raw_codes),
+                    },
+                },
+            }
+
+    # 构建 code -> Item 映射（以 item_no 为主，必要时回退到列表遍历）
+    code_to_item: dict[str, Any] = {}
+    for it in items or []:
+        try:
+            key = (it.item_no or "").strip()
+        except Exception:
+            key = ""
+        if key:
+            # 仅第一次出现生效，后续重复忽略，避免覆盖
+            code_to_item.setdefault(key, it)
+
+    items_with_status: list[dict[str, Any]] = []
+    found = 0
+    not_found = 0
+    invalid = 0
+    lines: list[str] = []
+
+    for idx, raw in enumerate(codes):
+        code = str(raw or "").strip()
+        if not code:
+            invalid += 1
+            items_with_status.append(
+                {
+                    "input_index": idx,
+                    "code": "",
+                    "item_status": "invalid_code",
+                    "item": None,
+                }
+            )
+            continue
+
+        item = code_to_item.get(code)
+        if item:
+            found += 1
+            items_with_status.append(
+                {
+                    "input_index": idx,
+                    "code": code,
+                    "item_status": "found",
+                    "item": item,
+                }
+            )
+        else:
+            not_found += 1
+            items_with_status.append(
+                {
+                    "input_index": idx,
+                    "code": code,
+                    "item_status": "not_found",
+                    "item": None,
+                }
+            )
+
+    if truncated:
+        lines.append(f"（本次仅处理前 {max_codes} 条，共 {len(raw_codes)} 个编号；其余请分批调用。）")
+    lines.append("库存查询统计（按输入编号分类）：")
+    lines.append(f"- 命中（查到库存行）：{found}")
+    lines.append(f"- 未找到（库存表中无该编号）：{not_found}")
+    lines.append(f"- 编码无效或查询失败：{invalid}")
+    lines.append(f"- 已处理编号：{len(codes)}")
+
+    try:
+        # 补充一段紧凑的明细表，便于人读
+        found_items = [it for it in items_with_status if it.get("item_status") == "found" and it.get("item")]
+        if found_items:
+            lines.append("")
+            lines.append("【命中明细（简表）】")
+            formatted = sql_agent.format_response([it["item"] for it in found_items])
+            lines.append(formatted)
+    except Exception:
+        # 明细表渲染失败不影响主结构
+        pass
+
+    return {
+        "success": True,
+        "result": "\n".join(lines),
+        "data": {
+            "items": items_with_status,
+            "stats": {
+                "found": found,
+                "not_found": not_found,
+                "invalid": invalid,
+                "input_count": len(codes),
+                "truncated": truncated,
+                "input_total": len(raw_codes),
+            },
+        },
+    }
+
+
 def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     执行 select_wanding_match（只读）：从 match_wanding_price/match_quotation 的候选中用 LLM 选 1 个。
@@ -652,6 +830,25 @@ def get_inventory_tools_openai_format() -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "get_inventory_by_code_batch",
+                "description": "对多个物料编号一次性查库存；当用户对多产品（如整表或 5 个以上编号）问库存时优先使用本工具，避免逐条调用 get_inventory_by_code。单次最多 50 条，更多请分批调用。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "codes": {
+                            "type": "array",
+                            "items": {"type": "string", "description": "10 位物料编号"},
+                            "description": "多个 10 位物料编号，单次最多 50 条",
+                        },
+                    },
+                    "required": ["codes"],
+                },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "match_quotation",
                 "description": "询价匹配：同时查报价历史与万鼎字段匹配，结果取并集，每条带 source（历史报价/字段匹配/共同）。",
                 "parameters": {
@@ -762,6 +959,8 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any]) -> dict[s
         return _execute_get_profit_by_price(arguments)
     if name == "get_profit_by_price_batch":
         return _execute_get_profit_by_price_batch(arguments)
+    if name == "get_inventory_by_code_batch":
+        return _execute_get_inventory_by_code_batch(arguments)
     if name == "modify_inventory":
         try:
             from backend.tools.inventory.services.inventory_modify_service import modify_inventory as do_modify

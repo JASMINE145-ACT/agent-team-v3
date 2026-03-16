@@ -25,8 +25,10 @@ class JAgentExtension(AgentExtension):
     def get_output_format_prompt(self) -> str:
         if self._prompt_provider is not None:
             return self._prompt_provider.get_output_format_prompt()
-        from backend.plugins.jagent.skills import OUTPUT_FORMAT
-        return OUTPUT_FORMAT
+        from backend.plugins.jagent.skills import OUTPUT_FORMAT, OUTPUT_FORMAT_LEGACY
+        from backend.config import Config
+        # 根据配置开关返回新旧格式
+        return OUTPUT_FORMAT if getattr(Config, "USE_CLAUDE_LOOP_PROMPT", True) else OUTPUT_FORMAT_LEGACY
 
     def on_before_prompt(self, user_input: str, context: dict) -> str:
         """在进入 ReAct 之前按首轮检测结果注入语言策略说明。"""

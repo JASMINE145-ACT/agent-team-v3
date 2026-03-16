@@ -28,8 +28,8 @@ class Config:
     )
     # 主 LLM（默认智谱 GLM，可通过 .env 中的 LLM_MODEL 覆盖）
     LLM_MODEL = os.getenv("LLM_MODEL", "glm-4-flash")
-    # 单次回复最大 token 数；表格/利润率等长回复需 2 万+，否则末尾易被截断
-    LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "20000"))
+    # 单次回复最大 token 数；表格/利润率等长回复需 2 万+，Claude Loop 改造后提升至 4 万避免思考被截断
+    LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "40000"))
     # 上下文压缩：用轻量模型对历史 tool 结果做摘要，默认 gpt-4o-mini；未设则用主模型同 endpoint
     SUMMARY_LLM_MODEL = os.getenv("SUMMARY_LLM_MODEL", "gpt-4o-mini")
     SUMMARY_LLM_BASE_URL = (os.getenv("SUMMARY_LLM_BASE_URL") or "").strip() or None  # None 则用 OPENAI_BASE_URL
@@ -73,15 +73,23 @@ class Config:
     FALLBACK_LLM_API_KEY = (os.getenv("FALLBACK_API_KEY") or "").strip() or None
     FALLBACK_LLM_MODEL = (os.getenv("FALLBACK_MODEL") or "").strip() or None
 
-    # 有图时仅 Step0 使用视觉模型，Step1+ 用主模型；未设则不上传图也走主模型
-    VISION_LLM_MODEL = (os.getenv("VISION_LLM_MODEL") or "").strip() or None
-    VISION_LLM_API_KEY = (os.getenv("VISION_LLM_API_KEY") or "").strip() or None
-    VISION_LLM_BASE_URL = (os.getenv("VISION_LLM_BASE_URL") or "").strip() or None
-    # 单张图片大小上限（字节），超过拒绝；默认 5MB；无效 env 时回退默认
+    # 图片输入：使用智谱视觉模型识别后注入文本；不设则用主模型 Key/Base
+    GLM_OCR_ENABLED = (os.getenv("GLM_OCR_ENABLED", "true") or "").strip().lower() in ("1", "true", "yes")
+    GLM_OCR_API_KEY = (os.getenv("GLM_OCR_API_KEY") or "").strip() or None  # None 则用 OPENAI_API_KEY
+    _glm_ocr_base = (os.getenv("GLM_OCR_BASE_URL") or "").strip() or "https://open.bigmodel.cn/api/paas/v4"
+    GLM_OCR_BASE_URL = _glm_ocr_base.rstrip("/") + "/"
+    GLM_OCR_MODEL = (os.getenv("GLM_OCR_MODEL") or "").strip() or "glm-4v"  # 可选 glm-4v-plus 等
+    # 单张图片大小上限（字节），超过拒绝；默认 5MB；智谱 OCR 单张 8MB，此处取 min
     try:
-        MAX_IMAGE_SIZE = int(os.getenv("MAX_IMAGE_SIZE_MB", "5")) * 1024 * 1024
+        _max_mb = int(os.getenv("MAX_IMAGE_SIZE_MB", "5"))
+        MAX_IMAGE_SIZE = min(_max_mb * 1024 * 1024, 8 * 1024 * 1024)
     except (TypeError, ValueError):
-        MAX_IMAGE_SIZE = 5 * 1024 * 1024
+        MAX_IMAGE_SIZE = min(5 * 1024 * 1024, 8 * 1024 * 1024)
+    # 每次请求参与 OCR 的图片最大张数，防止一次性传入过多图片导致延迟过高
+    try:
+        MAX_OCR_IMAGES_PER_REQUEST = int(os.getenv("MAX_OCR_IMAGES_PER_REQUEST", "3"))
+    except (TypeError, ValueError):
+        MAX_OCR_IMAGES_PER_REQUEST = 3
 
     # Work 模式：管道/ReAct 开关与 run_id TTL（秒）
     WORK_USE_PIPELINE = (os.getenv("WORK_USE_PIPELINE", "true") or "").strip().lower() in ("1", "true", "yes")
@@ -89,6 +97,9 @@ class Config:
 
     # Chat/WeCom ReAct 单轮最大步数（每步一次 LLM 调用）；默认 12，可通过 REACT_MAX_STEPS 覆盖
     REACT_MAX_STEPS = int(os.getenv("REACT_MAX_STEPS", "12"))
+
+    # Claude Loop Prompt：是否使用三段式 Claude Loop 思考结构（Gather/Act/Verify）；默认 true
+    USE_CLAUDE_LOOP_PROMPT = (os.getenv("USE_CLAUDE_LOOP_PROMPT", "true") or "").strip().lower() in ("1", "true", "yes")
 
     # Run Log：长流程运行日志基目录（相对 base_dir 的 data/run-logs，或通过环境变量覆盖）
     RUN_LOG_BASE_DIR = Path(os.getenv("RUN_LOG_BASE_DIR", str(base_dir / "data" / "run-logs")))
@@ -123,5 +134,9 @@ class Config:
 
 if __name__ != "__main__":
     Config.validate()
+    if Config.GLM_OCR_ENABLED:
+        print("[Config] GLM_OCR: enabled, base_url:", Config.GLM_OCR_BASE_URL)
+    else:
+        print("[Config] GLM_OCR: disabled")
 
 __all__ = ["Config"]

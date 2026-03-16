@@ -7,10 +7,17 @@ import types as _types
 from typing import Any, Dict, List, Tuple
 
 _CORE_OUTPUT_FORMAT = """\
-## 输出格式（每轮必须）
-1. 先输出 <think>...</think>：目标 / 已知 / 缺失 / 本步行动。
-2. 若调用工具：紧接 tool_call；结果返回后目标已完成则直接输出最终回答；否则继续下一轮。
-3. 若不调用工具：在 <think> 后直接给出最终回答。
+## 输出格式（Claude Agent Loop）
+
+每轮推理按三段式输出 <think>:
+
+<think>
+1. Gather Context: 分析用户意图、已知信息、会话上下文、缺失项
+2. Take Action: 决定行动(直接回答/调用工具/澄清)，说明工具选择理由与参数来源
+3. Verify Results: 如有工具返回结果，检查是否得到信息、是否继续、是否可回答
+</think>
+
+允许模型灵活组织，首轮可跳过 Verify。
 **多轮指代**：用户说「选哪个」→ 必须调用 select_wanding_match；用户说「那个产品」→ 用上轮完整名称。"""
 
 

@@ -7,6 +7,7 @@ SKILL_INVENTORY_PRICE = """\
 - **目标**：查库存、查报价、查各档位价格；询价/查 code 时优先 match_quotation（历史+万鼎并行取并集，结果带匹配来源），多候选时用 LLM 选型。
 - **search_inventory(keywords)**：按产品名/规格搜库存，只适配英文。
 - **get_inventory_by_code(code)**：已知 10 位物料编号时直接查库存。
+- **get_inventory_by_code_batch(codes)**：当用户要求对**多个**编号（如整张表、或 5 个以上编号）查库存时，**必须**使用本工具，一次传入多个物料编号 codes；禁止对每个产品单独多次调用 get_inventory_by_code。单次最多 50 条，更多请分批调用；结果在 data.items 中与输入 1:1 对齐（含 input_index、code、item_status、item）。
 - **modify_inventory(code, action, quantity, memo?)**：**锁定可售**（action=lock，占位）或**增补/归零**（action=supplement）。需物料编号（code）；建议先 get_inventory_by_code 确认。supplement 时 quantity>0 为增补，quantity=0 为将用户仓/可售归零。仅当用户明确说「锁定/预留」「增补/入库/加库存」或「改回 0/归零」时使用。需 INVENTORY_MODIFY_ENABLED=1 才真实写 ACCURATE。
 - **match_quotation(keywords, customer_level?)**：**询价/查 code 时优先用本工具**。同时查报价历史与万鼎字段匹配，结果取并集，每条候选带 **source**（历史报价/字段匹配/共同）。返回格式含 candidates、match_source，单条时含 chosen。这样「直接50mm」等既能命中历史也能命中万鼎时，会显示 共同 或 历史报价。
 - **match_by_quotation_history(keywords)**：仅历史匹配（单独用较少，一般用 match_quotation）。
@@ -21,7 +22,7 @@ SKILL_INVENTORY_PRICE = """\
 - **「全部价格」「各档价格」**：对同一 keywords 按需分别调用 match_wanding_price(customer_level=…)，汇总成表格「客户级别 | 客户价」。**档位与自然语言对应**：用户说「**二级代理**」「二级代理价格」→ customer_level=A；「**一级代理**」→ B；「**聚万大客户**」→ C；「**青山大客户**」「青山大客户价格」→ D（降低利润率用 D_low）；「**大唐大客户**」→ E。**出厂/采购价**：用户要「出厂价含税」「出厂价不含税」「采购不含税」时传 customer_level=FACTORY_INC_TAX / FACTORY_EXC_TAX / PURCHASE_EXC_TAX。档位代码：A/B/C/D/D_LOW/E 及 FACTORY_INC_TAX/FACTORY_EXC_TAX/PURCHASE_EXC_TAX。**只调一次会只得到默认 B 档。**
 - **回复用户时档位一律用全名**：出厂价_含税、出厂价_不含税、采购不含税；（二级代理）A级别 利润率/报单价格；（一级代理）B级别 利润率/报单价格；（聚万大客户）C级别 利润率/报单价格；（青山大客户）D级别 利润率/报单价格/降低利润率；（大唐大客户）E级别（包运费） 利润率/报单价格。表格列名或文中提到价格档位时写上述全名，不要只写 A类/B类。
 - **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。
-- **展示**：结果表上方必写「匹配来源：」+ match_source；候选含 source 时表格加「来源」列；有 chosen 时标「已选：第 N 条」；select_wanding_match 须传入上步 match_source。"""
+- **展示**：结果表上方必写「匹配来源：」+ match_source；表格**必须包含「产品编号(code)」列**；候选含 source 时表格加「来源」列；有 chosen 时标「已选：第 N 条」；select_wanding_match 须传入上步 match_source。"""
 
 SKILL_OOS = """\
 **2. 无货**
@@ -45,6 +46,7 @@ SKILL_QUOTE = """\
 - **字段语义规则**：
   - 报价单里的 `Qty` 是「询价数量/采购数量」，**不是库存**；库存只能来自库存工具（`get_inventory_by_code` / `search_inventory`）。
   - 用户要求「提取 Excel 数据/商品信息」时，**回复中的表格必须与工具返回的表逐行一致**：照抄全部行、不得只列部分、不得把同一行重复多遍凑行数、不得自行编造行。若篇幅所限只能展示部分，须明确写「仅展示前 N 行，共 M 行」。**不得在表格单元格内填写「数据被截断」等占位符**；仅当工具返回明确含「已截断」提示时，方可在回复末尾用一句话说明「部分内容因长度被截断」，且不得在具体单元格内填「数据被截断」。
+  - **CRITICAL - Excel 数据展示规则**：`parse_excel_smart` 返回「共 N 行」时，表示已成功读取 N 行数据（包含表头）；返回的 Markdown 表格第一行是列编号（如 `| 1 | 2 | 3 | 4 |`），第二行是表头，第三行开始是实际数据。**严禁**在 Verify 阶段声称「只有表头」「没有数据行」「似乎为空」或任何误导性判断。**必须**完整展示工具返回的所有数据行，并在回复中明确说明「共 N 行数据」。
 - **何时用**：用户要「提取报价数据」「看报价单内容」「填表」「解析/编辑这个 Excel」且 context 有 file_path 时用；**整单询价填充**用下面的 run_quotation_fill。"""
 
 SKILL_FILL = """\
@@ -57,6 +59,7 @@ SKILL_EXCEL_CHAT = """\
 **3. Excel（普适，Chat）**
 - **parse_excel_smart(file_path, sheet_name?, max_rows?)**：解析任意 Excel，返回 Markdown 表（只读查看）。若用户要实际填表/批量修改，应引导到 Work 页或使用后端 API，而不是在 Chat 中用复杂编辑工具。
 - 回复时**必须与工具返回的表逐行一致**：照抄全部行、不得只列部分、不得把同一行重复多遍凑数、不得编造行。**不得在单元格内填写「数据被截断」**；仅当工具明确提示已截断时，可在回复末尾用一句话说明，勿在单元格内写「数据被截断」。若返回中含「已截断」，请基于已有内容回答，勿再次调用解析工具。
+- **CRITICAL - Excel 数据展示规则**：`parse_excel_smart` 返回「共 N 行」时，表示已成功读取 N 行数据（包含表头）；返回的 Markdown 表格第一行是列编号（如 `| 1 | 2 | 3 | 4 |`），第二行是表头，第三行开始是实际数据。**严禁**在 Verify 阶段声称「只有表头」「没有数据行」「似乎为空」或任何误导性判断。**必须**完整展示工具返回的所有数据行，并在回复中明确说明「共 N 行数据」。
 - **何时用**：用户要「解析这个 Excel」「看一下这张表的内容」且 context 有 file_path 时用。**整单询价填充、报价单提取/按表填表请到 Work 页操作。**"""
 
 SKILL_CLARIFY = """\
@@ -70,7 +73,8 @@ SKILL_KNOWLEDGE = """\
 **6. 业务知识记录**
 - **append_business_knowledge(content)**：当用户要求将某条知识、规则、纠正**记录到知识库 / 记在 knowledge / 润色后记录 / 把这个记下来**等（任意说法）时，**必须**调用本工具。content 为润色后的完整一条知识（可多句），如「PVC160 不是标准规格，应理解为 DN150(6")」。无需用户先说「请记住」；用户说「记录在 knowledge 里面」「可以润色一下记到知识库」即调用。"""
 
-OUTPUT_FORMAT = """\
+# 旧版输出格式（回退用）
+OUTPUT_FORMAT_LEGACY = """\
 ## 输出格式（每轮必须）
 
 1. 先输出 <think>...</think>
@@ -78,6 +82,46 @@ OUTPUT_FORMAT = """\
 2. 若调用工具：紧接 tool_call；工具结果返回后，若目标已完成则直接输出最终回答（无需再调工具）；否则继续下一轮工具调用。
 3. 若不调用工具（如打招呼、能力外）：在 <think> 后直接给出最终回答。
 4. **涉及多个同类项**（如多行、多编号）时，优先使用批量类工具（*_batch），减少单轮步数。
+
+**多轮指代**：用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）。用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_quotation 或 match_wanding_price，勿用用户本句的简称或错字。"""
+
+OUTPUT_FORMAT = """\
+## 输出格式（Claude Agent Loop 规范）
+
+每轮推理按以下三段式结构输出 <think> 块:
+
+<think>
+
+### 1. Gather Context
+分析当前任务所需信息，例如：
+- 用户意图
+- 已知信息
+- 会话上下文
+- 缺失信息
+
+### 2. Take Action
+决定下一步行动：
+- 直接回答
+- 调用工具
+- 请求用户澄清
+
+如果调用工具，请说明：
+- 选择哪个工具
+- 为什么选择
+- 参数来源
+
+### 3. Verify Results
+如果上一轮有工具返回结果(observation)，检查：
+- 是否得到需要的信息
+- 是否需要继续调用工具
+- 是否可以给出最终回答
+
+</think>
+
+**重要规则**:
+- 首轮无 observation 时 Verify 部分可简写或跳过
+- 允许模型灵活组织思考内容，不强制严格对齐格式
+- **涉及多个同类项**（如多行、多编号）时，优先使用批量类工具（*_batch），减少单轮步数
 
 **多轮指代**：用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）。用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_quotation 或 match_wanding_price，勿用用户本句的简称或错字。"""
 

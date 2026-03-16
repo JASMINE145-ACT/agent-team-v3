@@ -67,7 +67,132 @@ Agent Team version3/
 
 **框架化改造（概要）**：ReAct 引擎与业务解耦，`CoreAgent` 不 import 业务模块；工具由 `ToolRegistry` 查表分发，替代原 `execute_tool` 内 if/elif 链；业务通过 `AgentExtension` 注册（技能 prompt 在 `plugins/jagent/skills.py`，注册在 `plugins/jagent/extension.py`）。启动时 `app.py` 创建 `CoreAgent(extensions=[JAgentExtension()])` 并写入 `app.state.agent`，`routes.py` 与 `gateway/handlers/chat.py` 从 `request.app.state.agent` / `ws.app.state.agent` 取 agent。功能行为保持不变；详见 `doc/改造.md`。
 
+### 统一「上限 / 截断」配置一览
+
+以下为控制 LLM 输入/输出、工具结果、上下文等长度的配置点。**配置策略**（2026-03-16 调整）：
+- **默认值写在代码里**（`backend/config.py` 或 `backend/core/agent.py`），便于版本管理和部署
+- **环境变量可选覆盖**：仅在需要针对特定环境调整时才设置环境变量
+- **Render 等云平台无需额外配置**：默认值已优化，直接部署即可
+
+- **工具与上下文**（2026-03-16 调大以避免 Excel 数据截断）
+  - `TOOL_RESULT_MAX_CHARS`：单次工具结果字符上限，代码默认 `16_000`（环境变量可覆盖）。原为 `8_000`，已提升至 `16k`。
+  - `TOOL_RESULT_EXCEL_MAX_CHARS`：Excel 工具（`parse_excel_smart`等）单次返回字符上限，代码默认 `100_000`（环境变量可覆盖）。原为 `48_000`，已提升至 `100k` 以完整展示大表格。
+  - `CONTEXT_MAX_CHARS`：多轮总上下文上限，代码默认 `16_000`（环境变量可覆盖）。原为 `8_000`，已提升至 `16k`。
+- **模型输出**
+  - `Config.LLM_MAX_TOKENS`：单次回复最大 token 数，代码默认 `40000`（`backend/config.py`，环境变量可覆盖）。原为 `20000`，已提升至 `40k` 以支持 Claude Loop 更长的思考与回复。
+- **OCR 与图片**
+  - `backend/core/glm_ocr.py`：
+    - `ZHIPU_OCR_MAX_BYTES = 8 * 1024 * 1024`：智谱官方单张 8MB 硬上限。
+    - `MAX_OCR_TEXT_CHARS`：从环境变量读取，默认 `6000`；拼接后的 OCR 文本超过该长度时会在注入 user 消息前截断，并追加「[已截断 OCR 结果]」后缀。
+  - `backend/config.py` + 路由层：
+    - `MAX_IMAGE_SIZE_MB`（环境变量）→ `Config.MAX_IMAGE_SIZE`：单张图片大小上限（字节），默认取 `min(MAX_IMAGE_SIZE_MB, 8MB)`；`routes_chat.py` 与 `gateway/handlers/chat.py` 在上传图片时按该值校验请求体。
+    - `MAX_OCR_IMAGES_PER_REQUEST`：单次参与 OCR 的图片张数上限，默认 `3`。
+- **上传与会话长度**
+  - `Config.MAX_UPLOAD_MB`：通用上传文件大小上限，默认 `200MB`。
+  - 会话相关（均可通过环境变量覆盖，见 `backend/config.py`）：
+    - `SESSION_MAX_TURNS`：单会话最大轮数，默认 `20`。
+    - `SESSION_INJECT_TURNS`：每次注入到 prompt 中的最近轮数，默认 `4`。
+    - `SESSION_INJECT_ANSWER_TRIM`：注入最近回答时的字符截断上限，默认 `2000`。
+    - `SESSION_ANSWER_TRIM`：会话持久化时，对每条 answer 的截断上限，默认 `2000`。
+- **ReAct 循环控制**
+  - `Config.REACT_MAX_STEPS`：单轮 ReAct 循环中 LLM 调用步数上限，默认 `12` 步（环境变量 `REACT_MAX_STEPS` 可改）。
+- **库存 / 万鼎相关批量工具**
+  - `backend/tools/inventory/services/inventory_agent_tools.py`：
+    - `BATCH_PROFIT_MAX_ITEMS = 50`：批量利润率查询单次最多处理 `50` 条，更多条目会被丢弃且在结果文案中以「仅处理前 N 条」形式标注截断。
+    - `Config.MAX_CODES_PER_BATCH`：`get_inventory_by_code_batch` 单次最多接收的 `codes` 数量，默认 `50`。
+    - `Config.MAX_CODES_PER_SEARCH`：`search_inventory` 中 `get_items_by_codes` 的 code 数量上限，默认 `10`。
+    - `Config.MAX_DETAILS_FOR_AGENT`：`search_items` 返回明细行数上限，默认 `10`。
+
 **独立运行**：从项目根目录执行 `python run_backend.py` 或 `python cli_agent.py` 即可；无根目录 `config.py`/`models/`，配置与模型均用 `backend.tools.oos` 等包内模块。
+
+### Claude Loop 改造说明（三段式思考结构）
+
+**改造时间**: 2026年3月  
+**目标**: 在保持现有 ReAct 循环逻辑不变的前提下，在 prompt 层引入 Claude Loop 的「Gather Context → Take Action → Verify Results」三段式思考结构，提升 Agent 推理的稳定性和可验证性。
+
+**核心改动**:
+- `backend/plugins/jagent/skills.py` 中的 `OUTPUT_FORMAT` 从简单的「目标/已知/行动」改为显式的三段式结构
+- `backend/core/agent_helpers.py` 中的 `_CORE_OUTPUT_FORMAT` 同步为简化版 Claude Loop 格式
+- 增加环境变量 `USE_CLAUDE_LOOP_PROMPT`（默认 `true`），支持回退到旧版 prompt
+
+**三段式结构**:
+
+```
+<think>
+
+### 1. Gather Context
+分析当前任务所需信息，例如：
+- 用户意图
+- 已知信息
+- 会话上下文
+- 缺失信息
+
+### 2. Take Action
+决定下一步行动：
+- 直接回答
+- 调用工具
+- 请求用户澄清
+
+如果调用工具，请说明：
+- 选择哪个工具
+- 为什么选择
+- 参数来源
+
+### 3. Verify Results
+如果上一轮有工具返回结果(observation)，检查：
+- 是否得到需要的信息
+- 是否需要继续调用工具
+- 是否可以给出最终回答
+
+</think>
+```
+
+**设计原则**（基于实践反馈）:
+1. **Verify 简化**: 不要求模型做「完整性/正确性」验证（LLM 很少真正做到），改为实用的「是否得到信息/是否继续/是否回答」三项检查
+2. **格式灵活**: 用「例如」「可以」等柔性词，允许模型自由组织思考内容，不强制严格对齐格式
+3. **observation 判断清晰**: 用「如果上一轮有工具返回结果」而不是「仅在有 observation 后」，让模型更容易理解
+4. **Context 隐式注入**: 保持现有的 `session.build_injection`、`get_excel_summary_for_context`、`build_tool_memory_injection` 等隐式注入机制，不引入显式 context tools（避免增加 step 成本）
+
+**预期效果**:
+- **更稳定的工具选择**: Gather Context 阶段显式分析用户意图和缺失信息，减少误判
+- **更清晰的推理链**: Take Action 要求说明「为什么选这个工具」和「参数从哪来」，便于调试
+- **更可靠的结束判断**: Verify Results 阶段检查是否得到所需信息，减少过早结束或多余工具调用
+- **更自然的推理**: 允许模型灵活组织，避免填空题式的僵化格式
+
+**回退方案**:
+- 设置环境变量 `USE_CLAUDE_LOOP_PROMPT=false` 可回退到旧版 prompt（保留为 `OUTPUT_FORMAT_LEGACY`）
+- `backend/plugins/jagent/extension.py` 的 `get_output_format_prompt` 根据该开关返回新旧格式
+- 循环逻辑、工具实现、Session/Memory/Context Compression 等均未改动，保持向后兼容
+
+**不改动的部分**（保持稳定性）:
+- `backend/core/agent.py` 的 `execute_react` 循环逻辑完全不改
+- `_extract_tag` 解析 `<think>` 的方式不改
+- 结束判断逻辑不改（仍通过 `tool_calls` 有无和 `max_steps` 控制）
+- 所有工具实现不改
+- Session/Memory/Context Compression 逻辑不改
+
+**已知问题与修复** (2026-03-15):
+
+**问题**: Claude Loop 引入后，LLM 在 **Verify Results** 阶段可能**过度解读** `parse_excel_smart` 工具返回的 Markdown 表格结构：
+- 工具返回的第一行是**列编号**（`| 1 | 2 | 3 | 4 |`）
+- 第二行是**表头**（`| Code | Qty | Price | Total |`）
+- 之后是**数据行**
+- LLM 误判为「只有表头，没有数据行」，在 Verify 时错误声称「文件似乎只有表头」
+
+**根因**: 
+- 改造前：LLM 直接展示工具返回，不做判断
+- 改造后：Verify 阶段要求「检查是否得到信息」，LLM 误将列编号+表头理解成「只有表头」
+
+**修复方法** (已合入 `skills.py`):
+在 `SKILL_QUOTE` 与 `SKILL_EXCEL_CHAT` 的**字段语义规则**中新增：
+```
+**Verify 阶段禁止主观判断数据有无**：工具返回的 Markdown 表格第一行是列编号、第二行是表头、之后是数据行；不要在 Verify 时臆测「只有表头」或「没有数据」，应**信任工具返回并完整展示**。
+```
+
+**验证方法**: 
+上传包含数据的 Excel 文件，执行「提取数据」，检查 LLM 回复：
+- ❌ 错误：「文件似乎只有表头，没有实际的数据行」
+- ✅ 正确：直接展示完整表格，无误判声明
 
 **云端部署准备**：见 `doc/云端部署准备清单.md`（环境变量、业务文件、前端 dist、持久化、Docker）；详细步骤与平台推荐见根目录 `README.md` 中「部署到云端」。部署时需安装 `requirements.txt` 中的依赖（包括企业微信长连接使用的 `wecom-aibot-sdk`），以便在云端 Web Service 中同时跑 FastAPI HTTP API 与 WeCom 长连接 Bot。
 
@@ -75,11 +200,12 @@ Agent Team version3/
 
 ## 技能与工具（prompt 内描述）
 
-1. **库存与万鼎价格**：search_inventory、get_inventory_by_code、match_wanding_price、select_wanding_match、get_profit_by_price、get_profit_by_price_batch。目标：查库存、万鼎报价、各档位价格/利润率。**批量利润率** get_profit_by_price_batch 返回 **data.items**（与输入严格 1:1，含 input_index、item_status、name；matched 时有 matched_price/matched_profit/matched_price_level；skipped 时 skip_reason 仅 missing_code|missing_price|invalid_price），见 `doc/tool-orchestration-and-contract-issues.md`。**逻辑与数据源差异**（先万鼎 LLM 选型→code 查库存、有 code 直查、英文直查库存；Accurate 仅英文有库存无价格、万鼎有中英文与价格）见 `doc/库存与万鼎匹配逻辑与数据源差异.md`。
+1. **库存与万鼎价格**：search_inventory、get_inventory_by_code、get_inventory_by_code_batch、match_wanding_price、select_wanding_match、get_profit_by_price、get_profit_by_price_batch。目标：查库存、万鼎报价、各档位价格/利润率。**批量利润率** get_profit_by_price_batch 返回 **data.items**（与输入严格 1:1，含 input_index、item_status、name；matched 时有 matched_price/matched_profit/matched_price_level；skipped 时 skip_reason 仅 missing_code|missing_price|invalid_price），见 `doc/tool-orchestration-and-contract-issues.md`。**批量库存** get_inventory_by_code_batch 接受多个物料编号 codes，单次最多 50 条，返回 data.items（与输入 1:1，含 input_index、code、item_status、item）与 stats（found/not_found/invalid 等），用于一次性获取多产品库存而不在 ReAct 里逐条循环调用 get_inventory_by_code。**逻辑与数据源差异**（先万鼎 LLM 选型→code 查库存、有 code 直查、英文直查库存；Accurate 仅英文有库存无价格、万鼎有中英文与价格）见 `doc/库存与万鼎匹配逻辑与数据源差异.md`。
 2. **无货**：get_oos_list、get_oos_stats、register_oos（从报价单）、register_oos_from_text（用户直接说「XX 无货」时登记，无需文件）。目标：无货登记（文件/文字两种途径）、无货列表、无货统计。
 3. **报价单**：parse_excel_smart（统一 Excel 解析）、fill_quotation_sheet、edit_excel。目标：提取/填表/普适 Excel；仅暴露 parse_excel_smart 做解析，extract_quotation_data 已从工具列表移除（edit_excel 的 tool schema 已修正为二维数组 `values` 明确 inner `items` 类型）。
 4. **询价填充**：run_quotation_fill。目标：整单流水线（提取→万鼎匹配→库存→回填）。
 5. **澄清**：ask_clarification。目标：无法判断意图时向用户提问。
+6. **图片 OCR（GLM-OCR）**：入口层通过 `backend.core.glm_ocr.call_zhipu_ocr` 调用智谱 GLM-OCR，将用户上传的图片识别为文本并注入 user 消息前置上下文。当前实现走 `{base_url}/chat/completions` 接口，使用 image_url + base64 data URL 方式调用视觉模型（默认 `glm-4v`），保持与智谱通用对话接口兼容；响应中统一从 `choices[0].message.content` 及多模态 content 中的文本片段聚合出 OCR 文本，并在检测到 body 中存在 `error` 字段或 `status != succeeded` 时直接视为失败，对总字符数应用 `MAX_OCR_TEXT_CHARS` 上限防止撑爆上下文；当收到非 PNG/JPEG/PDF 的 MIME（例如 `image/webp`）时，后端会在发送前自动将 MIME 回退为 `image/png`，以兼容浏览器剪贴板截图等场景并避免 1214 错误。
 
 技能描述现位于 `backend/plugins/jagent/skills.py`（ALL_SKILL_PROMPT、OUTPUT_FORMAT）；`backend/agent/agent.py` 为薄封装，实际逻辑在 `backend/core/agent.py` + JAgentExtension。**OpenClaw 配置**：`doc/openclaw/AGENTS.md`、`doc/openclaw/TOOLS.md` 与上述逻辑对齐，供 OpenClaw 工作区使用或复制到 `~/.openclaw/workspace`；用法见 `doc/openclaw/README.md`。
 
@@ -119,7 +245,7 @@ Agent Team version3/
 - **后端**：`cd "Agent Team version3"` → `python run_backend.py`（默认 8000）。
 - **CLI**：`python cli_agent.py`。
 - **调试日志（本次会话）**：为配合 Cursor debug mode，在 `start.py` 中插入了少量调试日志，运行一键启动时会将环境与启动信息写入项目根目录 `debug-9e751f.log`，问题确认后可随时删除对应代码。
-- **环境变量**：与 version2 一致（OPENAI_API_KEY/ZHIPU_API_KEY、OPENAI_BASE_URL、LLM_MODEL、AOL_* 等），.env 可放在 version3 根或 quotation_tracker（version2 下）。**有图时 Step0 视觉模型**：设 `VISION_LLM_MODEL` 后，用户上传图片时仅第一步用视觉模型，后续步用主模型；可选 `VISION_LLM_API_KEY`、`VISION_LLM_BASE_URL`。**MAX_IMAGE_SIZE**：`MAX_IMAGE_SIZE_MB` 默认 5，单张超过则拒绝（chat.send、/api/query、/api/query/stream）。
+- **环境变量**：与 version2 一致（OPENAI_API_KEY/ZHIPU_API_KEY、OPENAI_BASE_URL、LLM_MODEL、AOL_* 等），.env 可放在 version3 根或 quotation_tracker（version2 下）。**图片输入（GLM-OCR）**：用户上传图片时，先调用智谱 GLM-OCR 接口识别为文本，再将结果注入用户消息，全程仅使用主模型（无单独视觉模型）。需 `GLM_OCR_ENABLED=true`（默认 true）；可选 `GLM_OCR_API_KEY`、`GLM_OCR_BASE_URL`（不设则用 OPENAI_API_KEY 与智谱默认 OCR 地址）；`MAX_IMAGE_SIZE_MB` 默认 5，单张超过则拒绝（chat.send、/api/query、/api/query/stream）。启动日志会打印 `GLM_OCR: enabled/disabled`。**本地验证**：`python scripts/test_glm_ocr_trigger.py` 可检查配置并触发一次智谱 OCR；单元测试见 `tests/test_vision_config.py`（Config、get_image_payloads_for_ocr、run_ocr_for_attachments、Agent 无 vision client）。
 - **数据库（本地 SQLite / 云端 Neon）**：**本地测试**可不设 `DATABASE_URL`，使用本地 SQLite（无货/缺货/报价单/补货单等均落 `data/out_of_stock.db`）。**云端部署（如 Render）**请设置环境变量 `DATABASE_URL` 为 Neon（或其它 Postgres）连接串，以使用云端数据库；若在 RENDER 环境下未设置 `DATABASE_URL`，启动时会打 warning 提示使用云端库。`backend/tools/oos/config.py` 中读取 `DATABASE_URL`，有则用 Postgres（含 Neon），无则用 SQLite。无货/缺货等与 Supabase 的镜像逻辑仍可并存（见 `oos_repository.py`）。
 - **万鼎价格库**：**version3 不依赖 version2**，数据已放在 version3/data/。优先使用环境变量 `PRICE_LIBRARY_PATH`；未设置时先找 version3/data/ 下 `万鼎价格库_管材与国标管件_标准格式.xlsx`，不存在则用同目录下 `Copy of 万鼎...20250814.xlsx`。**新价格库整理**：若使用新版 `NEW PRICE(T) 万鼎...20251106.xlsx`，在 version3 下运行 `python scripts/build_wanding_standard_price_library.py`（脚本读 version2/data/ 下的源文件），**直接输出到 version3/data/万鼎价格库_管材与国标管件_标准格式.xlsx**；加 `--verify` 可生成后自动核对内容。管材 sheet 含 A–X 列，其中 U=相关体积、V=%、W=EXC TAX（LOCAL 不含税）、X=INC TAX（LOCAL 含税 Rp），仅管材有 U–X，国标管件仍为 A–T。
 - **CLI 流式「卡住」**：当模型返回大量 tool_calls 时，流式只输出文本，之后会长时间无输出（模型在发 tool_calls / 正在执行工具）。`execute_react` 现支持 `on_tool_calls_ready(n)` 与 `on_tool_start(name, index, total)`，CLI 会打印「收到 N 个工具调用，正在执行…」和「[i/N] 执行 xxx…」，避免误以为卡死。

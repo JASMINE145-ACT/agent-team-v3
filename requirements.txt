@@ -41,3 +41,6 @@ google-api-python-client>=2.0.0
 
 # 企业微信智能机器人长连接（wecom-aibot-sdk）
 wecom-aibot-sdk>=1.0.2
+
+# 图片格式转换（OCR 前将 webp 等转为 PNG）
+Pillow>=10.0.0

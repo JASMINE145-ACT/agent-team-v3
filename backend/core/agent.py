@@ -31,11 +31,11 @@ from backend.tools.quotation.excel_summary import (
 logger = logging.getLogger(__name__)
 
 # 单次工具结果最大字符数（过大会导致多轮 ReAct 时 prompt 迅速膨胀）
-TOOL_RESULT_MAX_CHARS = 8_000
+TOOL_RESULT_MAX_CHARS = int(os.environ.get("TOOL_RESULT_MAX_CHARS", "16000").replace("_", ""))
 # Excel 解析类工具：30+ 行表易超 8k，单独放宽避免截断后模型误以为“没拿全”或末行被截成半行导致模型填「数据被截断」
-TOOL_RESULT_EXCEL_MAX_CHARS = int(os.environ.get("TOOL_RESULT_EXCEL_MAX_CHARS", "48_000").replace("_", ""))
+TOOL_RESULT_EXCEL_MAX_CHARS = int(os.environ.get("TOOL_RESULT_EXCEL_MAX_CHARS", "100000").replace("_", ""))
 # 多轮对话总上下文上限，超出时压缩历史 tool 结果
-_CONTEXT_MAX_CHARS = 8_000
+_CONTEXT_MAX_CHARS = int(os.environ.get("CONTEXT_MAX_CHARS", "16000").replace("_", ""))
 _MAX_STEPS_HINT = (
     "（本轮推理步数已达上限。）请根据目前已获取的信息直接给出最终回答，不再调用任何工具。"
     "若尚有未处理完的项目，请在回复中友好说明：例如「已计算前 N 个产品的利润率；其余可继续说『继续算剩余产品』或分批询问」，不要向用户展示「步数限制」等系统术语。"
@@ -64,17 +64,6 @@ class CoreAgent:
             if fb_api_key and fb_base_url and self._fallback_model
             else None
         )
-        # 视觉模型（可选）：仅 Step0 有图时使用，Step1+ 用主模型
-        vision_model = getattr(Config, "VISION_LLM_MODEL", None)
-        if vision_model:
-            v_api_key = getattr(Config, "VISION_LLM_API_KEY", None) or api_key
-            v_base_url = getattr(Config, "VISION_LLM_BASE_URL", None) or base_url
-            self._vision_client = get_openai_client(api_key=v_api_key, base_url=v_base_url)
-            self._vision_model = vision_model
-        else:
-            self._vision_client = None
-            self._vision_model = None
-
         self._extensions = extensions
 
         if session_store is None:
@@ -195,23 +184,15 @@ class CoreAgent:
                 user_content += f"\n\n【当前主题】上一轮问：{last_q}。用户本句：{current_input}。请据此理解意图与所指产品。"
 
         tools = self._registry.get_definitions()
-        messages: List[dict] = [
-            {"role": "system", "content": self._system_prompt},
-        ]
+        system_parts: List[str] = [self._system_prompt]
         if excel_summary_entry is not None:
             try:
                 summary_text = format_excel_summary_for_prompt(excel_summary_entry)
-                messages.append({"role": "system", "content": summary_text})
+                system_parts.append(summary_text)
             except Exception:
                 logger.debug("format_excel_summary_for_prompt 失败，已忽略", exc_info=True)
-        image_parts = ctx.get("image_parts") or []
-        first_user_has_image_payload = bool(image_parts)
-        if image_parts:
-            first_user_content: Any = [{"type": "text", "text": user_content}]
-            first_user_content.extend(image_parts)
-            messages.append({"role": "user", "content": first_user_content})
-        else:
-            messages.append({"role": "user", "content": user_content})
+        messages: List[dict] = [{"role": "system", "content": "\n\n".join(system_parts)}]
+        messages.append({"role": "user", "content": user_content})
         thinking_parts: List[str] = []
         trace: List[dict] = []
         last_answer = ""
@@ -229,32 +210,26 @@ class CoreAgent:
 
         for step in range(max_steps):
             _raise_if_cancelled()
-            # 仅在首步需要图片理解；从第二步开始将首条 user 消息降级为纯文本，避免重复携带图片负担。
-            if step >= 1 and first_user_has_image_payload:
-                for m in messages:
-                    if m.get("role") == "user" and isinstance(m.get("content"), list):
-                        m["content"] = user_content
-                        break
-                first_user_has_image_payload = False
             is_last = step == max_steps - 1
             if is_last:
                 messages.append({"role": "user", "content": _MAX_STEPS_HINT})
 
-            # 仅 Step0 且 has_image 时用视觉模型，后续步用主模型（控制成本）
-            use_vision = step == 0 and ctx.get("has_image") and self._vision_client and self._vision_model
-            step_client = self._vision_client if use_vision else self.client
-            step_model = self._vision_model if use_vision else self.model
-            kwargs: Dict[str, Any] = {"model": step_model, "messages": messages, "temperature": 0.1, "max_tokens": max_tokens}
+            kwargs: Dict[str, Any] = {"model": self.model, "messages": messages, "temperature": 0.1, "max_tokens": max_tokens}
             if not is_last:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
+            logger.debug(
+                "LLM 请求 step=%d messages=%d tools=%d",
+                step + 1,
+                len(messages),
+                len(tools) if not is_last else 0,
+            )
 
             step_usage = None
             step_finish_reason = None
             if on_token is not None:
-                # 流式调用：使用本步选定的 client（vision 或 main）
                 llm_task = asyncio.create_task(
-                    asyncio.to_thread(call_llm_streaming_sync, step_client, kwargs, on_token)
+                    asyncio.to_thread(call_llm_streaming_sync, self.client, kwargs, on_token)
                 )
                 try:
                     while not llm_task.done():
@@ -264,6 +239,18 @@ class CoreAgent:
                 except asyncio.CancelledError:
                     if not llm_task.done():
                         llm_task.cancel()
+                    raise
+                except openai.APIStatusError as e:
+                    body = ""
+                    try:
+                        body = e.response.text if hasattr(e, "response") else str(e)
+                    except Exception:
+                        pass
+                    logger.error(
+                        "BigModel API 错误(流式) status=%s body=%s",
+                        e.status_code,
+                        body[:2000],
+                    )
                     raise
                 except (openai.APITimeoutError, openai.APIConnectionError):
                     if self._fallback_client and self._fallback_model:
@@ -283,7 +270,19 @@ class CoreAgent:
             else:
                 _raise_if_cancelled()
                 try:
-                    resp = step_client.chat.completions.create(**kwargs)
+                    resp = self.client.chat.completions.create(**kwargs)
+                except openai.APIStatusError as e:
+                    body = ""
+                    try:
+                        body = e.response.text if hasattr(e, "response") else str(e)
+                    except Exception:
+                        pass
+                    logger.error(
+                        "BigModel API 错误(非流式) status=%s body=%s",
+                        e.status_code,
+                        body[:2000],
+                    )
+                    raise
                 except (openai.APITimeoutError, openai.APIConnectionError):
                     if self._fallback_client and self._fallback_model:
                         logger.warning("本步模型调用超时，fallback 到备用模型: %s", self._fallback_model)
@@ -348,11 +347,16 @@ class CoreAgent:
                 _raise_if_cancelled()
                 name = getattr(tc.function, "name", "") or ""
                 tool_call_id = tool_calls_for_msg[i]["id"]
+                raw_arguments = getattr(tc.function, "arguments", "{}") or "{}"
                 try:
-                    args = json.loads(getattr(tc.function, "arguments", "{}") or "{}")
+                    args = json.loads(raw_arguments)
                 except json.JSONDecodeError:
-                    logger.debug("工具参数 JSON 解析失败，使用空 dict", exc_info=True)
-                    args = {}
+                    logger.warning("工具 %s 参数 JSON 解析失败，raw=%s", name, raw_arguments[:200])
+                    _parse_err_obs = f"工具参数格式错误，arguments 不是合法 JSON：{raw_arguments[:200]}。请重新调用并确保 arguments 为合法 JSON 字符串。"
+                    messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": _parse_err_obs})
+                    trace.append({"step": step + 1, "type": "tool_arg_error", "name": name, "raw": raw_arguments[:200]})
+                    continue
+                args = args if isinstance(args, dict) else {}
 
                 try:
                     args_key = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)

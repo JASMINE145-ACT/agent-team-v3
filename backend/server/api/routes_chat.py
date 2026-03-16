@@ -16,49 +16,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _extract_attachment_image_url(att: Dict[str, Any]) -> str:
-    # 优先使用外部 URL / 已有 data URL，避免重复传整图 base64。
-    direct = (att.get("url") or att.get("imageUrl") or "").strip()
-    if direct:
-        return direct
-    image_url_field = att.get("image_url")
-    if isinstance(image_url_field, str):
-        return image_url_field.strip()
-    if isinstance(image_url_field, dict):
-        return (image_url_field.get("url") or "").strip()
-    return ""
-
-
-def _build_image_parts(
-    image_attachments: list[Dict[str, Any]],
-    max_size: int,
-) -> tuple[list[Dict[str, Any]], str | None]:
-    image_parts: list[Dict[str, Any]] = []
-    for a in image_attachments:
-        image_url = _extract_attachment_image_url(a)
-        if image_url:
-            if image_url.startswith("data:") and "," in image_url:
-                data_part = image_url.split(",", 1)[1].strip()
-                if len(data_part) * 3 // 4 > max_size:
-                    return [], f"图片超过大小限制（单张不超过 {max_size // (1024*1024)}MB）"
-            image_parts.append({"type": "image_url", "image_url": {"url": image_url}})
-            continue
-
-        content = (a.get("content") or "").strip()
-        if content:
-            size_bytes = len(content) * 3 // 4
-            if size_bytes > max_size:
-                return [], f"图片超过大小限制（单张不超过 {max_size // (1024*1024)}MB）"
-            mime = (a.get("mimeType") or "image/png").strip()
-            image_parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{content}"}})
-            continue
-
-        file_id = (a.get("file_id") or a.get("fileId") or "").strip()
-        if file_id:
-            return [], "当前接口暂不支持仅 file_id 直传图片，请改为 image_url 或 base64 content。"
-    return image_parts, None
-
-
 @router.post("/api/query")
 @router.post("/api/master/query")
 async def query(
@@ -110,7 +67,7 @@ async def query(
     context["detected_lang"] = detected
     # 英文优先，其余情况默认按中文处理以保持兼容
     context["preferred_lang"] = "en" if detected == "en" else "zh"
-    # 图片附件：校验 MAX_IMAGE_SIZE，构建 image_parts，有视觉模型时设 has_image
+    # 图片附件：GLM-OCR 识别后注入文本，不设 has_image/image_parts
     image_attachments = [
         a for a in attachments
         if (a or {}).get("type") == "image"
@@ -125,17 +82,22 @@ async def query(
     ]
     if image_attachments:
         from backend.config import Config
-        if not getattr(Config, "VISION_LLM_MODEL", None):
-            return {"success": False, "error": "当前未配置视觉模型（VISION_LLM_MODEL），暂不支持图片输入。"}
+        from backend.core.glm_ocr import run_ocr_for_attachments
+        if not getattr(Config, "GLM_OCR_ENABLED", False):
+            return {"success": False, "error": "当前未启用图片识别（GLM-OCR），暂不支持图片输入。"}
         max_size = getattr(Config, "MAX_IMAGE_SIZE", 5 * 1024 * 1024)
-        image_parts, err = _build_image_parts(image_attachments, max_size)
-        if err:
-            return {"success": False, "error": err}
-        if image_parts:
-            context["has_image"] = True
-            context["image_parts"] = image_parts
-        elif not query_text:
-            return {"success": False, "error": "未读取到有效图片内容，请检查图片数据后重试。"}
+        api_key = getattr(Config, "GLM_OCR_API_KEY", None) or Config.OPENAI_API_KEY
+        base_url = getattr(Config, "GLM_OCR_BASE_URL", "") or ""
+        ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-4v") or "glm-4v"
+        if not api_key or not base_url:
+            return {"success": False, "error": "未配置视觉识图 API Key 或 Base URL。"}
+        ocr_text, ocr_err = await asyncio.to_thread(
+            run_ocr_for_attachments, image_attachments, max_size, api_key, base_url, ocr_model
+        )
+        if ocr_err:
+            return {"success": False, "error": ocr_err}
+        query_text = (query_text or "").strip()
+        query_text = f"{query_text}\n\n【以下为上传图片的识别结果】\n{ocr_text}" if query_text else f"【以下为上传图片的识别结果】\n{ocr_text}"
     agent = request.app.state.agent
     try:
         result = await agent.execute_react(query_text, context=context, session_id=session_id)
@@ -219,23 +181,28 @@ async def query_stream(
         ]
     if image_attachments_stream:
         from backend.config import Config
-        if not getattr(Config, "VISION_LLM_MODEL", None):
-            async def _vision_not_enabled():
-                yield f'data: {json.dumps({"type": "error", "message": "当前未配置视觉模型（VISION_LLM_MODEL），暂不支持图片输入。"}, ensure_ascii=False)}\n\n'
-            return StreamingResponse(_vision_not_enabled(), media_type="text/event-stream")
+        from backend.core.glm_ocr import run_ocr_for_attachments
+        if not getattr(Config, "GLM_OCR_ENABLED", False):
+            async def _ocr_not_enabled():
+                yield f'data: {json.dumps({"type": "error", "message": "当前未启用图片识别（GLM-OCR），暂不支持图片输入。"}, ensure_ascii=False)}\n\n'
+            return StreamingResponse(_ocr_not_enabled(), media_type="text/event-stream")
         max_size = getattr(Config, "MAX_IMAGE_SIZE", 5 * 1024 * 1024)
-        image_parts_stream, err = _build_image_parts(image_attachments_stream, max_size)
-        if err:
-            async def _invalid_image_req():
-                yield f'data: {json.dumps({"type": "error", "message": err}, ensure_ascii=False)}\n\n'
-            return StreamingResponse(_invalid_image_req(), media_type="text/event-stream")
-        if image_parts_stream:
-            context["has_image"] = True
-            context["image_parts"] = image_parts_stream
-        elif not query_text:
-            async def _invalid_image():
-                yield f'data: {json.dumps({"type": "error", "message": "未读取到有效图片内容，请检查图片数据后重试。"}, ensure_ascii=False)}\n\n'
-            return StreamingResponse(_invalid_image(), media_type="text/event-stream")
+        api_key = getattr(Config, "GLM_OCR_API_KEY", None) or Config.OPENAI_API_KEY
+        base_url = getattr(Config, "GLM_OCR_BASE_URL", "") or ""
+        ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-4v") or "glm-4v"
+        if not api_key or not base_url:
+            async def _ocr_no_config():
+                yield f'data: {json.dumps({"type": "error", "message": "未配置视觉识图 API Key 或 Base URL。"}, ensure_ascii=False)}\n\n'
+            return StreamingResponse(_ocr_no_config(), media_type="text/event-stream")
+        ocr_text, ocr_err = await asyncio.to_thread(
+            run_ocr_for_attachments, image_attachments_stream, max_size, api_key, base_url, ocr_model
+        )
+        if ocr_err:
+            async def _ocr_failed():
+                yield f'data: {json.dumps({"type": "error", "message": ocr_err}, ensure_ascii=False)}\n\n'
+            return StreamingResponse(_ocr_failed(), media_type="text/event-stream")
+        query_text = (query_text or "").strip()
+        query_text = f"{query_text}\n\n【以下为上传图片的识别结果】\n{ocr_text}" if query_text else f"【以下为上传图片的识别结果】\n{ocr_text}"
     agent = request.app.state.agent
 
     async def _gen():

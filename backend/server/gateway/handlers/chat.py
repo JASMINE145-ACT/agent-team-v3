@@ -17,48 +17,6 @@ from backend.server.gateway.run_store import register as run_register, unregiste
 logger = logging.getLogger(__name__)
 
 
-def _extract_attachment_image_url(att: dict[str, Any]) -> str:
-    direct = (att.get("url") or att.get("imageUrl") or "").strip()
-    if direct:
-        return direct
-    image_url_field = att.get("image_url")
-    if isinstance(image_url_field, str):
-        return image_url_field.strip()
-    if isinstance(image_url_field, dict):
-        return (image_url_field.get("url") or "").strip()
-    return ""
-
-
-def _build_image_parts(
-    image_attachments: list[dict[str, Any]],
-    max_size: int,
-) -> tuple[list[dict[str, Any]], str | None]:
-    image_parts: list[dict[str, Any]] = []
-    for a in image_attachments:
-        image_url = _extract_attachment_image_url(a)
-        if image_url:
-            if image_url.startswith("data:") and "," in image_url:
-                data_part = image_url.split(",", 1)[1].strip()
-                if len(data_part) * 3 // 4 > max_size:
-                    return [], f"图片超过大小限制（单张不超过 {max_size // (1024*1024)}MB）"
-            image_parts.append({"type": "image_url", "image_url": {"url": image_url}})
-            continue
-
-        content = (a.get("content") or "").strip()
-        if content:
-            size_bytes = len(content) * 3 // 4
-            if size_bytes > max_size:
-                return [], f"图片超过大小限制（单张不超过 {max_size // (1024*1024)}MB）"
-            mime = (a.get("mimeType") or "image/png").strip()
-            image_parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{content}"}})
-            continue
-
-        file_id = (a.get("file_id") or a.get("fileId") or "").strip()
-        if file_id:
-            return [], "当前接口暂不支持仅 file_id 直传图片，请改为 image_url 或 base64 content。"
-    return image_parts, None
-
-
 def _generate_title_via_llm(user_query: str, assistant_answer: str) -> Optional[str]:
     """同步调用 LLM 生成 5–10 字会话标题。失败返回 None。"""
     q = (user_query or "").strip()[:300]
@@ -159,8 +117,8 @@ async def handle_chat_send(
         )
     ]
     if image_attachments:
-        if not getattr(Config, "VISION_LLM_MODEL", None):
-            err_msg = "当前未配置视觉模型（VISION_LLM_MODEL），暂不支持图片输入。"
+        if not getattr(Config, "GLM_OCR_ENABLED", False):
+            err_msg = "当前未启用图片识别（GLM-OCR），暂不支持图片输入。"
             await send_res({"ok": False, "runId": run_id, "error": err_msg})
             await send_event({
                 "type": "event",
@@ -169,20 +127,11 @@ async def handle_chat_send(
             })
             return
         max_size = getattr(Config, "MAX_IMAGE_SIZE", 5 * 1024 * 1024)
-        image_parts, err = _build_image_parts(image_attachments, max_size)
-        if err:
-            await send_res({"ok": False, "runId": run_id, "error": err})
-            await send_event({
-                "type": "event",
-                "event": "chat",
-                "payload": {"runId": run_id, "sessionKey": session_key, "state": "error", "errorMessage": err},
-            })
-            return
-        if image_parts:
-            context["has_image"] = True
-            context["image_parts"] = image_parts
-        elif not user_input:
-            err_msg = "未读取到有效图片内容，请检查图片数据后重试。"
+        api_key = getattr(Config, "GLM_OCR_API_KEY", None) or Config.OPENAI_API_KEY
+        base_url = getattr(Config, "GLM_OCR_BASE_URL", "") or ""
+        ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-4v") or "glm-4v"
+        if not api_key or not base_url:
+            err_msg = "未配置视觉识图 API Key 或 Base URL（可设置 GLM_OCR_API_KEY、GLM_OCR_BASE_URL 或使用主模型 Key）。"
             await send_res({"ok": False, "runId": run_id, "error": err_msg})
             await send_event({
                 "type": "event",
@@ -190,6 +139,20 @@ async def handle_chat_send(
                 "payload": {"runId": run_id, "sessionKey": session_key, "state": "error", "errorMessage": err_msg},
             })
             return
+        from backend.core.glm_ocr import run_ocr_for_attachments
+        ocr_text, ocr_err = await asyncio.to_thread(
+            run_ocr_for_attachments, image_attachments, max_size, api_key, base_url, ocr_model
+        )
+        if ocr_err:
+            await send_res({"ok": False, "runId": run_id, "error": ocr_err})
+            await send_event({
+                "type": "event",
+                "event": "chat",
+                "payload": {"runId": run_id, "sessionKey": session_key, "state": "error", "errorMessage": ocr_err},
+            })
+            return
+        user_input = (user_input or "").strip()
+        user_input = f"{user_input}\n\n【以下为上传图片的识别结果】\n{ocr_text}" if user_input else f"【以下为上传图片的识别结果】\n{ocr_text}"
 
     # 轻量语言检测：为 Web 控制台 Chat 设置 preferred_lang
     if user_input:
