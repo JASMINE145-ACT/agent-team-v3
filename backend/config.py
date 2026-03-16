@@ -78,7 +78,7 @@ class Config:
     GLM_OCR_API_KEY = (os.getenv("GLM_OCR_API_KEY") or "").strip() or None  # None 则用 OPENAI_API_KEY
     _glm_ocr_base = (os.getenv("GLM_OCR_BASE_URL") or "").strip() or "https://open.bigmodel.cn/api/paas/v4"
     GLM_OCR_BASE_URL = _glm_ocr_base.rstrip("/") + "/"
-    GLM_OCR_MODEL = (os.getenv("GLM_OCR_MODEL") or "").strip() or "glm-4v"  # 可选 glm-4v-plus 等
+    GLM_OCR_MODEL = (os.getenv("GLM_OCR_MODEL") or "").strip() or "glm-ocr"
     # 单张图片大小上限（字节），超过拒绝；默认 5MB；智谱 OCR 单张 8MB，此处取 min
     try:
         _max_mb = int(os.getenv("MAX_IMAGE_SIZE_MB", "5"))

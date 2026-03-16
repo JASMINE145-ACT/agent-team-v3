@@ -129,7 +129,7 @@ async def handle_chat_send(
         max_size = getattr(Config, "MAX_IMAGE_SIZE", 5 * 1024 * 1024)
         api_key = getattr(Config, "GLM_OCR_API_KEY", None) or Config.OPENAI_API_KEY
         base_url = getattr(Config, "GLM_OCR_BASE_URL", "") or ""
-        ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-4v") or "glm-4v"
+        ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-ocr") or "glm-ocr"
         if not api_key or not base_url:
             err_msg = "未配置视觉识图 API Key 或 Base URL（可设置 GLM_OCR_API_KEY、GLM_OCR_BASE_URL 或使用主模型 Key）。"
             await send_res({"ok": False, "runId": run_id, "error": err_msg})

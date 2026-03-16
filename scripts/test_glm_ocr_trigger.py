@@ -5,11 +5,12 @@
 用法（在 Agent Team version3 目录下）：
   python scripts/test_glm_ocr_trigger.py
 
-会加载 .env，打印 Config 中的 GLM_OCR 相关配置，并对一张 1x1 小图调用 OCR；
-成功则打印识别结果或 "GLM-OCR 触发成功"。
+会加载 .env，打印 Config 中的 GLM_OCR 相关配置，并优先读取 data/ 目录中的一张真实图片调用 OCR；
+若未找到真实图片，回退到内置 1x1 小图（该图可能被接口判定为尺寸过小）。
 """
 import sys
 from pathlib import Path
+import base64
 
 root = Path(__file__).resolve().parent.parent
 if str(root) not in sys.path:
@@ -38,14 +39,28 @@ def main():
         print("\n未配置 GLM_OCR_BASE_URL，将使用默认智谱 OCR 地址。")
         base_url = "https://open.bigmodel.cn/api/paas/v4/"
 
-    # 1x1 红色像素 PNG
-    tiny_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
-    import base64
-    raw = base64.b64decode(tiny_b64)
+    # 优先使用 data 目录里的一张真实图片，避免 1x1 图触发「上传图片大小错误」。
+    data_dir = root / "data"
+    candidate = None
+    if data_dir.exists():
+        for p in sorted(data_dir.iterdir()):
+            if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp"):
+                candidate = p
+                break
 
-    print("\n正在请求智谱 OCR（单张 1x1 小图）...")
+    if candidate is not None:
+        raw = candidate.read_bytes()
+        mime = "image/png" if candidate.suffix.lower() == ".png" else "image/jpeg"
+        print(f"\n使用测试图片: {candidate} ({len(raw)} bytes)")
+    else:
+        tiny_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        raw = base64.b64decode(tiny_b64)
+        mime = "image/png"
+        print("\n未找到 data 目录测试图，回退到内置 1x1 小图（可能因尺寸过小被拒绝）。")
+
+    print("\n正在请求智谱 OCR...")
     try:
-        text = call_zhipu_ocr(raw, "image/png", api_key, base_url)
+        text = call_zhipu_ocr(raw, mime, api_key, base_url)
         if text:
             print("GLM-OCR 触发成功。识别结果:", text[:200] if len(text) > 200 else text)
         else:

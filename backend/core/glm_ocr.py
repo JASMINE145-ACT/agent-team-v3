@@ -1,11 +1,9 @@
 """
-智谱视觉识图：图片 → 文本，供入口层注入用户消息。
+智谱 OCR：图片 -> 文本，供入口层注入用户消息。
 
-当前实现通过 `{base_url}/chat/completions` 接口，使用 image_url + base64 data URL
-调用视觉模型（默认 `glm-4v`），保持与智谱通用对话接口兼容。
-
-响应中优先从 `choices[0].message.content` 及多模态 content 中的文本片段聚合出 OCR 文本，
-整体长度受 `MAX_OCR_TEXT_CHARS` 控制，避免撑爆 LLM 上下文。
+当前实现使用官方 OCR 端点 `{base_url}/files/ocr`（multipart/form-data 上传文件）。
+响应中优先从 `words_result` 聚合文本，整体长度受 `MAX_OCR_TEXT_CHARS` 控制，
+避免注入后撑爆 LLM 上下文。
 """
 import base64
 import logging
@@ -60,10 +58,10 @@ def call_zhipu_ocr(
     model: Optional[str] = None,
 ) -> Optional[str]:
     """
-    调用智谱视觉模型识别图片文字（`/chat/completions` + image_url）。
+    调用智谱 OCR 接口识别图片文字（`/files/ocr`）。
 
     - base_url: 形如 `https://open.bigmodel.cn/api/paas/v4/` 或无末尾斜杠版本。
-    - 图片以 base64 data URL 格式嵌入到 messages.content 中。
+    - 以 multipart/form-data 上传文件。
     - 返回识别出的纯文本；失败返回 None。
     """
     if not image_bytes or not api_key or not (base_url or "").strip():
@@ -71,7 +69,7 @@ def call_zhipu_ocr(
     if timeout is None:
         timeout = GLM_OCR_TIMEOUT_SECONDS
     if not model:
-        model = os.getenv("GLM_OCR_MODEL", "glm-4v")
+        model = os.getenv("GLM_OCR_MODEL", "glm-ocr")
 
     mime_type = (mime or "image/png").strip() or "image/png"
     # 诊断日志：记录传入的 MIME 和图片前 16 字节，帮助排查 1214
@@ -82,9 +80,13 @@ def call_zhipu_ocr(
         len(image_bytes),
         magic_hex,
     )
-    # 智谱 OCR 仅明确支持 PDF/JPG/PNG/JPEG。
+    if len(image_bytes) > ZHIPU_OCR_MAX_BYTES:
+        logger.warning("GLM-OCR 图片超出接口上限: size=%d > %d", len(image_bytes), ZHIPU_OCR_MAX_BYTES)
+        return None
+
+    # 智谱 OCR 仅明确支持 PDF/JPG/PNG/JPEG/BMP。
     # 当前端给出 webp 等格式时，优先尝试将图片真实转为 PNG；失败则仅修改 MIME。
-    allowed_mimes = {"image/png", "image/jpeg", "image/jpg", "application/pdf"}
+    allowed_mimes = {"image/png", "image/jpeg", "image/jpg", "image/bmp", "application/pdf"}
     lower_mime = mime_type.lower()
     if lower_mime not in allowed_mimes:
         logger.debug("GLM-OCR 非支持 MIME %r，尝试转换为 PNG 再发送", mime_type)
@@ -101,37 +103,23 @@ def call_zhipu_ocr(
             except Exception as e:
                 logger.warning("GLM-OCR PNG 转换失败，将仅修改 MIME 继续发送: %s", e)
         mime_type = "image/png"
-    b64 = base64.b64encode(image_bytes).decode()
-    data_url = f"data:{mime_type};base64,{b64}"
-
-    url = f"{(base_url or '').rstrip('/')}/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload: Dict[str, Any] = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                    {
-                        "type": "text",
-                        "text": (
-                            "请提取图片中的所有文字，按原始布局和结构完整输出，"
-                            "不要总结或解释，只输出识别到的文字内容。"
-                        ),
-                    },
-                ],
-            }
-        ],
-        "max_tokens": 4096,
-        "temperature": 0.1,
+    url = f"{(base_url or '').rstrip('/')}/files/ocr"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    ext = _mime_to_extension(mime_type)
+    filename = "ocr_input.pdf" if mime_type.lower() == "application/pdf" else f"ocr_input.{ext}"
+    files = {"file": (filename, image_bytes, mime_type)}
+    data: Dict[str, Any] = {
+        "tool_type": "hand_write",
+        "language_type": language_type or "CHN_ENG",
     }
+    if model:
+        data["model"] = model
 
     last_exc: Optional[Exception] = None
     body: Dict[str, Any] = {}
     for attempt in range(2):
         try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+            resp = requests.post(url, headers=headers, files=files, data=data, timeout=timeout)
             if resp.status_code != 200:
                 logger.warning("GLM-OCR HTTP %s: %s", resp.status_code, resp.text[:500])
                 return None
@@ -164,30 +152,36 @@ def call_zhipu_ocr(
             logger.warning("GLM-OCR 最终失败: %s", last_exc)
         return None
 
-    # chat/completions 标准响应：尝试从 choices[0].message.content 抽取文本
+    # files/ocr 响应：优先从 words_result 聚合文本
     try:
         if not isinstance(body, dict):
             logger.warning("GLM-OCR 响应体非 dict，无法解析: %s", str(body)[:300])
             return None
-        choices = body.get("choices") or []
-        if not choices:
-            logger.warning("GLM-OCR 响应缺少 choices 字段: %s", str(body)[:300])
-            return None
-        msg = choices[0].get("message") or {}
-        content = msg.get("content") or ""
-        # 1) 纯文本 content
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-        # 2) 多模态 content 列表：聚合其中的 text 片段
-        if isinstance(content, list):
-            parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
-            joined = "\n".join(p for p in parts if p).strip()
+        words_result = body.get("words_result")
+        if isinstance(words_result, list):
+            lines: List[str] = []
+            for item in words_result:
+                if isinstance(item, dict):
+                    w = item.get("words") or item.get("word") or item.get("text")
+                    if isinstance(w, str) and w.strip():
+                        lines.append(w.strip())
+                    continue
+                if isinstance(item, str) and item.strip():
+                    lines.append(item.strip())
+            joined = "\n".join(lines).strip()
             if joined:
                 return joined
+        # 兼容少数实现返回为字符串
+        if isinstance(words_result, str) and words_result.strip():
+            return words_result.strip()
+        # 有些返回把识别文本放到 result 字段
+        result = body.get("result")
+        if isinstance(result, str) and result.strip():
+            return result.strip()
     except Exception as e:
-        logger.warning("GLM-OCR 解析 choices 失败: %s, body=%s", e, str(body)[:300])
+        logger.warning("GLM-OCR 解析 words_result 失败: %s, body=%s", e, str(body)[:300])
 
-    logger.warning("GLM-OCR 响应中未找到文本: %s", str(body)[:300])
+    logger.warning("GLM-OCR 响应中未找到可用文本: %s", str(body)[:300])
     return None
 
 

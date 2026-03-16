@@ -88,7 +88,7 @@ async def query(
         max_size = getattr(Config, "MAX_IMAGE_SIZE", 5 * 1024 * 1024)
         api_key = getattr(Config, "GLM_OCR_API_KEY", None) or Config.OPENAI_API_KEY
         base_url = getattr(Config, "GLM_OCR_BASE_URL", "") or ""
-        ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-4v") or "glm-4v"
+        ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-ocr") or "glm-ocr"
         if not api_key or not base_url:
             return {"success": False, "error": "未配置视觉识图 API Key 或 Base URL。"}
         ocr_text, ocr_err = await asyncio.to_thread(
@@ -189,7 +189,7 @@ async def query_stream(
         max_size = getattr(Config, "MAX_IMAGE_SIZE", 5 * 1024 * 1024)
         api_key = getattr(Config, "GLM_OCR_API_KEY", None) or Config.OPENAI_API_KEY
         base_url = getattr(Config, "GLM_OCR_BASE_URL", "") or ""
-        ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-4v") or "glm-4v"
+        ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-ocr") or "glm-ocr"
         if not api_key or not base_url:
             async def _ocr_no_config():
                 yield f'data: {json.dumps({"type": "error", "message": "未配置视觉识图 API Key 或 Base URL。"}, ensure_ascii=False)}\n\n'

@@ -205,7 +205,7 @@ Agent Team version3/
 3. **报价单**：parse_excel_smart（统一 Excel 解析）、fill_quotation_sheet、edit_excel。目标：提取/填表/普适 Excel；仅暴露 parse_excel_smart 做解析，extract_quotation_data 已从工具列表移除（edit_excel 的 tool schema 已修正为二维数组 `values` 明确 inner `items` 类型）。
 4. **询价填充**：run_quotation_fill。目标：整单流水线（提取→万鼎匹配→库存→回填）。
 5. **澄清**：ask_clarification。目标：无法判断意图时向用户提问。
-6. **图片 OCR（GLM-OCR）**：入口层通过 `backend.core.glm_ocr.call_zhipu_ocr` 调用智谱 GLM-OCR，将用户上传的图片识别为文本并注入 user 消息前置上下文。当前实现走 `{base_url}/chat/completions` 接口，使用 image_url + base64 data URL 方式调用视觉模型（默认 `glm-4v`），保持与智谱通用对话接口兼容；响应中统一从 `choices[0].message.content` 及多模态 content 中的文本片段聚合出 OCR 文本，并在检测到 body 中存在 `error` 字段或 `status != succeeded` 时直接视为失败，对总字符数应用 `MAX_OCR_TEXT_CHARS` 上限防止撑爆上下文；当收到非 PNG/JPEG/PDF 的 MIME（例如 `image/webp`）时，后端会在发送前自动将 MIME 回退为 `image/png`，以兼容浏览器剪贴板截图等场景并避免 1214 错误。
+6. **图片 OCR（GLM-OCR）**：入口层通过 `backend.core.glm_ocr.call_zhipu_ocr` 调用智谱 **`POST {base_url}/files/ocr`**，将用户上传的图片识别为文本并注入 user 消息前置上下文。**接口与模型**：必须使用 **`/api/paas/v4/files/ocr`** 且 **`model=glm-ocr`**，智谱 GLM-OCR 资源包才生效；若误用 `/chat/completions` 或模型 `glm-4v`/`glm-4v-flash`/`glm-vision`，会按余额按量扣费。当前实现为 multipart/form-data 上传文件，请求体传 `model=glm-ocr`（默认 `Config.GLM_OCR_MODEL`），响应从 `words_result` 聚合文本；总字符数受 `MAX_OCR_TEXT_CHARS` 上限。当收到非 PNG/JPEG/PDF 的 MIME（如 `image/webp`）时，后端会尝试转为 PNG 或仅改 MIME 再发送，避免 1214 错误。
 
 技能描述现位于 `backend/plugins/jagent/skills.py`（ALL_SKILL_PROMPT、OUTPUT_FORMAT）；`backend/agent/agent.py` 为薄封装，实际逻辑在 `backend/core/agent.py` + JAgentExtension。**OpenClaw 配置**：`doc/openclaw/AGENTS.md`、`doc/openclaw/TOOLS.md` 与上述逻辑对齐，供 OpenClaw 工作区使用或复制到 `~/.openclaw/workspace`；用法见 `doc/openclaw/README.md`。
 
