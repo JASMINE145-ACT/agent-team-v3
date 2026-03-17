@@ -67,6 +67,14 @@ Agent Team version3/
 
 **框架化改造（概要）**：ReAct 引擎与业务解耦，`CoreAgent` 不 import 业务模块；工具由 `ToolRegistry` 查表分发，替代原 `execute_tool` 内 if/elif 链；业务通过 `AgentExtension` 注册（技能 prompt 在 `plugins/jagent/skills.py`，注册在 `plugins/jagent/extension.py`）。启动时 `app.py` 创建 `CoreAgent(extensions=[JAgentExtension()])` 并写入 `app.state.agent`，`routes.py` 与 `gateway/handlers/chat.py` 从 `request.app.state.agent` / `ws.app.state.agent` 取 agent。功能行为保持不变；详见 `doc/改造.md`。
 
+**技能 Prompt 风格开关（DOC vs Decision Rules）**：  
+`backend/plugins/jagent/skills.py` 中的技能现统一拆分为 DOC/RULES 双版本：例如库存/价格技能 `SKILL_INVENTORY_PRICE_DOC` / `SKILL_INVENTORY_PRICE_RULES`、Excel Chat 技能 `SKILL_EXCEL_CHAT_DOC` / `SKILL_EXCEL_CHAT_RULES`、澄清技能 `SKILL_CLARIFY_DOC` / `SKILL_CLARIFY_RULES`、业务知识技能 `SKILL_KNOWLEDGE_DOC` / `SKILL_KNOWLEDGE_RULES` 等。DOC 版维持原有说明文案；RULES 版采用 Decision Rules 风格（按 Global Priority / Routing / Context Continuity / Batch Handling / Hard Constraints / Output / Examples 分层的 IF/THEN/MUST/DO NOT 规则，末尾带少量正反例）。Chat 场景的聚合常量为：
+
+- `CHAT_SKILL_PROMPT_DOC`：DOC 风格（默认），组合 `SKILL_INVENTORY_PRICE_DOC + SKILL_EXCEL_CHAT_DOC + SKILL_CLARIFY_DOC + SKILL_KNOWLEDGE_DOC`；
+- `CHAT_SKILL_PROMPT_RULES`：Decision Rules 风格，组合 `SKILL_INVENTORY_PRICE_RULES + SKILL_EXCEL_CHAT_RULES + SKILL_CLARIFY_RULES + SKILL_KNOWLEDGE_RULES`。
+
+`JAgentExtension.get_skill_prompt()` 通过 `Config.USE_DECISION_RULE_SKILLS` 切换两者：false/未设 → DOC；true → RULES。两版仅在 **提示风格** 上不同，工具列表与决策逻辑保持一致，便于对比「说明文档式」与「规则分层式」对 LLM 工具编排稳定性的影响。
+
 ### 统一「上限 / 截断」配置一览
 
 以下为控制 LLM 输入/输出、工具结果、上下文等长度的配置点。**配置策略**（2026-03-16 调整）：
@@ -105,47 +113,83 @@ Agent Team version3/
 
 **独立运行**：从项目根目录执行 `python run_backend.py` 或 `python cli_agent.py` 即可；无根目录 `config.py`/`models/`，配置与模型均用 `backend.tools.oos` 等包内模块。
 
-### Claude Loop 改造说明（三段式思考结构）
+### Claude Loop 改造说明（Plan / Gather / Act / Verify + 统一 tool_call 结构）
 
 **改造时间**: 2026年3月  
-**目标**: 在保持现有 ReAct 循环逻辑不变的前提下，在 prompt 层引入 Claude Loop 的「Gather Context → Take Action → Verify Results」三段式思考结构，提升 Agent 推理的稳定性和可验证性。
+**目标**: 在保持现有 ReAct 循环逻辑不变的前提下，在 prompt 层引入 Claude Loop 的「Plan → Gather Context → Act → Verify Results」四段式思考结构，并为工具调用约定统一的 JSON Schema（`{ name, arguments }`）及全局决策/失败恢复规则，提升 Agent 推理与工具编排的稳定性、可验证性与可观测性。
 
 **核心改动**:
-- `backend/plugins/jagent/skills.py` 中的 `OUTPUT_FORMAT` 从简单的「目标/已知/行动」改为显式的三段式结构
-- `backend/core/agent_helpers.py` 中的 `_CORE_OUTPUT_FORMAT` 同步为简化版 Claude Loop 格式
+- `backend/plugins/jagent/skills.py` 中的 `OUTPUT_FORMAT` 从简单的「目标/已知/行动」改为显式的四段式结构（Plan / Gather / Act / Verify），并在 Act 段内约定标准的工具调用输出格式（带 `<tool_call>...</tool_call>` 包裹的 JSON）
+- `backend/core/agent_helpers.py` 中的 `_CORE_OUTPUT_FORMAT` 同步为简化版 Claude Loop 格式（同样遵循 Plan/Gather/Act/Verify 的语义）
 - 增加环境变量 `USE_CLAUDE_LOOP_PROMPT`（默认 `true`），支持回退到旧版 prompt
 
-**三段式结构**:
+**四段式结构（概念）**:
 
 ```
 <think>
 
-### 1. Gather Context
-分析当前任务所需信息，例如：
-- 用户意图
-- 已知信息
-- 会话上下文
-- 缺失信息
+### 1. Plan
+- 当前轮次要解决的具体目标
+- 需要哪些关键信息
+- 打算用到哪些技能簇 / 工具链路（只点名，不在此处输出 JSON）
 
-### 2. Take Action
-决定下一步行动：
-- 直接回答
-- 调用工具
-- 请求用户澄清
+### 2. Gather Context
+- 用户意图与关键约束
+- 会话上下文中已有的关键信息
+- 最近 observation 中可复用的结果
+- 仍缺少什么信息
 
-如果调用工具，请说明：
-- 选择哪个工具
-- 为什么选择
-- 参数来源
+### 3. Act
+- 决定本轮是直接回答、澄清，还是调用工具
+- 若调用工具：
+  - 先自然语言说明要调用哪个工具、为什么、参数从哪来
+  - 再输出一个 `<tool_call>...</tool_call>` 包裹的 JSON，结构为：
 
-### 3. Verify Results
-如果上一轮有工具返回结果(observation)，检查：
-- 是否得到需要的信息
-- 是否需要继续调用工具
-- 是否可以给出最终回答
+<tool_call>
+{
+  "name": "<tool_name>",
+  "arguments": {
+    ... JSON 对象形式的参数 ...
+  }
+}
+</tool_call>
+</think>
+```
+
+**tool_call JSON Schema 与单步单工具约束（全局）**:
+- 工具调用统一使用结构：
+  - `{"name": "<tool_name>", "arguments": { ... }}`
+  - `name` 必须与后端注册的工具名完全一致（区分大小写）；
+  - `arguments` 必须是 JSON 对象，字段名与工具参数 schema 一一对应；
+- Act 段要求：
+  - 先用自然语言说明「调用哪个工具、为什么、参数从哪里来」；
+  - 随后输出一个 `<tool_call>...</tool_call>` 包裹的 JSON 对象，内部即上述 `{name, arguments}`；
+  - 每步**最多一个** `<tool_call>`（ONE step = ONE tool call）；若本轮不调用工具则完全省略 `<tool_call>`。
+
+**Tool Decision Rules / Failure Handling（全局 Guardrail）**:
+- Tool Decision Rules：
+  - MUST 调用工具：当用户请求的是外部数据或系统状态（库存、价格/利润率、Excel 内容、无货/缺货列表与统计等），且当前对话/observation 中尚无足够信息时；
+  - MUST NOT 调用工具：当答案可以完全基于现有对话与最近工具结果推理得出，或用户只是在请求解释/总结/对比，而非新数据时。
+- Failure Handling：
+  - 工具返回空结果或明显低质量结果时，禁止捏造任何产品/编码/库存/价格/Excel 行内容，必须要么向用户澄清，要么按各技能 Decision Rules 中定义的备选路径尝试其他工具；
+  - 工具因参数缺失/类型错误失败时，应在 Verify/Plan 中先修正参数或向用户说明问题来源，再重试调用，而不是基于错误 observation 继续推理。
+
+### 4. Verify Results
+- 如果上一轮有 observation，检查是否已获得完成目标所需信息
+- 决定是继续下一步 Plan/Gather/Act/Verify，还是直接给出最终回答
 
 </think>
 ```
+
+**tool_call JSON Schema 与单步单工具约束（全局）**:
+- 工具调用统一使用结构：
+  - `{"name": "<tool_name>", "arguments": { ... }}`
+  - `name` 必须与后端注册的工具名完全一致（区分大小写）；
+  - `arguments` 必须是 JSON 对象，字段名与工具参数 schema 一一对应；
+- Act 段要求：
+  - 先用自然语言说明「调用哪个工具、为什么、参数从哪里来」；
+  - 随后输出一个 `<tool_call>...</tool_call>` 包裹的 JSON 对象，内部即上述 `{name, arguments}`；
+  - 每步**最多一个** `<tool_call>`（ONE step = ONE tool call）；若本轮不调用工具则完全省略 `<tool_call>`。
 
 **设计原则**（基于实践反馈）:
 1. **Verify 简化**: 不要求模型做「完整性/正确性」验证（LLM 很少真正做到），改为实用的「是否得到信息/是否继续/是否回答」三项检查

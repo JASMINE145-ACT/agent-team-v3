@@ -93,7 +93,8 @@ async def handle_chat_send(
     message = (params.get("message") or "").strip()
     attachments = params.get("attachments") or []
     run_id = params.get("idempotencyKey") or str(uuid.uuid4())
-    if not session_key:
+    # /new、/reset 允许无 sessionKey（直接生成新会话）；其余请求必须带 sessionKey
+    if not session_key and message.strip().lower() not in ("/new", "/reset"):
         raise ValueError("sessionKey required")
     if not message and not attachments:
         raise ValueError("message or attachments required")

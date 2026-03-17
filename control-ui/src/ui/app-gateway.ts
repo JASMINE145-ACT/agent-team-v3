@@ -214,6 +214,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       );
     }
     const state = handleChatEvent(host as unknown as OpenClawApp, payload);
+    let didLoadHistoryForNewSession = false;
     if (state === "final" || state === "error" || state === "aborted") {
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
       void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
@@ -236,6 +237,14 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
         host.chatStreamStartedAt = null;
         host.chatRunId = null;
         host.chatQueue = [];
+        host.chatMessages = [];
+        host.lastError = null;
+        host.chatThinkingLevel = null;
+        host.compactionStatus = null;
+        if (host.compactionClearTimer != null) {
+          clearTimeout(host.compactionClearTimer);
+          host.compactionClearTimer = null;
+        }
         host.resetToolStream();
         host.resetChatScroll();
         host.applySettings({
@@ -245,10 +254,13 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
         });
         void host.loadAssistantIdentity();
         void loadChatHistory(host as unknown as OpenClawApp);
+        didLoadHistoryForNewSession = true;
       }
     }
     if (state === "final" || state === "foreign_final") {
-      void loadChatHistory(host as unknown as OpenClawApp);
+      if (!didLoadHistoryForNewSession) {
+        void loadChatHistory(host as unknown as OpenClawApp);
+      }
     }
     return;
   }

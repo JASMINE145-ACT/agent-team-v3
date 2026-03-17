@@ -1,6 +1,7 @@
 import json
 
 import asyncio
+import pytest
 from types import SimpleNamespace
 from backend.core.language_utils import detect_language, contains_chinese
 from backend.plugins.jagent.extension import JAgentExtension
@@ -152,4 +153,71 @@ def test_english_query_with_chinese_tool_output_adds_translation_note():
     ctx_zh = {"detected_lang": "zh", "preferred_lang": "zh"}
     out_zh = ext.on_after_tool("inventory_tool", {}, chinese_obs, ctx_zh)
     assert out_zh == chinese_obs
+
+
+# ----- New session (/new, /reset) gateway behavior -----
+
+
+def test_chat_send_new_with_empty_session_key_returns_new_session_key():
+    """chat.send message=/new 且 sessionKey 为空时，不报错并返回 newSessionKey。"""
+    res_payloads = []
+    event_payloads = []
+
+    async def _send_res(p: dict) -> None:
+        res_payloads.append(p)
+
+    async def _send_event(p: dict) -> None:
+        if p.get("event") == "chat":
+            event_payloads.append(p.get("payload"))
+
+    ws = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(agent=_DummyAgent())))
+    params = {"sessionKey": "", "message": "/new"}
+    asyncio.run(handle_chat_send(ws, "req-new-1", params, _send_res, _send_event))
+
+    assert len(res_payloads) == 1
+    assert res_payloads[0].get("ok") is True
+    assert "runId" in res_payloads[0]
+    assert len(event_payloads) == 1
+    payload = event_payloads[0]
+    assert payload.get("state") == "final"
+    assert payload.get("sessionKey") == ""
+    new_key = payload.get("newSessionKey")
+    assert new_key and len(new_key) > 0
+    # UUID 形
+    assert "-" in new_key or len(new_key) >= 32
+
+
+def test_chat_send_new_with_session_key_returns_same_session_key_in_payload():
+    """chat.send message=/new 且带 sessionKey 时，payload 中 sessionKey 为请求中的值。"""
+    event_payloads = []
+
+    async def _send_res(_: dict) -> None:
+        pass
+
+    async def _send_event(p: dict) -> None:
+        if p.get("event") == "chat":
+            event_payloads.append(p.get("payload"))
+
+    ws = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(agent=_DummyAgent())))
+    params = {"sessionKey": "existing-session-123", "message": "/new"}
+    asyncio.run(handle_chat_send(ws, "req-new-2", params, _send_res, _send_event))
+
+    assert len(event_payloads) == 1
+    assert event_payloads[0].get("sessionKey") == "existing-session-123"
+    assert event_payloads[0].get("newSessionKey")
+    assert event_payloads[0].get("state") == "final"
+
+
+def test_chat_send_empty_session_key_with_normal_message_raises():
+    """sessionKey 为空且 message 非 /new、/reset 时，应抛出 sessionKey required。"""
+    async def _send_res(_: dict) -> None:
+        pass
+
+    async def _send_event(_: dict) -> None:
+        pass
+
+    ws = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(agent=_DummyAgent())))
+    params = {"sessionKey": "", "message": "hello"}
+    with pytest.raises(ValueError, match="sessionKey required"):
+        asyncio.run(handle_chat_send(ws, "req-err", params, _send_res, _send_event))
 

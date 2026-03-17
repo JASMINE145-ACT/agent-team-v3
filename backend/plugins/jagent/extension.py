@@ -19,8 +19,14 @@ class JAgentExtension(AgentExtension):
     def get_skill_prompt(self) -> str:
         if self._prompt_provider is not None:
             return self._prompt_provider.get_skill_prompt()
-        from backend.plugins.jagent.skills import CHAT_SKILL_PROMPT
-        return CHAT_SKILL_PROMPT
+        from backend.config import Config
+        from backend.plugins.jagent.skills import (
+            CHAT_SKILL_PROMPT_DOC,
+            CHAT_SKILL_PROMPT_RULES,
+        )
+
+        use_rules = getattr(Config, "USE_DECISION_RULE_SKILLS", False)
+        return CHAT_SKILL_PROMPT_RULES if use_rules else CHAT_SKILL_PROMPT_DOC
 
     def get_output_format_prompt(self) -> str:
         if self._prompt_provider is not None:
