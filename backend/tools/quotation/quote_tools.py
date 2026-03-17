@@ -1144,6 +1144,15 @@ def fill_quotation(
         if quotation_date_cell:
             qr, qc = quotation_date_cell
             _set_cell_value_merged_safe(ws, row=qr, col=qc, value=qdate_str)
+        # 部分报价模板在 R 列之后预留了大面积着色区域（如绿色块），用户导出/打印时不需要这部分列。
+        # 这里在写完数据后裁剪工作表，仅保留 A–R（1–18 列），避免右侧多余区域影响观感。
+        try:
+            MAX_COL = 18  # A-R
+            last_col = getattr(ws, "max_column", None)
+            if isinstance(last_col, int) and last_col > MAX_COL:
+                ws.delete_cols(MAX_COL + 1, last_col - MAX_COL)
+        except Exception:
+            logger.debug("truncate quotation sheet columns failed (ignored)", exc_info=True)
         _normalize_sheet_view(ws)
         wb.save(out_p)
         return {"success": True, "output_path": str(out_p), "filled_count": filled, "error": None}

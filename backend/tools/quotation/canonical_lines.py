@@ -85,6 +85,9 @@ def build_canonical_quotation_lines(
         quote_spec = extract_spec_from_quote_name(quote_name_str) if quote_name_str else ""
         if not quote_spec:
             quote_spec = spec_inquiry
+        # Debug: log spec extraction for troubleshooting
+        if quote_name_str:
+            logger.debug(f"Row {row}: quote_name='{quote_name_str[:50]}...' -> quote_spec='{quote_spec}'")
         lines.append({
             "row_index": i,
             "row": row,
@@ -104,8 +107,10 @@ def build_canonical_quotation_lines(
     if run_spec_llm and lines:
         try:
             from backend.tools.quotation.spec_extract import extract_specs_batch_llm
+            logger.info(f"Running LLM spec extraction for {len(lines)} lines")
             batch = extract_specs_batch_llm(lines)
             if batch and len(batch) == len(lines):
+                logger.info(f"LLM spec extraction returned {len(batch)} results")
                 for i, res in enumerate(batch):
                     if i >= len(lines):
                         break
@@ -113,7 +118,13 @@ def build_canonical_quotation_lines(
                     if "requested_spec" in res:
                         lines[i]["specification"] = (res.get("requested_spec") or "").strip()[:500]
                     if "quoted_spec" in res:
-                        lines[i]["quote_spec"] = (res.get("quoted_spec") or "").strip()[:500]
+                        old_spec = lines[i].get("quote_spec", "")
+                        new_spec = (res.get("quoted_spec") or "").strip()[:500]
+                        lines[i]["quote_spec"] = new_spec
+                        if new_spec != old_spec:
+                            logger.debug(f"Row {i}: LLM updated quote_spec from '{old_spec}' to '{new_spec}'")
+            else:
+                logger.warning(f"LLM spec extraction failed or returned wrong count: {len(batch) if batch else 0} vs {len(lines)}")
         except Exception:
             logger.exception("extract_specs_batch_llm failed, keep rule-based specs")
     return lines

@@ -926,7 +926,7 @@ class DataService:
                     qty=qty,
                     code=str(line.get("code", ""))[:100] if line.get("code") else None,
                     quote_name=str(line.get("quote_name", ""))[:500] if line.get("quote_name") else None,
-                    quote_spec=str(line.get("quote_spec", ""))[:500] if line.get("quote_spec") else None,
+                    quote_spec=(str(line.get("quote_spec") or "")[:500]) or None,
                     unit_price=float(unit_price) if unit_price is not None else None,
                     amount=float(amount) if amount is not None else None,
                     available_qty=float(line.get("available_qty", 0) or 0),

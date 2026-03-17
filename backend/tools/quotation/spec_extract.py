@@ -155,17 +155,21 @@ def extract_specs_batch_llm(
     返回与 rows 等长的 list，每项 {"requested_spec": str, "quoted_spec": str}；失败或超行数时返回空列表。
     """
     if not rows or len(rows) > EXTRACT_SPECS_BATCH_MAX_ROWS:
+        logger.debug(f"Skipping LLM spec extraction: rows={len(rows) if rows else 0}, max={EXTRACT_SPECS_BATCH_MAX_ROWS}")
         return []
     try:
         from backend.config import Config
         if not getattr(Config, "QUOTATION_SPEC_LLM", True):
+            logger.info("QUOTATION_SPEC_LLM is False, skipping LLM extraction")
             return []
         _api_key = api_key or getattr(Config, "OPENAI_API_KEY", None)
         _base_url = base_url or getattr(Config, "OPENAI_BASE_URL", None) or ""
         _model = model or getattr(Config, "LLM_MODEL", "glm-4-flash")
+        logger.info(f"LLM spec extraction: model={_model}, api_key={'***' if _api_key else 'None'}")
     except Exception:
         return []
     if not _api_key:
+        logger.warning("No API key for LLM spec extraction")
         return []
     # 构建紧凑输入：每行一行文本，便于模型按行输出
     lines_text = []
@@ -188,9 +192,11 @@ def extract_specs_batch_llm(
             temperature=0,
         )
         content = (resp.choices[0].message.content or "").strip()
+        logger.info(f"LLM spec extraction response length: {len(content)}")
         parsed = _parse_batch_specs_json(content)
         if len(parsed) != len(rows):
             logger.warning("extract_specs_batch_llm 返回条数 %s 与输入 %s 不一致", len(parsed), len(rows))
+            logger.debug(f"LLM response: {content[:500]}")
             return []
         out = []
         for i, p in enumerate(parsed):
