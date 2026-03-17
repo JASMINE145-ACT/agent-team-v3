@@ -415,6 +415,7 @@ export type QuotationDraftLine = {
   qty: number;
   code?: string | null;
   quote_name?: string | null;
+  quote_spec?: string | null;
   unit_price?: number | null;
   amount?: number | null;
   available_qty?: number | null;

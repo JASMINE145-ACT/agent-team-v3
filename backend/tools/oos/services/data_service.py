@@ -363,17 +363,31 @@ class DataService:
 
     def _migrate_add_columns_if_needed(self) -> None:
         """为已有 out_of_stock_records 表补充新列，兼容旧数据库"""
-        if self.engine.dialect.name != "sqlite":
-            return  # PostgreSQL 等由 create_all 或独立迁移处理
+        dialect = self.engine.dialect.name
         with self.engine.connect() as conn:
-            try:
-                r = conn.execute(text("PRAGMA table_info(out_of_stock_records)"))
-                existing = {row[1] for row in r.fetchall()}
-            except Exception:
-                existing = set()
+            # SQLite uses PRAGMA, PostgreSQL uses information_schema
+            if dialect == "sqlite":
+                try:
+                    r = conn.execute(text("PRAGMA table_info(out_of_stock_records)"))
+                    existing = {row[1] for row in r.fetchall()}
+                except Exception:
+                    existing = set()
+            elif dialect == "postgresql":
+                try:
+                    r = conn.execute(text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'out_of_stock_records'"
+                    ))
+                    existing = {row[0] for row in r.fetchall()}
+                except Exception:
+                    existing = set()
+            else:
+                return  # Unsupported dialect
+            
             # 需补充的列（含 last_email_sent_at，与无货登记系统一致）
             alters = [
-                ("last_email_sent_at", "ALTER TABLE out_of_stock_records ADD COLUMN last_email_sent_at DATETIME"),
+                ("last_email_sent_at", "ALTER TABLE out_of_stock_records ADD COLUMN last_email_sent_at " + 
+                 ("DATETIME" if dialect == "sqlite" else "TIMESTAMP")),
                 ("email_status", "ALTER TABLE out_of_stock_records ADD COLUMN email_status VARCHAR(20) DEFAULT 'pending'"),
                 ("email_sent_by", "ALTER TABLE out_of_stock_records ADD COLUMN email_sent_by VARCHAR(100)"),
                 ("email_sent_count", "ALTER TABLE out_of_stock_records ADD COLUMN email_sent_count INTEGER NOT NULL DEFAULT 0"),
@@ -391,22 +405,42 @@ class DataService:
             # 补充 upload_batch_id 索引（若列为新加）
             if "upload_batch_id" not in existing:
                 try:
-                    conn.execute(text(
-                        "CREATE INDEX IF NOT EXISTS ix_out_of_stock_records_upload_batch_id "
-                        "ON out_of_stock_records (upload_batch_id)"
-                    ))
+                    if dialect == "sqlite":
+                        conn.execute(text(
+                            "CREATE INDEX IF NOT EXISTS ix_out_of_stock_records_upload_batch_id "
+                            "ON out_of_stock_records (upload_batch_id)"
+                        ))
+                    else:  # PostgreSQL
+                        conn.execute(text(
+                            "CREATE INDEX IF NOT EXISTS ix_out_of_stock_records_upload_batch_id "
+                            "ON out_of_stock_records (upload_batch_id)"
+                        ))
                     conn.commit()
                 except Exception as e:
                     logger.debug("创建 upload_batch_id 索引: %s", e)
 
             # shortage_records 表补充邮件相关列（与无货对齐，旧库可能缺这些列）
-            try:
-                r = conn.execute(text("PRAGMA table_info(shortage_records)"))
-                shortage_existing = {row[1] for row in r.fetchall()}
-            except Exception:
+            if dialect == "sqlite":
+                try:
+                    r = conn.execute(text("PRAGMA table_info(shortage_records)"))
+                    shortage_existing = {row[1] for row in r.fetchall()}
+                except Exception:
+                    shortage_existing = set()
+            elif dialect == "postgresql":
+                try:
+                    r = conn.execute(text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'shortage_records'"
+                    ))
+                    shortage_existing = {row[0] for row in r.fetchall()}
+                except Exception:
+                    shortage_existing = set()
+            else:
                 shortage_existing = set()
+                
             shortage_alters = [
-                ("last_email_sent_at", "ALTER TABLE shortage_records ADD COLUMN last_email_sent_at DATETIME"),
+                ("last_email_sent_at", "ALTER TABLE shortage_records ADD COLUMN last_email_sent_at " + 
+                 ("DATETIME" if dialect == "sqlite" else "TIMESTAMP")),
                 ("email_status", "ALTER TABLE shortage_records ADD COLUMN email_status VARCHAR(20) DEFAULT 'pending'"),
                 ("email_sent_by", "ALTER TABLE shortage_records ADD COLUMN email_sent_by VARCHAR(100)"),
                 ("email_sent_count", "ALTER TABLE shortage_records ADD COLUMN email_sent_count INTEGER NOT NULL DEFAULT 0"),
@@ -421,11 +455,24 @@ class DataService:
                         logger.warning("迁移添加列 shortage_records.%s 失败: %s", col, e)
 
             # quotation_draft_lines 表补充 quote_spec（报价产品规，与规范行/第二张图对齐）
-            try:
-                r = conn.execute(text("PRAGMA table_info(quotation_draft_lines)"))
-                qdl_existing = {row[1] for row in r.fetchall()}
-            except Exception:
+            if dialect == "sqlite":
+                try:
+                    r = conn.execute(text("PRAGMA table_info(quotation_draft_lines)"))
+                    qdl_existing = {row[1] for row in r.fetchall()}
+                except Exception:
+                    qdl_existing = set()
+            elif dialect == "postgresql":
+                try:
+                    r = conn.execute(text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'quotation_draft_lines'"
+                    ))
+                    qdl_existing = {row[0] for row in r.fetchall()}
+                except Exception:
+                    qdl_existing = set()
+            else:
                 qdl_existing = set()
+                
             qdl_alters = [
                 ("quote_spec", "ALTER TABLE quotation_draft_lines ADD COLUMN quote_spec VARCHAR(500)"),
             ]

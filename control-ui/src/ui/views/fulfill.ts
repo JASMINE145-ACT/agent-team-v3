@@ -299,7 +299,7 @@ export function renderFulfill(props: FulfillProps) {
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.qty ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.code ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.quote_name ?? ""}</td>
-                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${(line as { quote_spec?: string }).quote_spec ?? ""}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.quote_spec ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.unit_price ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.amount ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.available_qty ?? ""}</td>
