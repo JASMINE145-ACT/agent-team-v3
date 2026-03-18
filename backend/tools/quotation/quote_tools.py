@@ -58,12 +58,62 @@ def _normalize_sheet_view(ws) -> None:
     Normalize worksheet view for exported files.
     Some templates are saved in page-break preview mode, which users perceive
     as dashed lines and large tinted areas in Excel/WPS.
+    Also clears conditional formatting and removes green/colored fills from
+    cells outside the data area.
     """
     try:
+        if hasattr(ws, "views") and hasattr(ws.views, "sheetView") and ws.views.sheetView:
+            for sv in ws.views.sheetView:
+                sv.view = "normal"
         if getattr(ws, "sheet_view", None) is not None:
             ws.sheet_view.view = "normal"
     except Exception:
         logger.debug("normalize sheet view failed", exc_info=True)
+
+    try:
+        ws.page_setup.horizontalCentered = False
+        ws.page_setup.verticalCentered = False
+        ws.sheet_properties.pageSetUpPr = None
+    except Exception:
+        logger.debug("clear page setup properties failed", exc_info=True)
+
+    try:
+        ws.conditional_formatting._cf_rules.clear()
+    except Exception:
+        logger.debug("clear conditional formatting failed", exc_info=True)
+
+    try:
+        from openpyxl.styles import PatternFill
+        no_fill = PatternFill(fill_type=None)
+        max_row = ws.max_row or 1
+        max_col = ws.max_column or 1
+        for row in ws.iter_rows(min_row=1, max_row=max_row, min_col=1, max_col=max_col):
+            for cell in row:
+                fill = getattr(cell, "fill", None)
+                if fill is None:
+                    continue
+                fg = getattr(fill.fgColor, "rgb", None) if fill.fgColor else None
+                bg = getattr(fill.bgColor, "rgb", None) if fill.bgColor else None
+                if fg and isinstance(fg, str) and _is_green_like(fg):
+                    cell.fill = no_fill
+                elif bg and isinstance(bg, str) and _is_green_like(bg):
+                    cell.fill = no_fill
+    except Exception:
+        logger.debug("clear green fills failed", exc_info=True)
+
+
+def _is_green_like(rgb_hex: str) -> bool:
+    """Return True if the RGB hex string looks green-ish (high G, low R/B)."""
+    hex_str = rgb_hex.lstrip("#")
+    if len(hex_str) == 8:
+        hex_str = hex_str[2:]
+    if len(hex_str) != 6:
+        return False
+    try:
+        r, g, b = int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16)
+    except ValueError:
+        return False
+    return g > 150 and g > r * 1.3 and g > b * 1.3
 
 # 边界行标识（用户指定：报价数据列到该行为止）
 TOTAL_ROW_MARKER = "Total Excluding PPN不含税总价"
