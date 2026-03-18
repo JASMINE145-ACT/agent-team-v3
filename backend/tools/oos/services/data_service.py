@@ -485,6 +485,33 @@ class DataService:
                     except Exception as e:
                         logger.warning("迁移添加列 quotation_draft_lines.%s 失败: %s", col, e)
 
+    def _extract_quote_spec_safe(self, line: Dict) -> Optional[str]:
+        """
+        安全提取 quote_spec：
+        1. 优先使用传入的 quote_spec
+        2. 如果为空，从 quote_name 中提取
+        3. 都为空则返回 None
+        """
+        quote_spec = line.get("quote_spec")
+        if quote_spec:
+            return str(quote_spec)[:500]
+        
+        # 从 quote_name 中提取
+        quote_name = line.get("quote_name")
+        if not quote_name:
+            return None
+        
+        try:
+            from backend.tools.quotation.spec_extract import extract_spec_from_quote_name
+            extracted = extract_spec_from_quote_name(str(quote_name))
+            if extracted:
+                logger.info(f"Extracted spec from quote_name: '{quote_name[:50]}...' -> '{extracted}'")
+                return extracted[:500]
+        except Exception as e:
+            logger.warning(f"Failed to extract spec from quote_name: {e}")
+        
+        return None
+
     def _generate_product_key(self, product_name: str, specification: Optional[str]) -> str:
         """生成 product_key（规格标准化：统一小写、去除规格内部空格，使 DN40/DN 40 视为同一产品）"""
         name = product_name.strip().lower()
@@ -926,7 +953,7 @@ class DataService:
                     qty=qty,
                     code=str(line.get("code", ""))[:100] if line.get("code") else None,
                     quote_name=str(line.get("quote_name", ""))[:500] if line.get("quote_name") else None,
-                    quote_spec=(str(line.get("quote_spec") or "")[:500]) or None,
+                    quote_spec=self._extract_quote_spec_safe(line),
                     unit_price=float(unit_price) if unit_price is not None else None,
                     amount=float(amount) if amount is not None else None,
                     available_qty=float(line.get("available_qty", 0) or 0),
