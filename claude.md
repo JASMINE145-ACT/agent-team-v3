@@ -6,6 +6,35 @@
 - 为避免单条慢请求长期占用长连接，`handle_wecom_message` 使用 `asyncio.wait_for(_call_agent(), timeout=90)` 做超时保护：超过 **90 秒** 仍未返回时，会在日志中记录 warning，并向企业微信用户回复「处理超时，请稍后重试。」。
 - 企业微信长连接接收 Excel 报价单时走 `handle_wecom_file`：先用 `generate_excel_summary` + `put_excel_summary` 生成并缓存**精简摘要**，再在特性开关 `Config.WECHAT_EXCEL_FULL_PARSE_ENABLED` 打开时调用 `parse_excel_full` + `put_excel_context` 生成**完整结构化解析结果**（含每个 sheet 的行数/列名/预览行），并以 `file_id` 为 key 缓存在进程内，供后续工具/MCP skill 通过 `file_id`/`file_path` 访问同一份 Excel。
 - `_bind_session_file_path` 会把本次上传的 `file_path` 写入会话（`session.file_path`），`_load_wecom_session_context` 在后续文本消息中读出并返回 `{ file_path, file_id, excel_meta }`，其中 `excel_meta` 至少包含 `sheets_count` 与 `total_rows`，`CoreAgent.execute_react` 会在 user 消息末尾追加 `[Context: 已上传报价单, file_path=...]` 与 `file_id` 说明，并在有摘要时追加一条 `[ExcelSummary]` system 消息，用于提示 LLM 何时调用 Excel 工具而不是直接在 prompt 中展开整表。
+
+### 数据流修复记录
+
+#### quote_spec 前端传输问题修复（2026-03-17）
+
+**问题现象**：
+1. 后端 `canonical_lines.py` 已正确提取并保存 `quote_spec` 到数据库
+2. 前端 Work 页面显示 `quote_spec` 为空
+3. 用户编辑后保存也无法传递到后端
+
+**根本原因**：
+前端数据流断裂 — `control-ui/src/ui/controllers/work.ts` 中：
+- `PendingQuotationDraft` 类型定义缺少 `quote_spec` 字段
+- `parsePendingDraft()` 函数解析后端响应时未读取 `quote_spec`
+- `buildDraftFromObservation()` 回退逻辑未填充 `quote_spec`
+- `saveQuotationDraft()` 提交时未包含 `quote_spec`
+
+**修复内容**：
+1. 在 `PendingQuotationDraft.lines` 类型中添加 `quote_spec?: string`
+2. `parsePendingDraft()` 中添加：`quote_spec: optionalString(line.quote_spec)`
+3. `buildDraftFromObservation()` 中添加：`quote_spec: String(fi.quote_spec ?? "")`
+4. `saveQuotationDraft()` 提交负载中添加：`quote_spec: ln.quote_spec ?? ""`
+5. `work.ts` 视图中 quote_spec 输入框宽度从 90px 调整到 120px 以改善 UX
+
+**验证要点**：
+- 后端 API `/api/work/run-stream` 返回的 `pending_quotation_draft.lines[].quote_spec` 现在能正确显示在前端
+- 前端编辑 `quote_spec` 后点击"保存草稿"，值会正确传递给 `POST /api/quotation-drafts`
+- 数据库 `quotation_draft_lines.quote_spec` 列会正确保存编辑后的值
+
 **单主 Agent 架构**：无子 Agent 委托，主 Agent 掌握全部技能，根据用户意图直接选用工具完成目标。
 
 ## 与 version2 的区别
