@@ -476,7 +476,7 @@ export function renderWork(props: WorkProps) {
                             <input type="text" .value=${line.quote_name ?? ""} @change=${(e: Event) => onQuotationLineChange(i, "quote_name", (e.target as HTMLInputElement).value)} style="width: 120px;" aria-label=${t("work.lineQuoteName")} />
                           </td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">
-                            <input type="text" .value=${line.quote_spec ?? ""} @change=${(e: Event) => onQuotationLineChange(i, "quote_spec", (e.target as HTMLInputElement).value)} style="width: 90px;" aria-label=${t("work.lineQuoteSpec")} />
+                            <input type="text" .value=${line.quote_spec ?? ""} @change=${(e: Event) => onQuotationLineChange(i, "quote_spec", (e.target as HTMLInputElement).value)} style="width: 120px;" aria-label=${t("work.lineQuoteSpec")} />
                           </td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">
                             <input type="number" min="0" step="0.01" .value=${line.unit_price != null ? String(line.unit_price) : ""} @change=${(e: Event) => onQuotationLineChange(i, "unit_price", (e.target as HTMLInputElement).value)} style="width: 90px;" aria-label=${t("work.linePrice")} />

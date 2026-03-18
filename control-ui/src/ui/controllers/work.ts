@@ -39,6 +39,7 @@ export type PendingQuotationDraft = {
     qty?: number;
     code?: string;
     quote_name?: string;
+    quote_spec?: string;
     unit_price?: number | null;
     amount?: number | null;
     available_qty?: number;
@@ -249,6 +250,7 @@ function buildDraftFromObservation(obj: Record<string, unknown>): PendingQuotati
       qty,
       code,
       quote_name: quoteName,
+      quote_spec: String(fi.quote_spec ?? ""),
       unit_price: unitPrice,
       amount,
       available_qty: availableQty,
@@ -328,6 +330,7 @@ function parsePendingDraft(raw: unknown): PendingQuotationDraft {
       qty: Number.isFinite(qty) ? qty : 0,
       code: optionalString(line.code),
       quote_name: optionalString(line.quote_name),
+      quote_spec: optionalString(line.quote_spec),
       unit_price: unitPrice == null || Number.isNaN(unitPrice) ? null : unitPrice,
       amount: line.amount == null ? null : Number(line.amount),
       available_qty: optionalNumber(line.available_qty) ?? Number(line.available_qty ?? 0),
@@ -873,6 +876,7 @@ export async function saveQuotationDraft(state: WorkState): Promise<boolean> {
           qty: Number(ln.qty) || 0,
           code: ln.code ?? "",
           quote_name: ln.quote_name ?? "",
+          quote_spec: ln.quote_spec ?? "",
           unit_price: ln.unit_price != null ? Number(ln.unit_price) : null,
           amount: ln.amount != null ? Number(ln.amount) : null,
           available_qty: Number(ln.available_qty) || 0,
