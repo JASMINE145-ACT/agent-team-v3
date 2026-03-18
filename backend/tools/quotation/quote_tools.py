@@ -58,8 +58,8 @@ def _normalize_sheet_view(ws) -> None:
     Normalize worksheet view for exported files.
     Some templates are saved in page-break preview mode, which users perceive
     as dashed lines and large tinted areas in Excel/WPS.
-    Also clears conditional formatting and removes green/colored fills from
-    cells outside the data area.
+    Also clears conditional formatting and removes green-ish fills from the
+    entire worksheet to eliminate template artifacts.
     """
     try:
         if hasattr(ws, "views") and hasattr(ws.views, "sheetView") and ws.views.sheetView:
