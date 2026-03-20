@@ -160,6 +160,8 @@ QUERY_TERM_TO_CHINESE = [
     ("热熔器", "焊接机"), ("热熔机", "焊接机"), ("熔接器", "焊接机"),
     ("四通接线盒", "管四通圆接线盒"),
     ("马鞍卡", "管夹"),
+    # AW 在印尼管材场景下常指 AW 给水系列
+    ("aw", "给水 aw给水系列"),
 ]
 
 
@@ -169,6 +171,26 @@ def _normalize_keyword_terms(keywords: str) -> str:
     for eng, ch in QUERY_TERM_TO_CHINESE:
         s = re.sub(r"\b" + re.escape(eng) + r"\b", ch, s, flags=re.I)
     return s.strip()
+
+
+# 询价意图词（价格/档位）不应参与产品字段匹配，否则会把正确候选过滤掉
+_QUERY_INTENT_STOPWORDS = {
+    "报价", "报单", "价格", "价", "报价价格",
+    "一级", "二级", "三级", "代理", "代理价", "一级代理", "二级代理",
+    "a级", "b级", "c级", "d级", "e级",
+}
+
+
+def _strip_query_intent_terms(keywords: str) -> str:
+    """移除询价中的非品名意图词，保留材质/规格/品类 token 用于字段匹配。"""
+    s = _normalize(keywords or "")
+    if not s:
+        return ""
+    # 先按长词优先剔除，避免残留碎片（如先去「一级代理」再去「一级」）
+    for term in sorted(_QUERY_INTENT_STOPWORDS, key=len, reverse=True):
+        s = re.sub(re.escape(term), " ", s, flags=re.I)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
 # 业务知识中【字段匹配同义与规格】规则缓存，供字段匹配阶段使用（与 LLM 选型共用同一 knowledge 文件）
@@ -272,6 +294,10 @@ def _get_synonym_words(word: str) -> frozenset:
 
 def _expand_unit_tokens(token: str, material: Optional[str] = None) -> set:
     eqs = {token}
+    # 支持分数英寸规格（如 3/4、1-1/4），统一补全为带引号形式参与映射
+    if re.fullmatch(r"\d+(?:-\d+)?/\d+", token):
+        token = token + '"'
+        eqs.add(token)
     if token.startswith("dn"):
         num = token[2:]
         if num in MM_TO_INCH:
@@ -300,6 +326,17 @@ def _expand_token_with_synonyms_and_units(token: str, material: Optional[str] = 
 def _split_tokens(text: str) -> List[str]:
     text = _normalize(text)
     tokens: List[str] = []
+    # 先提取英寸分数规格，避免被后续纯数字提取拆成 3、4 这类噪声 token
+    # 例：3/4"、1-1/4"
+    for m in re.finditer(r"\d+(?:\s*-\s*\d+)?\s*/\s*\d+\s*[\"”″]?", text):
+        raw = m.group()
+        compact = re.sub(r"\s+", "", raw)
+        compact = compact.replace("”", '"').replace("″", '"')
+        if "/" in compact:
+            if not compact.endswith('"'):
+                compact = compact + '"'
+            tokens.append(compact)
+    text = re.sub(r"\d+(?:\s*-\s*\d+)?\s*/\s*\d+\s*[\"”″]?", " ", text)
     for m in re.finditer(r"dn\s*(\d+)", text, re.I):
         tokens.append("dn" + m.group(1))
         tokens.append(m.group(1))
@@ -729,6 +766,7 @@ def match_fuzzy(
     keywords = (keywords or "").strip()
     keywords = _apply_knowledge_expansion(keywords)
     keywords = _normalize_keyword_terms(keywords)
+    keywords = _strip_query_intent_terms(keywords)
     if not keywords:
         return None
 
@@ -770,6 +808,7 @@ def match_fuzzy_candidates(
     keywords = (keywords or "").strip()
     keywords = _apply_knowledge_expansion(keywords)
     keywords = _normalize_keyword_terms(keywords)
+    keywords = _strip_query_intent_terms(keywords)
     if not keywords:
         return []
 

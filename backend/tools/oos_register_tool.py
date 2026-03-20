@@ -57,7 +57,7 @@ class OosRegisterTool(BaseTool):
             return ToolResult(ok=False, error=f"文件不存在: {file_path}", error_code="file_not_found")
 
         try:
-            from backend.agent.tools_oos import _run_register_oos
+            from backend.tools.oos.services.oos_agent_adapter import _run_register_oos
 
             out = await asyncio.wait_for(
                 asyncio.to_thread(_run_register_oos, file_path, context, prompt),

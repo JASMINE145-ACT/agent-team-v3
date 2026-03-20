@@ -1,5 +1,24 @@
 # Agent Team version3 — 项目说明（Claude 用）
 
+### 字段匹配修复（PVC-U AW 3/4" + 一级报价价格）
+
+- 位置：`backend/tools/inventory/services/wanding_fuzzy_matcher.py`。
+- 根因：询价中的意图词（如「一级/报价/价格」）被当作产品字段 token 参与硬过滤，导致本应命中的 AW 给水候选被 `query_text_tokens` 过滤掉。
+- 修复：
+  - 新增 `_strip_query_intent_terms`，在字段匹配前清洗非品名意图词；
+  - 在 `match_fuzzy` 与 `match_fuzzy_candidates` 中统一调用该清洗；
+  - 在 `QUERY_TERM_TO_CHINESE` 增加 `aw -> 给水 aw给水系列` 扩展，提升 `PVC-U AW 3/4"` 对印尼 AW 给水系列候选的召回。
+- 预期效果：`PVC-U AW 3/4" 一级报价价格` 不再被「报价/档位」词误过滤，能进入正确的 `DN20(3/4")` AW 给水候选集，再由后续排序/选型决定最终命中。
+
+### 英寸规格分词修复（3/4" 被拆分问题）
+
+- 位置：`backend/tools/inventory/services/wanding_fuzzy_matcher.py`。
+- 根因：`_split_tokens` 之前仅提取数字，`3/4"` 会被拆成 `3`、`4`，导致规格匹配退化为宽泛数字命中（大量 3"/4" 候选噪声）。
+- 修复：
+  - `_split_tokens` 先提取英寸分数规格 token（如 `3/4"`、`1-1/4"`），再移除该片段后继续做 dn/数字提取；
+  - `_expand_unit_tokens` 增强对分数英寸（含不带引号形式）的处理，可正确映射到 mm/dn（如 `3/4"` → `20`、`dn20`）。
+- 回归测试：新增 `tests/test_wanding_fuzzy_matcher_units.py`，覆盖 `3/4"` token 保持与 `dn20` 等价映射。
+
 ### 企业微信长连接 Bot — 超时与 Excel 绑定补充
 
 - WeCom 长连接通路通过 `backend/wecom_bot/handler.py` 的 `handle_wecom_message` 将文本消息转给 `CoreAgent.execute_react`。
@@ -274,7 +293,7 @@ Agent Team version3/
 ## 技能与工具（prompt 内描述）
 
 1. **库存与万鼎价格**：search_inventory、get_inventory_by_code、get_inventory_by_code_batch、match_wanding_price、select_wanding_match、get_profit_by_price、get_profit_by_price_batch。目标：查库存、万鼎报价、各档位价格/利润率。**批量利润率** get_profit_by_price_batch 返回 **data.items**（与输入严格 1:1，含 input_index、item_status、name；matched 时有 matched_price/matched_profit/matched_price_level；skipped 时 skip_reason 仅 missing_code|missing_price|invalid_price），见 `doc/tool-orchestration-and-contract-issues.md`。**批量库存** get_inventory_by_code_batch 接受多个物料编号 codes，单次最多 50 条，返回 data.items（与输入 1:1，含 input_index、code、item_status、item）与 stats（found/not_found/invalid 等），用于一次性获取多产品库存而不在 ReAct 里逐条循环调用 get_inventory_by_code。**逻辑与数据源差异**（先万鼎 LLM 选型→code 查库存、有 code 直查、英文直查库存；Accurate 仅英文有库存无价格、万鼎有中英文与价格）见 `doc/库存与万鼎匹配逻辑与数据源差异.md`。
-2. **无货**：get_oos_list、get_oos_stats、register_oos（从报价单）、register_oos_from_text（用户直接说「XX 无货」时登记，无需文件）。目标：无货登记（文件/文字两种途径）、无货列表、无货统计。
+2. **无货**：get_oos_list、get_oos_stats、register_oos（从报价单）、register_oos_from_text（用户直接说「XX 无货」时登记，无需文件）。目标：无货登记（文件/文字两种途径）、无货列表、无货统计。OOS 工具的 OpenAI tools schema 现集中定义在 `backend/tools/oos/oos_tools.py`（`get_oos_tools_openai_format`），`backend/agent/tools.py` 通过 `_get_oos_tools()` 聚合到统一工具列表中，便于与库存/报价工具保持同一接入模式。
 3. **报价单**：parse_excel_smart（统一 Excel 解析）、fill_quotation_sheet、edit_excel。目标：提取/填表/普适 Excel；仅暴露 parse_excel_smart 做解析，extract_quotation_data 已从工具列表移除（edit_excel 的 tool schema 已修正为二维数组 `values` 明确 inner `items` 类型）。
 4. **询价填充**：run_quotation_fill。目标：整单流水线（提取→万鼎匹配→库存→回填）。
 5. **澄清**：ask_clarification。目标：无法判断意图时向用户提问。

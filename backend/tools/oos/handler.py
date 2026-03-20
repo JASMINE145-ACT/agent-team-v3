@@ -102,23 +102,22 @@ def _make_register_oos_from_text_handler() -> Callable:
 
 def register_oos_tools(ctx: ExtensionContext) -> None:
     """向 ExtensionContext 注册所有 OOS 工具。供 JAgentExtension.register() 调用。"""
-    from backend.agent.tools import (
-        _run_oos_list,
-        _run_oos_stats,
+    from backend.tools.oos.services.oos_agent_adapter import (
         _run_oos_by_file,
         _run_oos_by_time,
+        _run_oos_list,
+        _run_oos_stats,
         _run_register_oos,
-        EXTRA_TOOLS,
     )
+    from backend.tools.oos.oos_tools import get_oos_tools_openai_format
 
-    ctx.register_tool(_OOS_TOOL_DEFS[0], _make_oos_handler(_run_oos_list, "limit", 100))
-    ctx.register_tool(_OOS_TOOL_DEFS[1], _make_no_arg_handler(_run_oos_stats))
-    ctx.register_tool(_OOS_TOOL_DEFS[2], _make_oos_handler(_run_oos_by_file, "limit", 50))
-    ctx.register_tool(_OOS_TOOL_DEFS[3], _make_oos_handler(_run_oos_by_time, "last_n_days", 30))
+    # 使用集中定义的 OOS 工具 schema，避免与 agent 层 EXTRA_TOOLS 重复定义。
+    defs = {d["function"]["name"]: d for d in get_oos_tools_openai_format()}
 
-    for t in EXTRA_TOOLS:
-        n = t["function"]["name"]
-        if n == "register_oos":
-            ctx.register_tool(t, _make_register_oos_handler(_run_register_oos))
-        elif n == "register_oos_from_text":
-            ctx.register_tool(t, _make_register_oos_from_text_handler())
+    ctx.register_tool(defs["get_oos_list"], _make_oos_handler(_run_oos_list, "limit", 100))
+    ctx.register_tool(defs["get_oos_stats"], _make_no_arg_handler(_run_oos_stats))
+    ctx.register_tool(defs["get_oos_by_file"], _make_oos_handler(_run_oos_by_file, "limit", 50))
+    ctx.register_tool(defs["get_oos_by_time"], _make_oos_handler(_run_oos_by_time, "last_n_days", 30))
+
+    ctx.register_tool(defs["register_oos"], _make_register_oos_handler(_run_register_oos))
+    ctx.register_tool(defs["register_oos_from_text"], _make_register_oos_from_text_handler())
