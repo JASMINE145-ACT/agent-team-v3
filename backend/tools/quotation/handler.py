@@ -65,6 +65,29 @@ def _make_append_business_knowledge_handler() -> Callable:
     return handler
 
 
+def _make_batch_quick_quote_handler() -> Callable:
+    async def handler(args: dict, context: dict) -> str:
+        inquiry_text = (args.get("inquiry_text") or "").strip()
+        if not inquiry_text:
+            return json.dumps({"success": False, "result": "", "error": "请提供询价文字"}, ensure_ascii=False)
+        
+        customer_level = (args.get("customer_level") or "B").strip().upper() or "B"
+        
+        try:
+            from backend.tools.quotation.batch_quick_quote import batch_quick_quote
+            out = await asyncio.to_thread(batch_quick_quote, inquiry_text, customer_level)
+            
+            # 如果成功，直接返回 Markdown 表格文本（不包裹 JSON）
+            if out.get("success"):
+                return out["result"]
+            else:
+                return json.dumps(out, ensure_ascii=False)
+        except Exception as e:
+            logger.exception("batch_quick_quote 失败")
+            return json.dumps({"success": False, "result": "", "error": str(e)}, ensure_ascii=False)
+    return handler
+
+
 def register_quotation_tools(ctx: ExtensionContext) -> None:
     """向 ExtensionContext 注册所有报价单工具。供 JAgentExtension.register() 调用。"""
     from backend.tools.quotation.quote_tools import get_quote_tools_openai_format
@@ -81,3 +104,5 @@ def register_quotation_tools(ctx: ExtensionContext) -> None:
             ctx.register_tool(t, _make_ask_clarification_handler())
         elif n == "append_business_knowledge":
             ctx.register_tool(t, _make_append_business_knowledge_handler())
+        elif n == "batch_quick_quote":
+            ctx.register_tool(t, _make_batch_quick_quote_handler())

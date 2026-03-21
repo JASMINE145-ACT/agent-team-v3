@@ -184,6 +184,23 @@ class CoreAgent:
                 user_content += f"\n\n【当前主题】上一轮问：{last_q}。用户本句：{current_input}。请据此理解意图与所指产品。"
 
         tools = self._registry.get_definitions()
+        allowed_tools: Optional[set[str]] = None
+        if "allowed_tools" in ctx:
+            allowed_tools_raw = ctx.get("allowed_tools")
+            normalized = {
+                str(x).strip()
+                for x in (allowed_tools_raw if isinstance(allowed_tools_raw, list) else [])
+                if isinstance(x, str) and str(x).strip()
+            }
+            # fail-closed: 只要显式传了 allowed_tools，就按白名单限制；
+            # 空列表或格式错误会得到空白名单（即禁用全部工具）。
+            allowed_tools = normalized
+            tools = [
+                d for d in tools
+                if isinstance(d, dict)
+                and isinstance(d.get("function"), dict)
+                and d["function"].get("name") in allowed_tools
+            ]
         system_parts: List[str] = [self._system_prompt]
         if excel_summary_entry is not None:
             try:
@@ -423,16 +440,28 @@ class CoreAgent:
                             logger.debug("on_event callback failed", exc_info=True)
 
                     trace.append({"step": step + 1, "type": "tool_call", "name": name, "arguments": args})
-                    tool_task = asyncio.create_task(self._registry.execute(name, args, ctx))
-                    try:
-                        while not tool_task.done():
-                            _raise_if_cancelled()
-                            await asyncio.sleep(0.05)
-                        obs = await tool_task
-                    except asyncio.CancelledError:
-                        if not tool_task.done():
-                            tool_task.cancel()
-                        raise
+                    if allowed_tools is not None and name not in allowed_tools:
+                        obs = json.dumps(
+                            {
+                                "success": False,
+                                "error": {
+                                    "type": "tool_not_allowed",
+                                    "message": f"工具 {name} 在当前渠道不可用",
+                                },
+                            },
+                            ensure_ascii=False,
+                        )
+                    else:
+                        tool_task = asyncio.create_task(self._registry.execute(name, args, ctx))
+                        try:
+                            while not tool_task.done():
+                                _raise_if_cancelled()
+                                await asyncio.sleep(0.05)
+                            obs = await tool_task
+                        except asyncio.CancelledError:
+                            if not tool_task.done():
+                                tool_task.cancel()
+                            raise
                     max_chars = (
                         TOOL_RESULT_EXCEL_MAX_CHARS
                         if name == "parse_excel_smart"

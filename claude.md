@@ -1,5 +1,15 @@
 # Agent Team version3 — 项目说明（Claude 用）
 
+### WeCom 工具白名单与 CoreAgent allowlist 回归测试（2026-03-21）
+
+- 新增测试文件：`tests/test_allowed_tools_scope.py`。
+- 覆盖点：
+  - `backend/server/services/wecom_chat_bridge.py`：`handle_wecom_text` 调用 `execute_react` 时会注入 `context.allowed_tools=["batch_quick_quote"]`，并使用 `session_id="wecom:<from_user>"`。
+  - `backend/core/agent.py`：当 `context.allowed_tools=["batch_quick_quote"]` 时，仅向 LLM 暴露该工具；
+  - `backend/core/agent.py` allowlist 采用 fail-closed：只要 context 显式传了 `allowed_tools`，就会按白名单过滤；空列表或格式错误将导致本轮不暴露任何工具；
+  - 若模型尝试调用未授权工具（如 `search_inventory`），会返回 `tool_not_allowed` observation，且不会执行注册表中的实际工具 handler；
+  - 非 WeCom 路径（不传 `allowed_tools`）仍暴露完整工具列表。
+
 ### 字段匹配修复（PVC-U AW 3/4" + 一级报价价格）
 
 - 位置：`backend/tools/inventory/services/wanding_fuzzy_matcher.py`。
@@ -18,6 +28,14 @@
   - `_split_tokens` 先提取英寸分数规格 token（如 `3/4"`、`1-1/4"`），再移除该片段后继续做 dn/数字提取；
   - `_expand_unit_tokens` 增强对分数英寸（含不带引号形式）的处理，可正确映射到 mm/dn（如 `3/4"` → `20`、`dn20`）。
 - 回归测试：新增 `tests/test_wanding_fuzzy_matcher_units.py`，覆盖 `3/4"` token 保持与 `dn20` 等价映射。
+
+### 英寸优先匹配策略（避免仅靠 dn 转换误匹配）
+
+- 位置：`backend/tools/inventory/services/wanding_fuzzy_matcher.py` 的 `search_fuzzy`。
+- 背景：PVC/PPR 等不同体系下，英寸与 dn 的业务口径可能不一致；若仅依赖 dn 等价扩展，可能把同 dn 但英寸不符的候选误召回。
+- 策略：当 query 显式包含英寸 token（如 `3/4"`、`1-1/4"`、`4"`）且候选中存在英寸精确命中时，仅保留英寸精确命中的候选；仅在完全没有英寸精确命中时，才回退使用 dn 等价扩展。
+- 兼容增强：`_split_tokens` 现在也会提取整数英寸 token（如 `4"`），不仅是分数英寸。
+- 回归测试：`tests/test_wanding_fuzzy_matcher_units.py` 新增用例，验证 `PVC-U AW 3/4"` 时不会选到同 dn 但英寸为 `1/2"` 的候选。
 
 ### 企业微信长连接 Bot — 超时与 Excel 绑定补充
 

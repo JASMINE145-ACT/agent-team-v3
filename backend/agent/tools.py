@@ -76,6 +76,29 @@ EXTRA_TOOLS = [
             "x_tool_meta": {"access_mode": "write", "risk_level": "medium"},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "batch_quick_quote",
+            "description": "【批量快速询价】纯文字输入多个产品+数量，一次性返回价格+库存的 Markdown 表格。适用企业微信快速报价场景。支持格式如「50三通 100个，25弯头 50个」或「DN50三通×100、DN25弯头×50」。限 100 项。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "inquiry_text": {
+                        "type": "string",
+                        "description": "询价文字，如「50三通 100个，25弯头 50个」或「DN50三通×100、DN25弯头×50」"
+                    },
+                    "customer_level": {
+                        "type": "string",
+                        "enum": ["A", "B", "C", "D", "D_low", "E", "出厂价_含税", "出厂价_不含税", "采购不含税"],
+                        "description": "价格档位：A 二级代理/B 一级代理/C 聚万大客户/D 青山大客户/D_low 青山(降低)/E 大唐(包运费)；或 出厂价_含税/出厂价_不含税/采购不含税。默认 B"
+                    }
+                },
+                "required": ["inquiry_text"]
+            },
+            "x_tool_meta": {"access_mode": "read", "risk_level": "low"}
+        }
+    },
 ]
 
 

@@ -63,6 +63,10 @@ class Config:
     _quotation_tpl = base_dir / "报价单" / "案例报价单.xlsx"
     QUOTATION_TEMPLATE_PATH = Path(os.getenv("QUOTATION_TEMPLATE_PATH", str(_quotation_tpl)))
 
+    # 批量快速询价（WeCom 专用）限制
+    BATCH_QUOTE_MAX_ITEMS = int(os.getenv("BATCH_QUOTE_MAX_ITEMS", "100"))
+    BATCH_QUOTE_TIMEOUT_SEC = int(os.getenv("BATCH_QUOTE_TIMEOUT_SEC", "40"))
+
     # LangSmith：Work/Chat 模式下 LLM 调用与 token 消耗追踪（可选）
     LANGSMITH_TRACING = os.getenv("LANGSMITH_TRACING", "").lower() in ("1", "true", "yes")
     LANGSMITH_API_KEY = (os.getenv("LANGSMITH_API_KEY") or "").strip() or None

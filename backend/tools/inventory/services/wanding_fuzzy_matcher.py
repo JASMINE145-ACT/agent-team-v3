@@ -323,6 +323,15 @@ def _expand_token_with_synonyms_and_units(token: str, material: Optional[str] = 
     return expanded
 
 
+def _is_inch_token(token: str) -> bool:
+    """是否为英寸规格 token（如 3/4"、1-1/4"、4"）。"""
+    t = (token or "").strip()
+    return bool(
+        re.fullmatch(r"\d+(?:-\d+)?/\d+\"", t)
+        or re.fullmatch(r"\d+(?:\.\d+)?\"", t)
+    )
+
+
 def _split_tokens(text: str) -> List[str]:
     text = _normalize(text)
     tokens: List[str] = []
@@ -337,6 +346,14 @@ def _split_tokens(text: str) -> List[str]:
                 compact = compact + '"'
             tokens.append(compact)
     text = re.sub(r"\d+(?:\s*-\s*\d+)?\s*/\s*\d+\s*[\"”″]?", " ", text)
+    for m in re.finditer(r"\d+(?:\.\d+)?\s*[\"”″]", text):
+        raw = m.group()
+        compact = re.sub(r"\s+", "", raw)
+        compact = compact.replace("”", '"').replace("″", '"')
+        if not compact.endswith('"'):
+            compact = compact + '"'
+        tokens.append(compact)
+    text = re.sub(r"\d+(?:\.\d+)?\s*[\"”″]", " ", text)
     for m in re.finditer(r"dn\s*(\d+)", text, re.I):
         tokens.append("dn" + m.group(1))
         tokens.append(m.group(1))
@@ -480,6 +497,7 @@ def search_fuzzy(
         chinese_tokens = _split_tokens(norm_kw)
         material_tokens = re.findall(r"pvc|ppr|pe|hdpe", norm_kw)
         query_size_tokens = {t for t in chinese_tokens if re.search(r"\d", t) and not t.endswith("°")}
+        query_inch_tokens = {t for t in query_size_tokens if _is_inch_token(t)}
         query_text_tokens = {
             t for t in chinese_tokens if not (re.search(r"\d", t) and not t.endswith("°"))
         }
@@ -500,6 +518,7 @@ def search_fuzzy(
             + len(single_text) * _SINGLE_CHAR_WEIGHT
         )
 
+        iter_rows: list[tuple[dict[str, Any], float, int]] = []
         for row in df.itertuples(index=False):
             row_id = getattr(row, "Material", getattr(row, "Describrition", str(row)))
             raw_text = str(getattr(row, field, ""))
@@ -521,6 +540,7 @@ def search_fuzzy(
             size_hits = sum(1 for q_eq in spec_equivs.values() if q_eq & product_specs)
             if query_size_tokens and size_hits == 0:
                 continue
+            inch_exact_hits = sum(1 for t in query_inch_tokens if t in product_specs)
 
             # 多字命中（权重 1.0）+ 单字命中（权重 _SINGLE_CHAR_WEIGHT）
             def _text_match(t: str) -> bool:
@@ -542,6 +562,16 @@ def search_fuzzy(
                 }
                 if hasattr(row, "unit_price"):
                     row_dict["unit_price"] = getattr(row, "unit_price", 0.0)
+                iter_rows.append((row_dict, score, inch_exact_hits))
+
+        # 英寸优先：若查询里显式给了英寸，且存在英寸精确命中的候选，
+        # 则只保留英寸精确命中，避免被 dn 等价扩展引入跨体系误匹配。
+        if query_inch_tokens and any(inch_hits > 0 for _, _, inch_hits in iter_rows):
+            iter_rows = [r for r in iter_rows if r[2] > 0]
+
+        for row_dict, score, _inch_hits in iter_rows:
+            row_id = row_dict.get("code") or row_dict.get("matched_name")
+            if row_id not in results or score > results[row_id][1]:
                 results[row_id] = (row_dict, score)
 
     out = list(results.values())

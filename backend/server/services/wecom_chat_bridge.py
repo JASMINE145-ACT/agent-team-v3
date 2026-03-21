@@ -31,7 +31,10 @@ async def handle_wecom_text(from_user: str, user_text: str, app: FastAPI) -> str
     try:
         result: dict[str, Any] = await agent.execute_react(
             user_input=user_text,
-            context={},
+            context={
+                "channel": "wecom",
+                "allowed_tools": ["batch_quick_quote"],
+            },
             session_id=session_id,
         )
         answer = (result.get("answer") or "").strip()
