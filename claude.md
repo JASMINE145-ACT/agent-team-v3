@@ -1,5 +1,32 @@
 # Agent Team version3 — 项目说明（Claude 用）
 
+### API 确认消息功能（2026-03-21）
+
+- 新增功能：用户发送报价或查询请求后,系统立即返回确认消息,告知请求已被接收并正在处理。
+- 实现位置：
+  - `backend/server/api/routes_work.py`：
+    - `/api/work/run-stream` 流式接口在响应开始时立即推送 `confirmation` 事件
+    - `/api/work/run` 非流式接口在执行前记录 "received" 活动日志
+  - `backend/server/api/routes_chat.py`：
+    - `/api/query/stream` 流式聊天接口在响应开始时立即推送 `confirmation` 事件
+  - **`backend/wecom_bot/client.py`**：
+    - WebSocket 长连接模式下,文本消息先推送确认消息,再推送处理结果
+    - 使用 `reply_stream` API 实现两次推送: 确认消息 + 实际结果
+  - `backend/server/services/wecom_chat_bridge.py`：
+    - HTTP 回调模式下,在日志中记录确认消息 (同步模式限制,无法先发确认)
+- 事件格式：
+  - Work 流式: `{"type": "confirmation", "message": "已收到您的报价需求，正在进行 AI 报价...", "work_run_id": "uuid", "file_count": 1, "customer_level": "B_QUOTE"}`
+  - Chat 流式: `{"type": "confirmation", "content": "已收到您的请求，正在处理中...", "session_id": "uuid"}`
+  - WeCom 长连接: 先推送 "已收到您的请求,正在处理中...",再推送实际结果
+- 新增文档：
+  - `docs/API_CONFIRMATION_MESSAGE.md` - API 确认消息功能详细说明
+  - `docs/frontend_integration_example.js` - 前端集成示例 (React/Vue/原生JS)
+  - `docs/IMPLEMENTATION_SUMMARY.md` - 实现总结
+  - `docs/WECOM_CONFIRMATION.md` - 企业微信端确认消息功能说明
+  - `docs/实现完成总结.md` - 中文实现总结
+  - `tests/test_confirmation_messages.py` - 测试脚本
+- 优势：提升用户体验,用户立即知道请求已被接收,可实时查看处理进度。
+
 ### WeCom 工具白名单与 CoreAgent allowlist 回归测试（2026-03-21）
 
 - 新增测试文件：`tests/test_allowed_tools_scope.py`。

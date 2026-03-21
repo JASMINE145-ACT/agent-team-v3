@@ -153,7 +153,7 @@ class WeComBotClient:
         self._ws.on("reconnecting", lambda attempt: logger.info("WeCom WS 正在进行第 %s 次重连…", attempt))
         self._ws.on("error", lambda error: logger.error("WeCom WS 发生错误: %s", error))
 
-        # 文本消息 → 交给 CoreAgent 处理，并以流式最后一段回复
+        # 文本消息 → 先发确认消息,再交给 CoreAgent 处理
         async def _on_text_message(frame):
             body = frame.get("body", {}) or {}
             text = (body.get("text", {}) or {}).get("content", "") or ""
@@ -179,12 +179,19 @@ class WeComBotClient:
 
             logger.info("WeCom 文本消息来自 %s: %s", from_user, text[:200])
 
+            # 🎯 立即发送确认消息
+            stream_id_confirmation = generate_req_id("confirm")
+            confirmation_text = "已收到您的请求,正在处理中..."
+            await self._ws.reply_stream(frame, stream_id_confirmation, confirmation_text, True)
+
+            # 然后处理实际请求
             try:
                 answer = await handle_wecom_message(self._agent, msg)
             except Exception as e:  # noqa: BLE001
                 logger.exception("处理 WeCom 文本消息失败: %s", e)
                 answer = "系统处理消息时出错，请稍后再试。"
 
+            # 发送实际结果
             stream_id = generate_req_id("stream")
             await self._ws.reply_stream(frame, stream_id, answer, True)
 

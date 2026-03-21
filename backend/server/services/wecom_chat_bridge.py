@@ -21,12 +21,18 @@ logger = logging.getLogger(__name__)
 async def handle_wecom_text(from_user: str, user_text: str, app: FastAPI) -> str:
     """
     将企业微信文本消息转发给当前 v3 Chat Agent，并返回回答文本。
+    
+    注意: 企业微信为同步回复模式,无法推送实时进度。
+    确认消息已在日志中记录,实际回复为处理完成后的结果。
     """
     session_id = f"wecom:{from_user}"
     agent = getattr(app.state, "agent", None)
     if agent is None:
         logger.error("app.state.agent 未初始化，无法处理 WeCom 消息")
         return "系统暂未就绪，请稍后再试。"
+
+    # 记录确认消息到日志 (企业微信同步模式无法先回复确认消息)
+    logger.info("[WeCom 确认] 已收到用户 %s 的请求: %s", from_user, user_text[:50])
 
     try:
         result: dict[str, Any] = await agent.execute_react(

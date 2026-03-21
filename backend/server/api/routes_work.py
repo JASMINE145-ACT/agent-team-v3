@@ -42,6 +42,9 @@ async def work_run(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     """
     执行 Work 流程：固定三步（识别表数据→查价格与库存/无货缺货→填表）+ ReAct，仅 Work 工具。
     Body: { "file_paths": string[], "customer_level": "A"|"B"|"C"|"D"?, "do_register_oos": bool? }
+    
+    注意：此接口为非流式接口,会等待整个流程完成后返回。
+    推荐使用 /api/work/run-stream 获取实时进度反馈。
     """
     file_paths = body.get("file_paths") or []
     if not isinstance(file_paths, list):
@@ -53,6 +56,22 @@ async def work_run(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     try:
         from backend.agent.work_executor import run_work_flow
         from backend.server.services.activity_log import log_activity
+        
+        # 记录开始活动 - 这个会立即返回，前端可以通过轮询活动日志知道请求已被接收
+        log_activity(
+            kind="work_run",
+            action="received",
+            entity_type="work",
+            entity_id=",".join(file_paths) if file_paths else None,
+            run_id=work_run_id,
+            summary="已收到报价需求，正在进行 AI 报价",
+            details={
+                "file_paths": file_paths,
+                "customer_level": customer_level,
+                "do_register_oos": bool(do_register_oos),
+            },
+        )
+        
         log_activity(
             kind="work_run",
             action="start",
@@ -111,7 +130,10 @@ async def work_run(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 @router.post("/api/work/run-stream")
 async def work_run_stream(body: Dict[str, Any] = Body(...)) -> StreamingResponse:
     """
-    执行 Work 流程并流式返回：先推送当前阶段 stage (0/1/2)，最后推送 result。
+    执行 Work 流程并流式返回：
+    1. 首先推送确认消息 (type: "confirmation")
+    2. 推送当前阶段 stage (type: "stage", stage: 0/1/2)
+    3. 最后推送结果 (type: "result")
     """
     file_paths = body.get("file_paths") or []
     if not isinstance(file_paths, list):
@@ -123,6 +145,16 @@ async def work_run_stream(body: Dict[str, Any] = Body(...)) -> StreamingResponse
 
     async def generate():
         queue: asyncio.Queue = asyncio.Queue()
+
+        # 立即推送确认消息
+        confirmation_msg = {
+            "type": "confirmation",
+            "message": "已收到您的报价需求，正在进行 AI 报价...",
+            "work_run_id": work_run_id,
+            "file_count": len(file_paths),
+            "customer_level": customer_level
+        }
+        yield f"data: {json.dumps(confirmation_msg, ensure_ascii=False)}\n\n"
 
         def on_step(_step_count: int, tool_name: str, _args: dict, _obs: str) -> None:
             stage = _work_tool_name_to_stage(tool_name)

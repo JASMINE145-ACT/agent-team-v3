@@ -203,9 +203,18 @@ async def query_stream(
             return StreamingResponse(_ocr_failed(), media_type="text/event-stream")
         query_text = (query_text or "").strip()
         query_text = f"{query_text}\n\n【以下为上传图片的识别结果】\n{ocr_text}" if query_text else f"【以下为上传图片的识别结果】\n{ocr_text}"
+    
     agent = request.app.state.agent
 
     async def _gen():
+        # 首先推送确认消息，让用户知道请求已被接收
+        confirmation_data = {
+            "type": "confirmation",
+            "content": "已收到您的请求，正在处理中...",
+            "session_id": session_id
+        }
+        yield f'data: {json.dumps(confirmation_data, ensure_ascii=False)}\n\n'
+        
         queue: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
