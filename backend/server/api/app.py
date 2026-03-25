@@ -42,6 +42,14 @@ async def health_get():
     return {"status": "ok"}
 
 
+@app.get("/WW_verify_dEJpsEmvXuoZ2UZG.txt")
+async def wecom_verify():
+    """企业微信域名验证文件，指向项目根目录的同名 txt。"""
+    from pathlib import Path
+    _root = Path(__file__).resolve().parent.parent.parent
+    return FileResponse(_root / "WW_verify_dEJpsEmvXuoZ2UZG.txt")
+
+
 @app.head("/health")
 async def health_head():
     """健康检查（HEAD 版本）：返回 200，用于只关心存活性的探针。"""
