@@ -78,6 +78,25 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 # 同一产品两次无货/缺货发邮件后，间隔多少小时可再次发（0=仅首次 count>=2 发一次）
 EMAIL_COOLDOWN_HOURS = int(os.getenv("EMAIL_COOLDOWN_HOURS", "24"))
 
+# 无货/缺货提醒通道：email_only | wecom_only | both（见 doc/oos-email-wecom-alerts.md）
+OOS_ALERT_MODE = os.getenv("OOS_ALERT_MODE", "email_only").strip().lower() or "email_only"
+
+# 企业微信群机器人（Webhook）；需 WECOM_GROUP_ALERT_ENABLED=true 且配置 URL 后生效
+WECOM_GROUP_WEBHOOK_URL = (os.getenv("WECOM_GROUP_WEBHOOK_URL") or "").strip() or None
+WECOM_GROUP_ALERT_ENABLED = os.getenv("WECOM_GROUP_ALERT_ENABLED", "false").lower() in ("1", "true", "yes")
+WECOM_GROUP_MENTIONED_MOBILE_LIST = [
+    m.strip() for m in (os.getenv("WECOM_GROUP_MENTIONED_MOBILE_LIST") or "").split(",") if m and m.strip()
+]
+WECOM_GROUP_MENTIONED_USERIDS = [
+    u.strip() for u in (os.getenv("WECOM_GROUP_MENTIONED_USERIDS") or "").split(",") if u and u.strip()
+]
+
+# 企业微信应用消息 API（/agent/notify 通道）；应用消息 API 的收件人 userid 列表
+# 来自 .env 中 WECOM_CORP_ID / WECOM_APP_SECRET / WECOM_APP_AGENT_ID
+WECOM_APP_NOTIFY_USERS = [
+    u.strip() for u in (os.getenv("WECOM_APP_NOTIFY_USERS") or "").split(",") if u and u.strip()
+]
+
 # 无货标识关键词
 OUT_OF_STOCK_KEYWORDS = [
     "无货",

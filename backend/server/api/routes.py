@@ -12,6 +12,7 @@ from backend.server.api.routes_quotation import router as router_quotation
 from backend.server.api.routes_work import router as router_work
 from backend.server.api.routes_activity import router as router_activity
 from backend.server.api.routes_tools import router as router_tools
+from backend.server.api.routes_notify import router as router_notify
 
 router = APIRouter()
 router.include_router(router_health, tags=["health"])
@@ -23,3 +24,4 @@ router.include_router(router_quotation, tags=["quotation"])
 router.include_router(router_work, tags=["work"])
 router.include_router(router_activity, tags=["activity"])
 router.include_router(router_tools, tags=["tools"])
+router.include_router(router_notify, tags=["notify"])

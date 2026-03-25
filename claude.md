@@ -1,5 +1,25 @@
 # Agent Team version3 — 项目说明（Claude 用）
 
+### WeCom 应用消息中转（`/agent/notify`，2026-03-24）
+
+- 新增 `backend/wecom_bot/notification_service.py`：实现 `WeComApplicationClient`，封装企业微信应用消息 API（`gettoken` + `message/send`），支持 `send_text`/`send_markdown`，目标字段为 `to_users` / `to_parties` / `to_tags`。
+- 内置 token cache：`access_token` 缓存并在过期前 5 分钟刷新，避免每次发送重新获取 token。
+- 新增 `backend/server/api/routes_notify.py`：提供 `POST /agent/notify`，请求体支持：
+  - `msg_type`（`text`/`markdown`）
+  - `content`
+  - `to_users` / `to_parties` / `to_tags`
+  - `priority`（当前透传，预留扩展）
+- 路由聚合：`backend/server/api/routes.py` 已挂载 `router_notify`。
+- 群发送约束：应用消息 API 不直接按内部群 ID 发送；当前通过 `touser` 广播群成员。`to_parties` 支持别名映射（`WECOM_GROUP_ALIAS_MAPPING`）到用户列表；未命中别名时按 `toparty`（部门）发送。
+- 新增示例配置：`backend/wecom_bot/.env.example`（`WECOM_CORP_ID`、`WECOM_APP_SECRET`、`WECOM_APP_AGENT_ID`、`WECOM_GROUP_ALIAS_MAPPING`）。
+- 文档同步：`doc/oos-email-wecom-alerts.md` 新增「应用消息 API 中转」说明、群消息限制与 token cache 说明。
+
+### backend/core 可复用性与 GLM 集成测试（2026-03-21）
+
+- **能力**：`CoreAgent`（`backend/core/agent.py`）+ `AgentExtension` 注册工具 + `ToolRegistry`，即可用自定义 **system/skill 文案**（由各 extension 的 `get_skill_prompt()` 拼接）和 **OpenAI 格式 tool** 跑 ReAct；入口为 `execute_react()`。
+- **并非零业务依赖**：`README.md` 称「纯框架」，但 `agent.py` 仍 `import backend.config`、`backend.agent.session.SessionStore`，并在带 `file_path`/`file_id` 的 context 时使用 `backend.tools.quotation.excel_summary`。新工程「只拷贝 core 目录」不够，至少需同仓库的 `backend/config.py`、`backend/agent/session.py` 等，或自行 fork 去掉 Excel 分支。
+- **集成测试**：`tests/test_core_glm_query.py` — 仅用 `CoreAgent` + 最小扩展（工具名 `core_test_echo`），读取当前 `.env` 的 `LLM_MODEL`（如 `glm-4.5-air`）与智谱 Key/Base，验证（1）无工具纯文本回复；（2）白名单 `allowed_tools` 下单次工具调用。无 API Key 时 `skip`。运行：`py -3 tests/test_core_glm_query.py`（在 version3 根目录）。
+
 ### API 确认消息功能（2026-03-21）
 
 - 新增功能：用户发送报价或查询请求后,系统立即返回确认消息,告知请求已被接收并正在处理。
@@ -458,3 +478,11 @@ Agent Team version3/
 - **run_id 与 pipeline 状态**：`tests/test_work_executor_run_id.py` 验证当 match 结果含 `needs_human_choice` 与 `pending_choices` 时，`_process_files_pipeline` 返回的 dict 包含有效 `run_id`，且 `_work_pipeline_state[run_id]` 已写入，避免 NameError 并保证 resume 可用。
 - **报价产品规规则抽取**：`tests/test_spec_extract.py` 对 `extract_spec_from_quote_name` 做单元测试，覆盖「直通(管径)PVC-UH」「直通(管酒)PVC-U排水」「罩(PVC-H)」「30°异径三级配」、含 DN200/(8")/4M/根 的长名称等输入，断言在预期有规格时返回非空字符串。
 - **批量 LLM 规格提取**：同文件内对 `extract_specs_batch_llm` 做 mock 测试：`QUOTATION_SPEC_LLM=false` 或 API 返回非法 JSON 时返回空列表；mock 返回合法 JSON 数组时返回与行数一致的 `requested_spec`/`quoted_spec` 列表。运行：在 version3 根目录执行 `py -m pytest tests/test_spec_extract.py tests/test_work_executor_run_id.py -v`。
+
+### 无货/缺货提醒 — Email 与企业微信群（2026-03-24）
+
+- **文档**：[`doc/oos-email-wecom-alerts.md`](doc/oos-email-wecom-alerts.md) — 触发条件（`count>=2` + `EMAIL_COOLDOWN_HOURS`）、SMTP/Gmail 所需环境变量、群机器人 Webhook 与 `@` 配置；文中说明 **长连接机器人（对话回复）与群 Webhook（后台告警）是两条路径**，当前告警实现与后者一致。
+- **调度**：`backend/tools/oos/services/alert_dispatch.py` — `OOS_ALERT_MODE`：`email_only`（默认）| `wecom_only` | `both`；`both` 时任一通道成功即 `mark_email_sent` / `mark_email_sent_shortage`。
+- **群推送**：`backend/tools/oos/services/wecom_group_service.py` — POST `msgtype=text` 到 `WECOM_GROUP_WEBHOOK_URL`（需 `WECOM_GROUP_ALERT_ENABLED=true`）。
+- **接入点**：`persist_out_of_stock_records`（`quotation_agent_tool`）、`QuotationProcessor`（`processor.py`）、`_persist_shortage_records_and_alerts`（`work_tools.py`）。采购批准仍仅用 `send_procurement_approval_email`。
+- **测试**：`tests/test_alert_dispatch.py`。
