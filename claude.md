@@ -1,5 +1,12 @@
 # Agent Team version3 — 项目说明（Claude 用）
 
+### 采购批准后触发缺货提醒（2026-03-25）
+
+- 修改文件：`backend/server/api/routes_procurement.py`
+- 行为变更：`POST /api/procurement/approve` 在 `insert_procurement_approvals` 成功后，会逐条调用 `dispatch_shortage_alert(...)` 发送缺货提醒（失败仅 warning，不影响落库与接口返回）。
+- 告警参数：`file_name` 固定为 `"采购批准"`，`count=1`，`product_name/specification/product_key` 来自批准项。
+- 通道控制：沿用 `backend/tools/oos/services/alert_dispatch.py` 的 `OOS_ALERT_MODE` 路由（`email_only` / `wecom_only` / `both`）；当 `WECOM_APP_NOTIFY_USERS` 有值时，优先走应用消息 API 到指定 userid。
+
 ### WeCom 应用消息中转（`/agent/notify`，2026-03-24）
 
 - 新增 `backend/wecom_bot/notification_service.py`：实现 `WeComApplicationClient`，封装企业微信应用消息 API（`gettoken` + `message/send`），支持 `send_text`/`send_markdown`，目标字段为 `to_users` / `to_parties` / `to_tags`。

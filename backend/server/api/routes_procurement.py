@@ -5,6 +5,7 @@ from fastapi import APIRouter, Body, HTTPException
 from typing import Any, Dict
 
 from backend.server.api.deps import get_oos_data_service
+from backend.tools.oos.services.alert_dispatch import dispatch_shortage_alert
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -38,6 +39,18 @@ async def procurement_approve(body: Dict[str, Any] = Body(...)) -> Dict[str, Any
         inserted, inserted_ids = ds.insert_procurement_approvals(normalized)
         if inserted == 0:
             return {"success": True, "data": {"approved_count": 0, "message": "未写入任何记录"}}
+        # 批准后主动触发缺货提醒（按 OOS_ALERT_MODE 走 email/wecom/both）
+        for item in normalized:
+            try:
+                dispatch_shortage_alert(
+                    product_name=(item.get("product_name") or "").strip() or (item.get("product_key") or ""),
+                    specification=item.get("specification"),
+                    product_key=(item.get("product_key") or "").strip() or (item.get("product_name") or ""),
+                    count=1,
+                    file_name="采购批准",
+                )
+            except Exception as alert_err:
+                logger.warning("采购批准后发送缺货提醒失败（不影响落库）: %s", alert_err)
         try:
             from backend.tools.oos.services.email_service import send_procurement_approval_email
             if send_procurement_approval_email(items=normalized):
