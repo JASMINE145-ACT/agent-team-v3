@@ -50,6 +50,16 @@ async def wecom_verify():
     return FileResponse(_root / "WW_verify_dEJpsEmvXuoZ2UZG.txt")
 
 
+@app.get("/ip")
+async def show_ip():
+    """返回服务器出口公网 IP，用于企业微信 IP 白名单配置。"""
+    import httpx
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get("https://api.ipify.org")
+        ip = r.text.strip()
+    return {"ip": ip, "service": "bot.vantsing.net"}
+
+
 @app.head("/health")
 async def health_head():
     """健康检查（HEAD 版本）：返回 200，用于只关心存活性的探针。"""
