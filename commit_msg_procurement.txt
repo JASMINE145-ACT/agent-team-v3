@@ -1,0 +1,7 @@
+feat: send shortage alert after procurement approval
+
+Trigger dispatch_shortage_alert for each approved procurement item
+immediately after approval records are inserted, while keeping failures
+non-blocking so approval persistence still succeeds.
+
+Also document the new behavior in claude.md.

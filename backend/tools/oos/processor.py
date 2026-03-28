@@ -163,10 +163,10 @@ class QuotationProcessor:
                         )
                         if self.data_service.should_trigger_email(product_key, count):
                             email_triggered = True
-                            from services.email_service import send_out_of_stock_alert
+                            from services.alert_dispatch import dispatch_out_of_stock_alert
 
-                            # 发送邮件
-                            email_sent = send_out_of_stock_alert(
+                            # 发送无货提醒（邮件和/或企业微信群，见 OOS_ALERT_MODE）
+                            email_sent = dispatch_out_of_stock_alert(
                                 product_name=product.product_name,
                                 specification=product.specification,
                                 product_key=product_key,

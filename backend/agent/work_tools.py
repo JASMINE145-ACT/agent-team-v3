@@ -429,7 +429,7 @@ def _persist_shortage_records_and_alerts(file_path: str, shortage_list: list[dic
     """Persist shortage records and send alerts without blocking the response."""
     try:
         from backend.tools.oos.services.data_service import DataService
-        from backend.tools.oos.services.email_service import send_shortage_alert
+        from backend.tools.oos.services.alert_dispatch import dispatch_shortage_alert
 
         file_name = Path(file_path).name if file_path else "unknown"
         ds = DataService()
@@ -451,7 +451,7 @@ def _persist_shortage_records_and_alerts(file_path: str, shortage_list: list[dic
             file_path=file_path,
         )
         for alert in email_alerts:
-            if send_shortage_alert(
+            if dispatch_shortage_alert(
                 product_name=alert.get("product_name", ""),
                 specification=alert.get("specification"),
                 product_key=alert.get("product_key", ""),

@@ -99,7 +99,9 @@ quotation_tracker/
 | **OutOfStockDetector** | 无货行规则、表头识别、get_context_around_wuhou、get_data_section、format_*_for_llm |
 | **LLMParser** | parse_out_of_stock_products(table_data, full_table)，JSON 提取、字段规范化 |
 | **DataService** | SQLite/PostgreSQL，insert_record、get_all_records、get_statistics、should_trigger_email |
-| **email_service** | send_out_of_stock_alert（缺货 ≥2 次触发） |
+| **email_service** | `send_out_of_stock_alert` / `send_shortage_alert`（内部用；≥2 次 + 冷却） |
+| **wecom_group_service** | 群机器人 Webhook 文本推送；`is_wecom_group_configured` |
+| **alert_dispatch** | `dispatch_out_of_stock_alert` / `dispatch_shortage_alert`，按 `OOS_ALERT_MODE` 选 email / wecom / both |
 | **quotation_agent_tool** | analyze_quotation_excel、get_out_of_stock_records、persist_out_of_stock_records（OpenAI function 格式） |
 | **agent_runner** | ReAct 循环，调用智谱/OpenAI，执行工具、写回观察 |
 | **execution_tracer** | 调试用，记录每步 thinking/tool_call/observation |
@@ -112,7 +114,8 @@ quotation_tracker/
 - **无货识别模式**：`USE_WUHOU_CONTEXT_MODE`（默认 false）= 送整段数据表；true = 先规则锁定无货，再送表头+无货上下 N 行。`WUHOU_CONTEXT_ROWS` 默认 2。
 - **全表模式**：`MAX_TABLE_ROWS_FOR_LLM`、`MIN_DATA_SECTION_ROWS`、`FOOTER_KEYWORDS`
 - **DB**：`QUOTATION_DB_PATH`（SQLite）、`DATABASE_URL`（可选 PostgreSQL）
-- **Email**：`EMAIL_SMTP_*`、`EMAIL_RECIPIENTS`、`EMAIL_COOLDOWN_HOURS`
+- **Email**：`EMAIL_SMTP_*` 或 Gmail API、`EMAIL_RECIPIENTS`、`EMAIL_COOLDOWN_HOURS`
+- **无货/缺货提醒通道**：`OOS_ALERT_MODE`（`email_only` \| `wecom_only` \| `both`）；企业微信：`WECOM_GROUP_WEBHOOK_URL`、`WECOM_GROUP_ALERT_ENABLED`、`WECOM_GROUP_MENTIONED_*`。详见项目根 `doc/oos-email-wecom-alerts.md`。
 
 ---
 

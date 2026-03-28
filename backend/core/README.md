@@ -15,7 +15,8 @@
 ## Dependencies
 
 - `openai`, `backend.config.Config`, `backend.agent.session.SessionStore`（可选）.
-- 无业务包、无 DB 直连。
+- **注意**：`agent.py` 在带 Excel 上下文时还会引用 `backend.tools.quotation.excel_summary`（`get_excel_summary_for_context` 等）。新工程若只拷贝 `backend/core`，需自行剔除或替换该分支，并保留 `config` + `session` 的最小实现。
+- 集成测试（真实 LLM）：仓库根目录运行 `py -3 tests/test_core_glm_query.py`，验证 `CoreAgent` + 最小 `AgentExtension` 与 `.env` 中的模型（如 `glm-4.5-air`）。
 
 ## Example usage
 

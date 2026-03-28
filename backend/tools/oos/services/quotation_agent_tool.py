@@ -243,8 +243,8 @@ def persist_out_of_stock_records(
             except Exception as e:
                 logger.warning("同步无货记录到 Supabase 失败（忽略，不影响本地写入）: %s", e)
             if data_service.should_trigger_email(product_key, count):
-                from .email_service import send_out_of_stock_alert
-                if send_out_of_stock_alert(
+                from .alert_dispatch import dispatch_out_of_stock_alert
+                if dispatch_out_of_stock_alert(
                     product_name=product_name,
                     specification=product.specification,
                     product_key=product_key,

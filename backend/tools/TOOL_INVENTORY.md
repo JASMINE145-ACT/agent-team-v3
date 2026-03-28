@@ -41,4 +41,4 @@
 ## 4. 后续可纳入
 
 - **erp_sync**：ERP/订单相关 API（当前代码库中未发现统一 HTTP 客户端，待有接口后再封装）。
-- **缺货落库与邮件**：`work_tools._persist_shortage_records_and_alerts` 调用的 DataService.insert_shortage_records + email_service，可单独封装为 shortage_persist 工具。
+- **缺货落库与提醒**：`work_tools._persist_shortage_records_and_alerts` 调用的 DataService.insert_shortage_records + `alert_dispatch.dispatch_shortage_alert`（邮件/企业微信群，见 `OOS_ALERT_MODE`），可单独封装为 shortage_persist 工具。

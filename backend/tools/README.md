@@ -8,13 +8,13 @@
 
 - **inventory**: 库存查询、万鼎匹配与选型、改库存。入口见 `inventory_agent_tools.get_inventory_tools_openai_format()` 及各处 service 函数.
 - **quotation**: 报价单提取、填表、from-text、整单流水线。入口见 `quote_tools.get_quote_tools_openai_format()`、`flow_orchestrator`、`text_to_inquiry` 等.
-- **oos**: 无货/缺货 CRUD、邮件、DataService（SQLite/Postgres）。入口见 `data_service.DataService`、`email_service`，配置见 `oos/config.py`.
+- **oos**: 无货/缺货 CRUD、邮件/企业微信群提醒、DataService（SQLite/Postgres）。入口见 `data_service.DataService`、`alert_dispatch`（调度 `email_service` + `wecom_group_service`），配置见 `oos/config.py`，说明见 `doc/oos-email-wecom-alerts.md`.
 
 ## Dependencies
 
 - **inventory**: AOL/ACCURATE API、价格库与映射表路径（Config）、OpenAI 用于选型与摘要.
 - **quotation**: Excel 解析与写入、Config 中的模板与上传路径、inventory 与 oos 用于匹配与无货登记.
-- **oos**: SQLAlchemy、DATABASE_URL 或本地 SQLite、邮件配置（Gmail/SMTP）.
+- **oos**: SQLAlchemy、DATABASE_URL 或本地 SQLite、邮件（Gmail/SMTP）与可选企业微信群 Webhook（`OOS_ALERT_MODE`、`WECOM_GROUP_*`）.
 
 ## Example usage
 
