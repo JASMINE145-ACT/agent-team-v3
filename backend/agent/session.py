@@ -41,6 +41,8 @@ class Session:
     tool_memory: Optional[Dict[str, Any]] = None
     # 用户偏好等长期事实（User Facts）
     user_facts: Optional[Dict[str, Any]] = None
+    # Rework 机制：最近一次需要用户确认的选择（来自 match_quotation 的 needs_human_choice）
+    pending_human_choice: Optional[Dict[str, Any]] = None
 
     @classmethod
     def empty(cls, session_id: str) -> "Session":
@@ -53,6 +55,7 @@ class Session:
             summary=None,
             tool_memory=None,
             user_facts=None,
+            pending_human_choice=None,
         )
 
 
@@ -93,6 +96,7 @@ class SessionStore:
                     summary=raw.get("summary"),
                     tool_memory=raw.get("tool_memory") or None,
                     user_facts=raw.get("user_facts") or None,
+                    pending_human_choice=raw.get("pending_human_choice") or None,
                 )
                 self._mem[session_id] = s
                 return s
@@ -128,6 +132,7 @@ class SessionStore:
                 "summary": session.summary,
                 "tool_memory": session.tool_memory,
                 "user_facts": session.user_facts,
+                "pending_human_choice": session.pending_human_choice,
                 "label": existing_label,
             }
             if input_tokens is not None:
@@ -269,6 +274,18 @@ class SessionStore:
         for k, v in patch.items():
             base[k] = v
         session.user_facts = base
+        self._persist_session(session)
+
+    def set_pending_human_choice(self, session_id: str, choice_data: Dict[str, Any]) -> None:
+        """记录最近一次需要用户确认的选择，供 rework 时使用。"""
+        session = self.load(session_id)
+        session.pending_human_choice = choice_data
+        self._persist_session(session)
+
+    def clear_pending_human_choice(self, session_id: str) -> None:
+        """清除待确认选择（用户已确认或放弃时调用）。"""
+        session = self.load(session_id)
+        session.pending_human_choice = None
         self._persist_session(session)
 
     def list_sessions(self) -> list:

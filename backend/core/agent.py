@@ -41,6 +41,31 @@ _MAX_STEPS_HINT = (
     "若尚有未处理完的项目，请在回复中友好说明：例如「已计算前 N 个产品的利润率；其余可继续说『继续算剩余产品』或分批询问」，不要向用户展示「步数限制」等系统术语。"
 )
 
+# Rework 意图检测
+_REWORK_KEYWORDS = ["错了", "不对", "不是这个", "不是这个", "重新选", "换一个", "不对，是", "不对，应该是", "选另一个", "换一下"]
+
+
+def _detect_rework_intent(user_input: str) -> bool:
+    """检测用户是否在表达"报价/选型错误"意图，触发 rework 流程。"""
+    return any(kw in user_input for kw in _REWORK_KEYWORDS)
+
+
+def _build_rework_injection(pending: dict) -> str:
+    """将待确认选择构造为 prompt 注入文本，展示给用户确认。"""
+    keywords = pending.get("keywords", "")
+    options = pending.get("options", [])
+    if not options:
+        return ""
+    lines = [f"\n【请确认正确选项】询价「{keywords}」时有多于候选，"]
+    lines.append("系统已按规则预选，但您可以推翻并指出正确选项：\n")
+    for i, opt in enumerate(options, 1):
+        code = opt.get("code", "")
+        name = opt.get("matched_name", "")
+        source = opt.get("source", "")
+        lines.append(f"  {i}. [{code}] {name} (来源: {source})")
+    lines.append("\n请直接回复选项序号或产品名称，指出正确选项。")
+    return "\n".join(lines)
+
 
 class CoreAgent:
     def __init__(
@@ -182,6 +207,12 @@ class CoreAgent:
                 last_q = (session.turns[-1].query or "").strip()[:80]
                 current_input = user_input.strip()[:50]
                 user_content += f"\n\n【当前主题】上一轮问：{last_q}。用户本句：{current_input}。请据此理解意图与所指产品。"
+
+            # Rework 机制：检测用户是否在纠正上次报价/选型错误
+            if _detect_rework_intent(user_input) and session.pending_human_choice:
+                rework_injection = _build_rework_injection(session.pending_human_choice)
+                if rework_injection:
+                    user_content += f"\n\n{rework_injection}"
 
         tools = self._registry.get_definitions()
         allowed_tools: Optional[set[str]] = None
@@ -484,6 +515,18 @@ class CoreAgent:
                             logger.warning("ext.on_after_tool 失败，已跳过 name=%s", name, exc_info=True)
 
                     tool_obs_cache[cache_key] = obs
+
+                    # Rework 机制：当 match_quotation 返回 needs_human_choice 时，存入 session
+                    if name == "match_quotation" and session_id and self._store:
+                        try:
+                            parsed_obs = json.loads(obs)
+                            if isinstance(parsed_obs, dict) and parsed_obs.get("needs_human_choice"):
+                                self._store.set_pending_human_choice(session_id, parsed_obs)
+                            elif parsed_obs.get("single") and session_id:
+                                # 用户已确认（收到 single 结果），清除待确认状态
+                                self._store.clear_pending_human_choice(session_id)
+                        except Exception:
+                            pass
                     if name == "get_profit_by_price_batch":
                         items_arg = args.get("items")
                         if isinstance(items_arg, list):

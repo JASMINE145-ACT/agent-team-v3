@@ -65,6 +65,17 @@ def _make_append_business_knowledge_handler() -> Callable:
     return handler
 
 
+def _make_record_correction_handler() -> Callable:
+    async def handler(args: dict, context: dict) -> str:
+        from backend.agent.remember import record_correction_to_knowledge as do_record
+        keywords = (args.get("keywords") or "").strip()
+        confirmed_code = (args.get("confirmed_code") or "").strip()
+        confirmed_name = (args.get("confirmed_name") or "").strip()
+        reasoning = (args.get("reasoning") or "").strip()
+        return do_record(keywords, confirmed_code, confirmed_name, reasoning)
+    return handler
+
+
 def _make_batch_quick_quote_handler() -> Callable:
     async def handler(args: dict, context: dict) -> str:
         inquiry_text = (args.get("inquiry_text") or "").strip()
@@ -104,5 +115,7 @@ def register_quotation_tools(ctx: ExtensionContext) -> None:
             ctx.register_tool(t, _make_ask_clarification_handler())
         elif n == "append_business_knowledge":
             ctx.register_tool(t, _make_append_business_knowledge_handler())
+        elif n == "record_correction_to_knowledge":
+            ctx.register_tool(t, _make_record_correction_handler())
         elif n == "batch_quick_quote":
             ctx.register_tool(t, _make_batch_quick_quote_handler())

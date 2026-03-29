@@ -1,0 +1,34 @@
+# Agent Team version3 — Cursor Rules
+
+> Auto-injected backend specs for Agent Team version3 development.
+
+---
+
+## Backend Specs
+
+<!-- @.trellis/spec/backend/index.md -->
+
+## Quick Reference
+
+- **Architecture**: Single-agent ReAct loop (`CoreAgent`), tools registered via `AgentExtension`
+- **Core flow**: `match_quotation` → parallel search → auto LLM selection via `llm_select_best`
+- **Rework**: User says "错了"/"不对" → `_detect_rework_intent()` → `_build_rework_injection()` → `record_correction_to_knowledge()`
+- **Tool result shape**: Always `{"success": true/false, "result": "..."}`
+- **match_quotation return types**: `single` | `needs_human_choice` | `unmatched`
+- **Key files**:
+  - `backend/core/agent.py` — CoreAgent ReAct loop
+  - `backend/agent/session.py` — SessionStore with `pending_human_choice`
+  - `backend/tools/inventory/services/inventory_agent_tools.py` — `_execute_match_quotation`
+  - `backend/tools/inventory/services/llm_selector.py` — `llm_select_best`, `_load_relevant_corrections`
+  - `backend/plugins/jagent/skills.py` — `SKILL_KNOWLEDGE_DOC`, `SKILL_KNOWLEDGE_RULES`
+
+---
+
+## Development Rules
+
+1. All tool handlers MUST return `{"success": true, "result": <json-string>}` — never raw strings
+2. Do NOT set `sys.path` — use environment variable `PYTHONPATH` for module resolution
+3. Use `logging.getLogger(__name__)` — not print statements
+4. Do NOT import version3 modules in other projects — use `version3_tools` borrowing layer
+5. New tools must be registered via `AgentExtension.register(ctx)` → `ctx.register_tool()`
+6. `session.pending_human_choice` access ONLY via `SessionStore.set_pending_human_choice()` / `clear_pending_human_choice()`

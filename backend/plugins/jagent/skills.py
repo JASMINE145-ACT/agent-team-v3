@@ -338,7 +338,8 @@ CLARIFY DECISION RULES
 
 SKILL_KNOWLEDGE_DOC = """\
 **6. 业务知识记录**
-- **append_business_knowledge(content)**：当用户要求将某条知识、规则、纠正**记录到知识库 / 记在 knowledge / 润色后记录 / 把这个记下来**等（任意说法）时，**必须**调用本工具。content 为润色后的完整一条知识（可多句），如「PVC160 不是标准规格，应理解为 DN150(6")」。无需用户先说「请记住」；用户说「记录在 knowledge 里面」「可以润色一下记到知识库」即调用。"""
+- **append_business_knowledge(content)**：当用户要求将某条知识、规则、纠正**记录到知识库 / 记在 knowledge / 润色后记录 / 把这个记下来**等（任意说法）时，**必须**调用本工具。content 为润色后的完整一条知识（可多句），如「PVC160 不是标准规格，应理解为 DN150(6")」。无需用户先说「请记住」；用户说「记录在 knowledge 里面」「可以润色一下记到知识库」即调用。
+- **record_correction_to_knowledge(keywords, confirmed_code, confirmed_name, reasoning)**：当用户在 rework 流程中**确认了正确的报价选项**后（如用户说「不是这个，是第二个」「选 1」「第三个才对」），**必须**调用本工具将此次纠正记录到知识库。Agent 应自动调用，无需用户明确要求「记录」。"""
 
 SKILL_KNOWLEDGE_RULES = """\
 KNOWLEDGE RECORDING DECISION RULES
@@ -346,14 +347,19 @@ KNOWLEDGE RECORDING DECISION RULES
 [Routing & Priority Rules]
 - IF the user asks you to 「记住」「记录到知识库」「记在 knowledge 里」「润色后记录」「把这个记下来」 (any phrasing),
   THEN you MUST call append_business_knowledge(content) with a polished, complete single piece of knowledge.
+- IF the user has just **confirmed the correct quotation option** during a rework correction
+  (e.g. user says 「不是这个，是第二个」「选 1」「第三个才对」 after seeing candidate options),
+  THEN you MUST call record_correction_to_knowledge(keywords, confirmed_code, confirmed_name, reasoning).
 
 [Hard Constraints — MUST FOLLOW]
 - The `content` you pass to append_business_knowledge MUST be a cleaned-up, self-contained knowledge statement (one or several sentences), not raw, noisy chat fragments.
 - DO NOT record casual remarks or off-topic small talk as business knowledge unless the user explicitly requests it to be recorded.
+- For record_correction_to_knowledge, pass the original keywords, the confirmed product code and name, and any reasoning the user gave.
 
 [Examples]
 - Correct: 用户说「PVC160 不是标准规格，应该理解成 DN150(6\")，帮我记到知识库」 -> you rewrite to a clean sentence and call append_business_knowledge with that sentence.
 - Incorrect: 用户只是随口说「这客户好难搞」时就调用 append_business_knowledge 记录 ❌.
+- Correct: 用户在候选列表中回复「第三个」-> call record_correction_to_knowledge(keywords="直接50", confirmed_code="THIRD_CODE", confirmed_name="第三个产品名", reasoning="用户选择了第三个").
 """
 
 # 旧版输出格式（回退用）

@@ -98,6 +98,60 @@ def invalidate_business_knowledge_cache() -> None:
     _business_knowledge_cache = {}
 
 
+def _load_relevant_corrections(keywords: str, max_examples: int = 3) -> str:
+    """
+    从 wanding_business_knowledge.md 的「## 用户纠正案例」章节中，
+    查找与当前 keywords 相似的历史纠正案例（few-shot），
+    以提升 LLM 在类似场景中直接选对的概率。
+    使用简单关键词重叠匹配，优先返回重叠最多的案例。
+    """
+    try:
+        from backend.tools.inventory.config import config as inv_config
+        path_str = getattr(inv_config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
+        if not path_str:
+            return ""
+        p = Path(path_str)
+        if not p.exists():
+            return ""
+        content = p.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+    # 提取所有 ## 用户纠正案例 章节
+    import re
+    sections = re.split(r"(?=^## 用户纠正案例)", content, flags=re.MULTILINE)
+    kw_lower = keywords.lower()
+    scored: List[tuple[int, str]] = []
+
+    # 收集含关键词的案例
+    for section in sections:
+        if "## 用户纠正案例" not in section:
+            continue
+        section_lower = section.lower()
+        # 简单评分：统计 keywords 中的主要词在该章节出现次数
+        score = sum(1 for kw_word in kw_lower.split() if kw_word in section_lower)
+        if score > 0:
+            # 截取案例部分（去掉章节标题）
+            lines = section.splitlines()
+            example_lines = [l for l in lines if l.strip() and not l.startswith("#")]
+            example_text = "\n".join(example_lines).strip()
+            if example_text:
+                scored.append((score, example_text))
+
+    if not scored:
+        return ""
+
+    # 优先返回得分最高的案例
+    scored.sort(key=lambda x: -x[0])
+    selected = scored[:max_examples]
+    if not selected:
+        return ""
+
+    header = "\n【参考历史纠正案例】（以下案例已由报价员确认，请优先参考）\n"
+    examples_text = "\n".join(f"- {ex}" for _, ex in selected)
+    return header + examples_text + "\n"
+
+
 def llm_select_best(
     keywords: str,
     candidates: List[dict[str, Any]],
@@ -120,6 +174,7 @@ def llm_select_best(
             max_tokens = 8192
 
     knowledge = _load_business_knowledge()
+    corrections = _load_relevant_corrections(keywords)
 
     lines = []
     for i, c in enumerate(candidates, 1):
@@ -134,6 +189,7 @@ def llm_select_best(
 {candidates_text}
 
 {knowledge}
+{corrections}
 
 请二选一（仅输出一个 JSON）：
 1) **有把握**选出一个最匹配的：用 "confident": true，并给出 "index"（序号 1-{len(candidates)}）和 "reasoning"。

@@ -129,6 +129,12 @@ class InventoryConfig:
     WORK_SINGLE_CAND_USE_LLM: bool = os.environ.get("WORK_SINGLE_CAND_USE_LLM", "0").strip().lower() in ("1", "true", "yes")
     WORK_MATCH_MAX_WORKERS: int = int(os.environ.get("WORK_MATCH_MAX_WORKERS", "5"))
 
+    # 万鼎模糊匹配阈值
+    # INVENTORY_MIN_SCORE: 万鼎模糊匹配最低分数阈值，低于此值视为整体未命中（默认 0.0=不启用）
+    INVENTORY_MIN_SCORE: float = float(os.environ.get("INVENTORY_MIN_SCORE", "0"))
+    # INVENTORY_MIN_SCORE_GAP: 万鼎模糊匹配分数差阈值，top1-top2 >= 此值时仅返回 top1（默认 0.0=不启用）
+    INVENTORY_MIN_SCORE_GAP: float = float(os.environ.get("INVENTORY_MIN_SCORE_GAP", "0"))
+
 
 # 全局配置实例
 config = InventoryConfig()

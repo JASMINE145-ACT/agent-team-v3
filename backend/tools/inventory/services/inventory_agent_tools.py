@@ -93,13 +93,19 @@ def _execute_match_by_quotation_history(arguments: dict[str, Any]) -> dict[str, 
 
 def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
     """
-    询价匹配（只读）：
+    询价匹配（只读，自动 LLM 选型）：
     - 输入：keywords（中文产品名+规格）、可选 customer_level。
     - 行为：同时查报价历史与万鼎字段匹配，取并集并按 source（历史报价/字段匹配/共同）标记。
-    - 返回：{ single | needs_selection | unmatched, candidates[], chosen?, match_source }，用于查 code/价格/档位。
+      多候选时自动调用 llm_select_best 选型，无需 Agent 二次调用 select_wanding_match。
+    - 返回：
+      - 单候选：{ single, candidates, chosen, match_source }
+      - 多候选+LLM有把握：{ single, chosen, match_source, selection_note }
+      - 多候选+LLM无把握：{ needs_human_choice, keywords, options }
+      - 无匹配：{ unmatched, keywords }
     """
     try:
         from backend.tools.inventory.services.match_and_inventory import match_quotation_union
+        from backend.tools.inventory.services.llm_selector import llm_select_best
 
         keywords = (arguments.get("keywords") or "").strip()
         if not keywords:
@@ -116,13 +122,62 @@ def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
         ]
         max_show = 15
         norm = norm[:max_show]
+
+        # 单候选快路径：直接返回
         if len(norm) == 1:
             r = norm[0]
             payload = {"single": True, "candidates": norm, "chosen": r, "chosen_index": 1, "match_source": r.get("source", "共同")}
             return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
+
+        # 多候选：自动调用 LLM 选型
         sources_present = list({c.get("source") for c in norm if c.get("source")})
-        payload = {"needs_selection": True, "keywords": keywords, "candidates": norm, "match_source": "、".join(sources_present) if sources_present else "共同"}
+        match_source_label = "、".join(sources_present) if sources_present else "共同"
+
+        best = llm_select_best(keywords, norm)
+
+        if best is None:
+            # LLM 明确判定无匹配 → 按无货处理
+            return {"success": True, "result": json.dumps({"unmatched": True, "keywords": keywords}, ensure_ascii=False)}
+
+        if best.get("_suggestions"):
+            # LLM 无把握 → 将选择权交给用户
+            options = best.get("options", [])
+            for opt in options:
+                opt["source"] = match_source_label
+            payload = {
+                "needs_human_choice": True,
+                "keywords": keywords,
+                "options": options,
+                "match_source": match_source_label,
+            }
+            return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
+
+        # LLM 有把握：返回选中结果
+        chosen_code = (best.get("code") or "").strip()
+        chosen_name = (best.get("matched_name") or "")[:200]
+        chosen_price = float(best.get("unit_price", 0) or 0)
+
+        # 补全来源
+        chosen_source = next((c.get("source", "共同") for c in norm if c.get("code") == chosen_code), match_source_label)
+
+        payload = {
+            "single": True,
+            "candidates": norm,
+            "chosen": {
+                "code": chosen_code,
+                "matched_name": chosen_name,
+                "unit_price": chosen_price,
+                "source": chosen_source,
+            },
+            "chosen_index": next((i + 1 for i, c in enumerate(norm) if c.get("code") == chosen_code), 1),
+            "match_source": f"llm_selected({chosen_source})",
+            "selection_note": best.get("reasoning", ""),
+        }
+        # 透传兜底元信息
+        if best.get("_selection_meta"):
+            payload["_selection_meta"] = best["_selection_meta"]
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
+
     except Exception as e:
         logger.exception("match_quotation 失败")
         return {"success": False, "error": str(e), "result": f"询价匹配失败: {e}"}
@@ -850,7 +905,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "match_quotation",
-                "description": "询价匹配：同时查报价历史与万鼎字段匹配，结果取并集，每条带 source（历史报价/字段匹配/共同）。",
+                "description": "询价匹配（自动 LLM 选型）：同时查报价历史与万鼎字段匹配，结果取并集。多候选时自动调用 LLM 选型，无需二次调用 select_wanding_match。返回：single（含 chosen）/ needs_human_choice（含 options 供用户选）/ unmatched。",
                 "parameters": {
                     "type": "object",
                     "properties": {

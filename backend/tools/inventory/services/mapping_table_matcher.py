@@ -20,7 +20,9 @@ from backend.tools.inventory.services.wanding_fuzzy_matcher import (
     _SYNONYM_TO_GROUP,
     _expand_keyword_with_synonyms,
     _expand_token_with_synonyms_and_units,
+    _is_inch_token,
     _normalize,
+    _normalize_chinese_number_order,
     _normalize_keyword_terms,
     _split_tokens,
 )
@@ -119,6 +121,9 @@ def search_mapping_fuzzy(
     if not keyword:
         return []
 
+    # 词序统一：中文在前、数字在后，避免"三通50"和"50三通"产生不同结果
+    keyword = _normalize_chinese_number_order(keyword)
+
     has_precomputed = "norm_text" in df.columns and "spec_tokens" in df.columns
     results: dict[str, Tuple[dict, float]] = {}
 
@@ -146,6 +151,9 @@ def search_mapping_fuzzy(
             + len(single_text) * _SINGLE_CHAR_WEIGHT
         )
 
+        query_inch_tokens = {t for t in query_size_tokens if _is_inch_token(t)}
+
+        iter_rows: list[tuple[dict[str, Any], float, int]] = []
         for row in df.itertuples(index=False):
             raw_text = str(getattr(row, "search_text", ""))
             if not raw_text:
@@ -169,6 +177,8 @@ def search_mapping_fuzzy(
             if query_size_tokens and size_hits == 0:
                 continue
 
+            inch_exact_hits = sum(1 for t in query_inch_tokens if t in product_specs)
+
             def _text_match(t: str) -> bool:
                 return t.lower() in normalized_text or (t == "度" and "°" in normalized_text)
 
@@ -180,13 +190,36 @@ def search_mapping_fuzzy(
             hit_weight = size_hits + multi_hits + single_hits * _SINGLE_CHAR_WEIGHT
             score = hit_weight / total_weight if total_weight > 0 else 0.0
 
-            if score > 0 and (code not in results or score > results[code][1]):
-                results[code] = (
-                    {"code": code, "matched_name": matched_name, "unit_price": 0.0},
-                    score,
+            if score > 0:
+                iter_rows.append(
+                    ({"code": code, "matched_name": matched_name, "unit_price": 0.0}, score, inch_exact_hits, hit_weight)
                 )
 
-    out = list(results.values())
+        # 英寸优先：若查询里显式给了英寸，且存在英寸精确命中的候选，
+        # 则只保留英寸精确命中，避免被 dn 等价扩展引入跨体系误匹配。
+        # 与 wanding_fuzzy_matcher.py search_fuzzy 保持一致
+        if query_inch_tokens and any(inch_hits > 0 for _, _, inch_hits, _hw in iter_rows):
+            iter_rows = [r for r in iter_rows if r[2] > 0]
+
+        for row_dict, score, _inch_hits, _hw in iter_rows:
+            code = row_dict["code"]
+            if code not in results:
+                results[code] = (
+                    row_dict,
+                    score,
+                    {"weighted_score": score * _hw, "total_hw": _hw, "inch_hits": _inch_hits},
+                )
+            else:
+                old = results[code][2]
+                new_weighted_score = old["weighted_score"] + score * _hw
+                new_total_hw = old["total_hw"] + _hw
+                results[code] = (
+                    row_dict,
+                    new_weighted_score / new_total_hw if new_total_hw > 0 else 0.0,
+                    {"weighted_score": new_weighted_score, "total_hw": new_total_hw, "inch_hits": max(_inch_hits, old["inch_hits"])},
+                )
+
+    out = [(row_dict, score) for code, (row_dict, score, _) in results.items()]
     out.sort(key=lambda x: x[1], reverse=True)
     return out
 
