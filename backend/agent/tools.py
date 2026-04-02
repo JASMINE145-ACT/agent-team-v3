@@ -79,24 +79,6 @@ EXTRA_TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "record_correction_to_knowledge",
-            "description": "【Rework 记录】当用户在 rework 流程中确认了正确的报价选项后，将此次纠正记录到业务知识库。Agent 应在用户确认正确选项后自动调用（无需用户明确要求「记录」）。参数 keywords=询价关键词，confirmed_code=用户确认的产品编号，confirmed_name=产品名称，reasoning=用户给出的选型原因（如有）。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keywords": {"type": "string", "description": "询价时的原始关键词"},
-                    "confirmed_code": {"type": "string", "description": "用户确认的正确产品编号"},
-                    "confirmed_name": {"type": "string", "description": "用户确认的产品名称"},
-                    "reasoning": {"type": "string", "description": "用户给出的选择原因（可选，如「这是排水用的」等）"},
-                },
-                "required": ["keywords", "confirmed_code", "confirmed_name"],
-            },
-            "x_tool_meta": {"access_mode": "write", "risk_level": "medium"},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "batch_quick_quote",
             "description": "【批量快速询价】纯文字输入多个产品+数量，一次性返回价格+库存的 Markdown 表格。适用企业微信快速报价场景。支持格式如「50三通 100个，25弯头 50个」或「DN50三通×100、DN25弯头×50」。限 100 项。",
             "parameters": {

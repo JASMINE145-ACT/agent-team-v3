@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
-from backend.config import Config
+from backend.config import Config, get_primary_react_llm_credentials
 from backend.server.api.routes import router
 from backend.server.api.routes_wecom import router as wecom_router
 from backend.server.gateway.gateway import router as ws_router
@@ -197,9 +197,10 @@ async def startup_event():
     from backend.core.agent import CoreAgent
     from backend.plugins.jagent.extension import JAgentExtension
     from backend.wecom_bot.client import run_wecom_bot
+    _pk, _pb = get_primary_react_llm_credentials()
     agent = CoreAgent(
-        api_key=Config.OPENAI_API_KEY,
-        base_url=Config.OPENAI_BASE_URL,
+        api_key=_pk,
+        base_url=_pb,
         model=Config.LLM_MODEL,
         extensions=[JAgentExtension()],
     )

@@ -3,7 +3,7 @@
 技能/输出格式通过 PromptProvider 注入，默认 LocalPromptProvider，便于切换云端。
 """
 from backend.core.agent import CoreAgent
-from backend.config import Config
+from backend.config import Config, get_primary_react_llm_credentials
 from backend.plugins.jagent.extension import JAgentExtension
 from backend.prompts import LocalPromptProvider
 
@@ -14,9 +14,10 @@ class SingleAgent(CoreAgent):
         if prompt_provider is None:
             prompt_provider = LocalPromptProvider()
         ext = JAgentExtension(prompt_provider=prompt_provider)
+        pk, pb = get_primary_react_llm_credentials()
         super().__init__(
-            api_key=api_key or Config.OPENAI_API_KEY,
-            base_url=base_url or Config.OPENAI_BASE_URL,
+            api_key=api_key or pk,
+            base_url=base_url or pb,
             model=model or Config.LLM_MODEL,
             extensions=[ext],
             session_store=session_store,

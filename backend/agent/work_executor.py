@@ -25,6 +25,17 @@ _WORK_CONTEXT_MAX_CHARS = 8_000
 
 logger = logging.getLogger(__name__)
 
+
+def _work_context_summarizer():
+    """Tool 结果压缩：与 Chat CoreAgent 一致，使用 SUMMARY_LLM_*（gpt-4o-mini）。"""
+    from backend.config import Config
+
+    return make_summarizer(
+        Config.SUMMARY_LLM_API_KEY or Config.OPENAI_API_KEY,
+        (Config.SUMMARY_LLM_BASE_URL or Config.OPENAI_BASE_URL or "").strip() or None,
+        getattr(Config, "SUMMARY_LLM_MODEL", "gpt-4o-mini"),
+    )
+
 # run_id -> { messages, step, trace, file_paths, customer_level, do_register_oos, _api_key, _base_url, _model, max_tokens, created_at }
 _work_run_state: Dict[str, dict] = {}
 
@@ -109,7 +120,7 @@ async def _run_work_flow_react(
 
         _api_key = api_key or getattr(Config, "OPENAI_API_KEY", None)
         _base_url = getattr(Config, "OPENAI_BASE_URL", None) or base_url
-        _model = model or getattr(Config, "LLM_MODEL", "gpt-4o")
+        _model = model or getattr(Config, "LLM_MODEL", "glm-4.5-air")
         max_tokens = getattr(Config, "LLM_MAX_TOKENS", 5000)
 
         # 婢跺洨鏁ゅΟ鈥崇€烽柊宥囩枂閿涘牅绶ユ俊?GLM 鐡掑懏妞傞弮鎯板殰閸斻劌鍨忛崚?gpt-4o-mini閿?        fb_api_key = getattr(Config, "FALLBACK_LLM_API_KEY", None)
@@ -118,7 +129,7 @@ async def _run_work_flow_react(
     except Exception:
         _api_key = api_key
         _base_url = base_url
-        _model = model or "gpt-4o"
+        _model = model or "glm-4.5-air"
         max_tokens = 5000
         fb_api_key = None
         fb_base_url = None
@@ -286,7 +297,7 @@ async def _run_work_flow_react(
 
             if name == "work_quotation_fill":
                 # 娑撯偓娑?鏋冩禒鍓佹畱娑撳?瀹告彃鍙忛柈銊ョ暚閹存劧绱濋崢瀣級閸樺棗褰?tool 缂佹挻鐏?                # 濮濄倖妞?fill 瀹歌尙绮＄拠璇插絿楠炴湹濞囬悽銊ょ啊 match 缂佹挻鐏夐敍灞藉竾缂傗晛鐣ㄩ崗銊ょ瑝瑜板崬鎼烽弫鐗堝祦濞?                _id_to_name = build_tool_call_id_to_name(messages)
-                _summarizer = make_summarizer(_api_key, _base_url, "gpt-4o-mini")
+                _summarizer = _work_context_summarizer()
                 _trim_context(messages, _WORK_CONTEXT_MAX_CHARS, _id_to_name, _summarizer)
 
     return {
@@ -506,7 +517,7 @@ async def _run_work_flow_resume_react(
 
             if name == "work_quotation_fill":
                 _id_to_name = build_tool_call_id_to_name(messages)
-                _summarizer = make_summarizer(_api_key, _base_url, "gpt-4o-mini")
+                _summarizer = _work_context_summarizer()
                 _trim_context(messages, _WORK_CONTEXT_MAX_CHARS, _id_to_name, _summarizer)
 
     return {

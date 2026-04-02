@@ -17,17 +17,44 @@ if (repo_root / ".env").exists():
     load_dotenv(repo_root / ".env", override=True)
     print(f"[Config] Loaded from (override): {repo_root / '.env'}")
 
+_PRIMARY_LLM_PROTOCOL_RAW = (os.getenv("PRIMARY_LLM_PROTOCOL") or "openai").strip().lower()
+
 class Config:
-    _OPENAI_BASE_URL_RAW = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_BASE_URL_ZHIPU") or "https://open.bigmodel.cn/api/paas/v4"
+    _llm_for_url = (os.getenv("LLM_MODEL") or "").strip()
+    _primary_looks_minimax = bool(_llm_for_url and ("minimax" in _llm_for_url.lower()))
+    _OPENAI_BASE_URL_RAW = (
+        (os.getenv("OPENAI_BASE_URL") or "").strip()
+        or (
+            (os.getenv("MINIMAX_BASE_URL") or "").strip()
+            if (_primary_looks_minimax and _PRIMARY_LLM_PROTOCOL_RAW != "anthropic")
+            else ""
+        )
+        or (os.getenv("OPENAI_BASE_URL_ZHIPU") or "").strip()
+        or "https://open.bigmodel.cn/api/paas/v4"
+    )
     OPENAI_BASE_URL = (_OPENAI_BASE_URL_RAW or "").rstrip("/") + "/"
     _IS_ZHIPU = "bigmodel.cn" in (OPENAI_BASE_URL or "")
+    PRIMARY_LLM_PROTOCOL = _PRIMARY_LLM_PROTOCOL_RAW if _PRIMARY_LLM_PROTOCOL_RAW in ("openai", "anthropic") else "openai"
+    ANTHROPIC_API_KEY = (os.getenv("ANTHROPIC_API_KEY") or os.getenv("MINIMAX_API_KEY") or "").strip()
+    ANTHROPIC_BASE_URL = (os.getenv("ANTHROPIC_BASE_URL") or "").strip() or None
     OPENAI_API_KEY = (
-        os.getenv("ZHIPU_API_KEY") or os.getenv("OPENAI_API_KEY")
+        (os.getenv("ZHIPU_API_KEY") or os.getenv("OPENAI_API_KEY"))
         if _IS_ZHIPU
-        else (os.getenv("OPENAI_API_KEY") or os.getenv("ZHIPU_API_KEY"))
+        else (
+            (os.getenv("OPENAI_API_KEY") or "").strip()
+            or (os.getenv("MINIMAX_API_KEY") or "").strip()
+            or (os.getenv("ZHIPU_API_KEY") or "").strip()
+        )
     )
-    # 主 LLM（默认智谱 GLM，可通过 .env 中的 LLM_MODEL 覆盖）
-    LLM_MODEL = os.getenv("LLM_MODEL", "glm-4-flash")
+    # 主 LLM（默认智谱 GLM，可通过 .env 中的 LLM_MODEL 覆盖）。
+    # 若当前走智谱 endpoint 且配置了 MiniMax 模型名，同时协议不是 anthropic，则自动回退到 OPENAI_MODEL/GLM。
+    _llm_raw = os.getenv("LLM_MODEL", "glm-4.5-air")
+    _llm_looks_minimax = bool(_llm_raw and ("minimax" in _llm_raw.lower()))
+    if _IS_ZHIPU and _llm_looks_minimax and PRIMARY_LLM_PROTOCOL != "anthropic":
+        LLM_MODEL = (os.getenv("CHAT_LLM_MODEL") or os.getenv("OPENAI_MODEL") or "glm-4.5-air")
+    else:
+        LLM_MODEL = _llm_raw
+    SESSION_TITLE_MODEL = (os.getenv("SESSION_TITLE_MODEL") or os.getenv("OPENAI_MODEL") or "glm-4.5-air")
     # 单次回复最大 token 数；表格/利润率等长回复需 2 万+，Claude Loop 改造后提升至 4 万避免思考被截断
     LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "40000"))
     # 上下文压缩：用轻量模型对历史 tool 结果做摘要，默认 gpt-4o-mini；未设则用主模型同 endpoint
@@ -102,8 +129,10 @@ class Config:
     # Chat/WeCom ReAct 单轮最大步数（每步一次 LLM 调用）；默认 12，可通过 REACT_MAX_STEPS 覆盖
     REACT_MAX_STEPS = int(os.getenv("REACT_MAX_STEPS", "12"))
 
-    # Claude Loop Prompt：是否使用三段式 Claude Loop 思考结构（Gather/Act/Verify）；默认 true
+    # Prompt 约束开关：默认 true（与 .env.example 对齐）
     USE_CLAUDE_LOOP_PROMPT = (os.getenv("USE_CLAUDE_LOOP_PROMPT", "true") or "").strip().lower() in ("1", "true", "yes")
+    # 决策规则技能：true 使用 RULES 版（更强约束），false 使用 DOC 版；默认 true（与 .env.example 对齐）
+    USE_DECISION_RULE_SKILLS = (os.getenv("USE_DECISION_RULE_SKILLS", "true") or "").strip().lower() in ("1", "true", "yes")
 
     # Run Log：长流程运行日志基目录（相对 base_dir 的 data/run-logs，或通过环境变量覆盖）
     RUN_LOG_BASE_DIR = Path(os.getenv("RUN_LOG_BASE_DIR", str(base_dir / "data" / "run-logs")))
@@ -133,13 +162,34 @@ class Config:
     @classmethod
     def validate(cls):
         errors = []
-        if not cls.OPENAI_API_KEY:
-            errors.append("缺少 OPENAI_API_KEY 或 ZHIPU_API_KEY")
+        if cls.PRIMARY_LLM_PROTOCOL == "anthropic":
+            if not cls.ANTHROPIC_API_KEY:
+                errors.append("PRIMARY_LLM_PROTOCOL=anthropic 时缺少 ANTHROPIC_API_KEY")
+            if not cls.ANTHROPIC_BASE_URL:
+                errors.append("PRIMARY_LLM_PROTOCOL=anthropic 时缺少 ANTHROPIC_BASE_URL")
+        else:
+            if not cls.OPENAI_API_KEY:
+                errors.append("缺少 OPENAI_API_KEY 或 ZHIPU_API_KEY")
         if not cls.AOL_ACCESS_TOKEN:
             errors.append("缺少 AOL_ACCESS_TOKEN（库存查询需要）")
         if errors:
             print("[Config] Warnings:", *[f"  - {e}" for e in errors])
         return len(errors) == 0
+
+
+def get_primary_react_llm_credentials() -> tuple[str, str]:
+    """
+    CoreAgent 主 ReAct 使用的 (api_key, base_url)。
+    PRIMARY_LLM_PROTOCOL=anthropic 时用 ANTHROPIC_*（如 MiniMax Messages），否则 OpenAI 兼容（智谱等）。
+    """
+    if getattr(Config, "PRIMARY_LLM_PROTOCOL", "openai") == "anthropic":
+        key = (Config.ANTHROPIC_API_KEY or "").strip()
+        base = (Config.ANTHROPIC_BASE_URL or "").strip().rstrip("/")
+        if base:
+            base = base + "/"
+        return key, base
+    return (Config.OPENAI_API_KEY or "").strip(), (Config.OPENAI_BASE_URL or "").strip()
+
 
 if __name__ != "__main__":
     Config.validate()
@@ -148,4 +198,4 @@ if __name__ != "__main__":
     else:
         print("[Config] GLM_OCR: disabled")
 
-__all__ = ["Config"]
+__all__ = ["Config", "get_primary_react_llm_credentials"]

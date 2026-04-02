@@ -270,8 +270,8 @@ export function renderChat(props: ChatProps) {
   const isBusy = props.sending || props.stream !== null;
   const canAbort = Boolean(props.canAbort && props.onAbort);
   const activeSession = props.sessions?.sessions?.find((row) => row.key === props.sessionKey);
-  const reasoningLevel = activeSession?.reasoningLevel ?? "off";
-  const showReasoning = props.showThinking && reasoningLevel !== "off";
+  // 未设置 reasoningLevel 的会话：默认展示 reasoning（与显式设为 "off" 区分）
+  const showReasoning = props.showThinking && activeSession?.reasoningLevel !== "off";
   const assistantIdentity = {
     name: props.assistantName,
     avatar: props.assistantAvatar ?? props.assistantAvatarUrl ?? null,

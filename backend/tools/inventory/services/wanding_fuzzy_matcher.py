@@ -473,39 +473,6 @@ def normalize_price(raw_price: Any) -> float:
     return value
 
 
-def _normalize_chinese_number_order(keyword: str) -> str:
-    """
-    统一关键词词序：中文在前、数字在后。
-    同时将「中文+紧随其后的数字」合并为一个原子 token（如"三通50"和"50三通"都变成"三通50"），
-    保证无论原始词序如何，规范化后两者的 token 集合完全一致。
-    防止后续 _split_tokens 因 len>2 拆分导致不同词序产生不同 token 集合。
-    """
-    if not keyword:
-        return keyword
-    # 第一步：扫描 tokenizer 输出，将"中文+紧随其后的数字"合并为原子 token
-    raw_tokens = re.findall(r"[\u4e00-\u9fff]+|\d+(?:\.\d+)?|[^\u4e00-\u9fff\d]+", keyword)
-    merged: list[str] = []
-    i = 0
-    while i < len(raw_tokens):
-        tok = raw_tokens[i]
-        if re.search(r"^[\u4e00-\u9fff]+$", tok) and i + 1 < len(raw_tokens) and re.match(r"^\d+", raw_tokens[i + 1]):
-            # 中文 token 后紧跟数字 → 合并为"三通50"形式
-            merged.append(tok + raw_tokens[i + 1])
-            i += 2
-        elif re.match(r"^\d+$", tok) and i + 1 < len(raw_tokens) and re.search(r"^[\u4e00-\u9fff]+$", raw_tokens[i + 1]):
-            # 数字 token 后紧跟中文 → 合并为"三通50"形式（数字在前场景）
-            merged.append(tok + raw_tokens[i + 1])
-            i += 2
-        else:
-            merged.append(tok)
-            i += 1
-    # 第二步：将所有中文 token（无论是合并后的还是独立的）放到数字 token 之前
-    chinese_tokens = [t for t in merged if re.search(r"[\u4e00-\u9fff]", t)]
-    number_tokens = [t for t in merged if re.match(r"^\d+(?:\.\d+)?$", t)]
-    other_tokens = [t for t in merged if not re.search(r"[\u4e00-\u9fff]", t) and not re.match(r"^\d+(?:\.\d+)?$", t)]
-    return " ".join(chinese_tokens + number_tokens + other_tokens)
-
-
 def search_fuzzy(
     df: pd.DataFrame,
     keyword: str,
@@ -525,10 +492,7 @@ def search_fuzzy(
     results: dict = {}
     has_precomputed = "norm_text" in df.columns and "spec_tokens" in df.columns
 
-    # 词序统一：中文在前、数字在后，避免"三通50"和"50三通"产生不同结果
-    normalized_keyword = _normalize_chinese_number_order(keyword.strip())
-
-    for kw in _expand_keyword_with_synonyms(normalized_keyword):
+    for kw in _expand_keyword_with_synonyms(keyword.strip()):
         norm_kw = _normalize(kw)
         chinese_tokens = _split_tokens(norm_kw)
         material_tokens = re.findall(r"pvc|ppr|pe|hdpe", norm_kw)
@@ -607,23 +571,10 @@ def search_fuzzy(
 
         for row_dict, score, _inch_hits in iter_rows:
             row_id = row_dict.get("code") or row_dict.get("matched_name")
-            if row_id not in results:
-                results[row_id] = (
-                    row_dict,
-                    score,
-                    {"weighted_score": score * hit_weight, "total_hw": hit_weight, "inch_hits": _inch_hits},
-                )
-            else:
-                old = results[row_id][2]
-                new_weighted_score = old["weighted_score"] + score * hit_weight
-                new_total_hw = old["total_hw"] + hit_weight
-                results[row_id] = (
-                    row_dict,
-                    new_weighted_score / new_total_hw if new_total_hw > 0 else 0.0,
-                    {"weighted_score": new_weighted_score, "total_hw": new_total_hw, "inch_hits": max(_inch_hits, old["inch_hits"])},
-                )
+            if row_id not in results or score > results[row_id][1]:
+                results[row_id] = (row_dict, score)
 
-    out = [(row_dict, score) for row_id, (row_dict, score, _) in results.items()]
+    out = list(results.values())
     out.sort(key=lambda x: x[1], reverse=True)
     return out
 

@@ -113,10 +113,49 @@ class InventoryConfig:
     RESOLVER_VECTOR_TOP_K: int = int(os.environ.get("INVENTORY_RESOLVER_VECTOR_TOP_K", "3"))
     RESOLVER_VECTOR_TOP_K_CANDIDATES: int = int(os.environ.get("INVENTORY_RESOLVER_VECTOR_TOP_K_CANDIDATES", "20"))
 
-    # ReAct Agent（思考→工具→观察）LLM 配置，与 quotation_tracker 同源：智谱优先
-    LLM_API_KEY: str = os.environ.get("ZHIPU_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
-    LLM_BASE_URL: str = os.environ.get("OPENAI_BASE_URL_ZHIPU") or os.environ.get("OPENAI_BASE_URL") or "https://open.bigmodel.cn/api/paas/v4"
-    LLM_MODEL: str = os.environ.get("LLM_MODEL", "glm-4-flash")
+    # 万鼎选型 / llm_selector：chat.completions。若模型名含 MiniMax，必须走 MiniMax OpenAI 兼容端，不可再用智谱 URL（否则 1211 模型不存在）。
+    # 显式覆盖：INVENTORY_LLM_BASE_URL / INVENTORY_LLM_API_KEY
+    _inv_llm_model_raw: str = os.environ.get("INVENTORY_LLM_MODEL") or os.environ.get("LLM_MODEL", "glm-4.5-air")
+    _inv_explicit_base: str = (os.environ.get("INVENTORY_LLM_BASE_URL") or "").strip().rstrip("/")
+    _inv_explicit_key: str = (os.environ.get("INVENTORY_LLM_API_KEY") or "").strip()
+    _inv_looks_minimax: bool = "minimax" in _inv_llm_model_raw.lower()
+
+    if _inv_explicit_base:
+        LLM_BASE_URL: str = _inv_explicit_base + "/"
+        LLM_API_KEY: str = (
+            _inv_explicit_key
+            or os.environ.get("MINIMAX_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("ZHIPU_API_KEY")
+            or ""
+        )
+    elif _inv_looks_minimax:
+        _mb = (os.environ.get("MINIMAX_BASE_URL") or "").strip().rstrip("/")
+        _ob = (os.environ.get("OPENAI_BASE_URL") or "").strip().rstrip("/")
+        if _mb:
+            LLM_BASE_URL = _mb + "/"
+        elif _ob and "bigmodel" not in _ob.lower():
+            LLM_BASE_URL = _ob + "/"
+        else:
+            LLM_BASE_URL = "https://api.minimaxi.com/v1/"
+        LLM_API_KEY = (
+            os.environ.get("MINIMAX_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("ZHIPU_API_KEY")
+            or ""
+        )
+    else:
+        LLM_API_KEY = os.environ.get("ZHIPU_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+        LLM_BASE_URL = (
+            os.environ.get("OPENAI_BASE_URL_ZHIPU")
+            or os.environ.get("OPENAI_BASE_URL")
+            or "https://open.bigmodel.cn/api/paas/v4"
+        )
+        if LLM_BASE_URL and not LLM_BASE_URL.endswith("/"):
+            LLM_BASE_URL = LLM_BASE_URL + "/"
+
+    # 与主后端 Config.LLM_MODEL 解耦：优先 INVENTORY_LLM_MODEL，否则沿用全局 LLM_MODEL
+    LLM_MODEL: str = _inv_llm_model_raw
     LLM_MAX_TOKENS: int = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
     TOOL_RESULT_MAX_CHARS: int = int(os.environ.get("TOOL_RESULT_MAX_CHARS", "8000"))
     LLM_TIMEOUT: int = int(os.environ.get("LLM_TIMEOUT", "60"))
@@ -128,12 +167,6 @@ class InventoryConfig:
     # - WORK_MATCH_MAX_WORKERS: Work 匹配阶段每文件并行行数上限（默认 5）
     WORK_SINGLE_CAND_USE_LLM: bool = os.environ.get("WORK_SINGLE_CAND_USE_LLM", "0").strip().lower() in ("1", "true", "yes")
     WORK_MATCH_MAX_WORKERS: int = int(os.environ.get("WORK_MATCH_MAX_WORKERS", "5"))
-
-    # 万鼎模糊匹配阈值
-    # INVENTORY_MIN_SCORE: 万鼎模糊匹配最低分数阈值，低于此值视为整体未命中（默认 0.0=不启用）
-    INVENTORY_MIN_SCORE: float = float(os.environ.get("INVENTORY_MIN_SCORE", "0"))
-    # INVENTORY_MIN_SCORE_GAP: 万鼎模糊匹配分数差阈值，top1-top2 >= 此值时仅返回 top1（默认 0.0=不启用）
-    INVENTORY_MIN_SCORE_GAP: float = float(os.environ.get("INVENTORY_MIN_SCORE_GAP", "0"))
 
 
 # 全局配置实例

@@ -27,15 +27,21 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **「全部价格」「各档价格」**：对同一 keywords 按需分别调用 match_wanding_price(customer_level=…)，汇总成表格「客户级别 | 客户价」。**档位与自然语言对应**：用户说「**二级代理**」「二级代理价格」→ customer_level=A；「**一级代理**」→ B；「**聚万大客户**」→ C；「**青山大客户**」「青山大客户价格」→ D（降低利润率用 D_low）；「**大唐大客户**」→ E。**出厂/采购价**：用户要「出厂价含税」「出厂价不含税」「采购不含税」时传 customer_level=FACTORY_INC_TAX / FACTORY_EXC_TAX / PURCHASE_EXC_TAX。档位代码：A/B/C/D/D_LOW/E 及 FACTORY_INC_TAX/FACTORY_EXC_TAX/PURCHASE_EXC_TAX。**只调一次会只得到默认 B 档。**
 - **回复用户时档位一律用全名**：出厂价_含税、出厂价_不含税、采购不含税；（二级代理）A级别 利润率/报单价格；（一级代理）B级别 利润率/报单价格；（聚万大客户）C级别 利润率/报单价格；（青山大客户）D级别 利润率/报单价格/降低利润率；（大唐大客户）E级别（包运费） 利润率/报单价格。表格列名或文中提到价格档位时写上述全名，不要只写 A类/B类。
 - **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。
-- **展示**：结果表上方必写「匹配来源：」+ match_source；表格**必须包含「产品编号(code)」列**；候选含 source 时表格加「来源」列；有 chosen 时标「已选：第 N 条」；select_wanding_match 须传入上步 match_source。"""
+- **低置信度 options（match_quotation 内置选型）**：若 observation 含 `needs_selection: true` 且 `low_confidence_options: true` 与精简 `options`（通常 2～3 条，各有 reasoning），表示 LLM 无法单选、仅列出最可能项 —— **优先用 `options` 做表格回复（含 code、单价、理由、来源）**，**不要**改回把 `candidates` 全表当作主结果；用户明确要求「看全部候选」时再展示完整 candidates。
+- **展示**：结果表上方必写「匹配来源：」+ match_source；表格**必须包含「产品编号(code)」列**；候选含 source 时表格加「来源」列；有 chosen 时标「已选：第 N 条」；select_wanding_match 须传入上步 match_source。
+- **产品编号不得伪造成「—」（重要）**：只要 observation 里 `chosen.code`、顶层 `table_product_code` 或某行候选的 `code` 为非空字符串，表格「产品编号(code)」**必须逐字照抄**（含 10 位数字）；**禁止**用「—」或留空。仅当 JSON 中该项确实无 code（例如部分历史仅有名称）时才可用「—」。
+- **unmatched + llm_rejected 时**：工具返回含 `unmatched: true` 且 `llm_rejected: true`（表示 LLM 判定无真正匹配）时，**禁止**展示全部 candidates 列表让用户再挑；应告知用户「未找到合适匹配，可尝试调整产品名称/规格，或登记无货」。"""
 
-GLOBAL_HARD_CONSTRAINTS_RULES = """\
+# 跨技能唯一硬约束（DOC / RULES 共用，避免与报价单/Excel 段重复长述）
+GLOBAL_HARD_CONSTRAINTS = """\
 GLOBAL HARD CONSTRAINTS (CROSS-SKILL)
 
 - NEVER treat any Excel `Qty` / `数量` field as inventory; inventory MUST always come only from inventory tools
   (`get_inventory_by_code` / `get_inventory_by_code_batch` / `search_inventory` and related inventory services),
   NOT from any Excel quantity or quotation sheet column.
 """
+
+GLOBAL_HARD_CONSTRAINTS_RULES = GLOBAL_HARD_CONSTRAINTS  # 别名，兼容旧引用
 
 
 SKILL_INVENTORY_PRICE_RULES = """\
@@ -84,6 +90,10 @@ INVENTORY & PRICE DECISION RULES
   THEN you MUST explain that no good match was found and MAY ask the user for a clearer product name/spec or code, instead of fabricating codes or products.
 - IF the intent remains unclear between inventory vs price even after one clarification,
   THEN you MUST ask_clarification again with a more concrete question, rather than assuming.
+- IF the tool returns `{unmatched: true, llm_rejected: true}` (LLM explicitly rejected all candidates, index: 0),
+  THEN you MUST tell the user "未找到合适匹配" and suggest trying a different product name/spec or registering as out-of-stock — you MUST NOT show the full candidates list for manual picking.
+- IF `match_quotation` returns `needs_selection: true` AND `low_confidence_options: true` with a short `options` list (from built-in LLM selection, not confident),
+  THEN you MUST present **only** that `options` table (code, unit_price, reasoning per row, source) as the primary reply — you MUST NOT replace it with the full `candidates` table unless the user explicitly asks to see all candidates.
 
 [Batch Handling Rules]
 - IF the user provides **多个编号或多个产品** and explicitly asks to check inventory or price for all of them,
@@ -124,6 +134,7 @@ INVENTORY & PRICE DECISION RULES
 - WHEN you call match_wanding_price only once, you will ONLY get the default B-level price; call multiple times with different levels when the user asks for all levels.
 
 [Output & Formatting Rules]
+- `match_quotation` / `select_wanding_match` 返回的 `selection_reasoning` / `reasoning` 是工具 JSON 中的 structured 数据（LLM 推理理由），**由 UI 直接渲染**，模型不需要在 think 里复述。
 - In the final reply, you MUST always use the full Chinese names for price levels:
   - 出厂价_含税、出厂价_不含税、采购不含税；
   - （二级代理）A级别 利润率/报单价格；
@@ -136,6 +147,8 @@ INVENTORY & PRICE DECISION RULES
   - Include a 「来源」 column when the candidate has a source (历史报价/字段匹配/共同);
   - Write 「匹配来源：{match_source}」 above the table;
   - Mark 「已选：第 N 条」 when there is a chosen candidate.
+- IF the tool JSON has a non-empty `chosen.code` OR top-level `table_product_code` OR a non-empty candidate `code`,
+  THEN you MUST copy that exact code string into the table column 「产品编号(code)」; you MUST NOT use 「—」 or leave it blank for that row (only use 「—」 when the JSON field is actually missing or empty).
 
 [Examples]
 - Examples above are colocated with the corresponding rules（中文库存链路、关键词保护等）；本节仅作补充场景回顾：
@@ -201,7 +214,7 @@ SKILL_QUOTE_DOC = """\
 - **edit_excel(file_path, edits, ...)**：普适编辑任意 Excel（cell+value 或 range+values）。
 - **规则**：同一 `file_path` 在同一轮内只调用一次 parse_excel_smart；若返回中含「已截断」，请直接基于已有内容回答，勿再次调用解析工具。
 - **字段语义规则**：
-  - 报价单里的 `Qty` 是「询价数量/采购数量」，**不是库存**；库存只能来自库存工具（`get_inventory_by_code` / `search_inventory`）。
+  - 报价单里的 `Qty` 是「询价数量/采购数量」；**不得当作实时库存**（见上文 **GLOBAL HARD CONSTRAINTS**）。
   - 用户要求「提取 Excel 数据/商品信息」时，**回复中的表格必须与工具返回的表逐行一致**：照抄全部行、不得只列部分、不得把同一行重复多遍凑行数、不得自行编造行。若篇幅所限只能展示部分，须明确写「仅展示前 N 行，共 M 行」。**不得在表格单元格内填写「数据被截断」等占位符**；仅当工具返回明确含「已截断」提示时，方可在回复末尾用一句话说明「部分内容因长度被截断」，且不得在具体单元格内填「数据被截断」。
   - **CRITICAL - Excel 数据展示规则**：`parse_excel_smart` 返回「共 N 行」时，表示已成功读取 N 行数据（包含表头）；返回的 Markdown 表格第一行是列编号（如 `| 1 | 2 | 3 | 4 |`），第二行是表头，第三行开始是实际数据。**严禁**在 Verify 阶段声称「只有表头」「没有数据行」「似乎为空」或任何误导性判断。**必须**完整展示工具返回的所有数据行，并在回复中明确说明「共 N 行数据」。
 - **何时用**：用户要「提取报价数据」「看报价单内容」「填表」「解析/编辑这个 Excel」且 context 有 file_path 时用；**整单询价填充**用下面的 run_quotation_fill。"""
@@ -273,6 +286,7 @@ FILL DECISION RULES (WORK PIPELINE)
 # Chat 仅保留普适 Excel，不包含报价单流水线；整单相关引导至 Work
 SKILL_EXCEL_CHAT_DOC = """\
 **3. Excel（普适，Chat）**
+- **Qty/数量列 ≠ 库存**：见文档首段 **GLOBAL HARD CONSTRAINTS**（库存仅以库存工具为准）。
 - **parse_excel_smart(file_path, sheet_name?, max_rows?)**：解析任意 Excel，返回 Markdown 表（只读查看）。若用户要实际填表/批量修改，应引导到 Work 页或使用后端 API，而不是在 Chat 中用复杂编辑工具。
 - 回复时**必须与工具返回的表逐行一致**：照抄全部行、不得只列部分、不得把同一行重复多遍凑数、不得编造行。**不得在单元格内填写「数据被截断」**；仅当工具明确提示已截断时，可在回复末尾用一句话说明，勿在单元格内写「数据被截断」。若返回中含「已截断」，请基于已有内容回答，勿再次调用解析工具。
 - **CRITICAL - Excel 数据展示规则**：`parse_excel_smart` 返回「共 N 行」时，表示已成功读取 N 行数据（包含表头）；返回的 Markdown 表格第一行是列编号（如 `| 1 | 2 | 3 | 4 |`），第二行是表头，第三行开始是实际数据。**严禁**在 Verify 阶段声称「只有表头」「没有数据行」「似乎为空」或任何误导性判断。**必须**完整展示工具返回的所有数据行，并在回复中明确说明「共 N 行数据」。
@@ -339,7 +353,7 @@ CLARIFY DECISION RULES
 SKILL_KNOWLEDGE_DOC = """\
 **6. 业务知识记录**
 - **append_business_knowledge(content)**：当用户要求将某条知识、规则、纠正**记录到知识库 / 记在 knowledge / 润色后记录 / 把这个记下来**等（任意说法）时，**必须**调用本工具。content 为润色后的完整一条知识（可多句），如「PVC160 不是标准规格，应理解为 DN150(6")」。无需用户先说「请记住」；用户说「记录在 knowledge 里面」「可以润色一下记到知识库」即调用。
-- **record_correction_to_knowledge(keywords, confirmed_code, confirmed_name, reasoning)**：当用户在 rework 流程中**确认了正确的报价选项**后（如用户说「不是这个，是第二个」「选 1」「第三个才对」），**必须**调用本工具将此次纠正记录到知识库。Agent 应自动调用，无需用户明确要求「记录」。"""
+- **What NOT to save（不要写入）**：可从代码或公开规格直接推得的常识；仅对当前会话有用、无长期复用价值的一句闲聊。"""
 
 SKILL_KNOWLEDGE_RULES = """\
 KNOWLEDGE RECORDING DECISION RULES
@@ -347,133 +361,45 @@ KNOWLEDGE RECORDING DECISION RULES
 [Routing & Priority Rules]
 - IF the user asks you to 「记住」「记录到知识库」「记在 knowledge 里」「润色后记录」「把这个记下来」 (any phrasing),
   THEN you MUST call append_business_knowledge(content) with a polished, complete single piece of knowledge.
-- IF the user has just **confirmed the correct quotation option** during a rework correction
-  (e.g. user says 「不是这个，是第二个」「选 1」「第三个才对」 after seeing candidate options),
-  THEN you MUST call record_correction_to_knowledge(keywords, confirmed_code, confirmed_name, reasoning).
 
 [Hard Constraints — MUST FOLLOW]
 - The `content` you pass to append_business_knowledge MUST be a cleaned-up, self-contained knowledge statement (one or several sentences), not raw, noisy chat fragments.
 - DO NOT record casual remarks or off-topic small talk as business knowledge unless the user explicitly requests it to be recorded.
-- For record_correction_to_knowledge, pass the original keywords, the confirmed product code and name, and any reasoning the user gave.
+
+[What NOT to save]
+- Don't save facts derivable from code or public specs alone (no long-term value as "knowledge").
+- Don't save ephemeral one-liners that only make sense in the current chat turn.
 
 [Examples]
 - Correct: 用户说「PVC160 不是标准规格，应该理解成 DN150(6\")，帮我记到知识库」 -> you rewrite to a clean sentence and call append_business_knowledge with that sentence.
 - Incorrect: 用户只是随口说「这客户好难搞」时就调用 append_business_knowledge 记录 ❌.
-- Correct: 用户在候选列表中回复「第三个」-> call record_correction_to_knowledge(keywords="直接50", confirmed_code="THIRD_CODE", confirmed_name="第三个产品名", reasoning="用户选择了第三个").
 """
 
-# 旧版输出格式（回退用）
-OUTPUT_FORMAT_LEGACY = """\
-## 输出格式（每轮必须）
+# 极简回退格式：`USE_CLAUDE_LOOP_PROMPT=False` 时注入。去掉强制四段式，聚焦工具调用与结果展示，减少 150–300 tokens/call。
+# Tool 调用与全局规则（LEGACY 与 Loop 轨共用，DRY）——语义与改版前一致，仅合并避免重复。
+_TOOL_CALL_GLOBAL_RULES_BLOCK = "**Tool Call Global Rules（全局约束）**:\n- ONE step = ONE tool call（每一轮推理至多调用一个工具）\n- `name` 必须精确匹配工具名（区分大小写）\n- `arguments` 必须是 JSON 对象，包含所有必需字段\n- Don't fabricate arguments（never invent）: 参数值须来自用户输入或已有 observation，不得臆造。\n- Don't abuse tools（needless calls）: 若本可用自然语言直接作答，则不要为调用而调用工具。\n\n**Tool Decision Rules（何时必须/禁止调用工具）**:\n- You MUST call a tool when:\n  - The user请求的是**外部数据**或系统状态（如库存、价格/利润率、Excel 内容或结构、无货/缺货列表与统计等），且\n  - 所需信息在当前对话上下文与最近 observation 中尚未完整可用。\n- You MUST NOT call a tool when:\n  - 答案可以直接基于现有对话上下文与最近工具结果推理得出（如对刚刚展示过的表格做解释、总结或简单计算），或\n  - 用户的问题仅是解释、推理、总结、对比现有结果，而不是请求新的外部数据。\n\n**批量与多行规则**:\n- **涉及多个同类项**（如多行、多编号）时，优先使用批量类工具（*_batch），减少单轮步数\n\n**多轮指代**:\n- 用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）\n- 用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_quotation 或 match_wanding_price，勿用用户本句的简称或错字\n\n**格式灵活性**:\n- 首轮无 observation 时 Verify 部分可简写或略写（见上文 Verify 长度上限）\n- 允许模型在上述框架内灵活组织思考内容，不要求逐条完整罗列示例中的所有小点"
 
-1. 先输出 <think>...</think>
-   - 目标 / 已知 / 缺失 / 本步行动（调用哪类工具或直接回答）。
-2. 若调用工具：紧接 tool_call；工具结果返回后，若目标已完成则直接输出最终回答（无需再调工具）；否则继续下一轮工具调用。
-3. 若不调用工具（如打招呼、能力外）：在 <think> 后直接给出最终回答。
-4. **涉及多个同类项**（如多行、多编号）时，优先使用批量类工具（*_batch），减少单轮步数。
+# Loop 四段式思考外壳（仅 USE_CLAUDE_LOOP_PROMPT=True 时注入）；末段与 _TOOL_CALL_GLOBAL_RULES_BLOCK 拼接。
+_OUTPUT_FORMAT_LOOP_BODY = '## 输出格式（Claude Agent Loop 规范）\n\n每轮推理按以下四段式结构输出 <think> 块，并在需要调用工具时按约定输出 JSON `tool_call`:\n\n<think>\n\n### 1. Plan\n- **Don\'t** 在本节写与本轮工具无关的长背景；只保留可执行决策所需最少信息。\n你 MUST 以半结构化方式输出本轮计划，使用如下字段：\n- User Goal: （用一句话概括当前轮要达成的业务目标）\n- Intent Type: （inventory | price | excel | clarify | knowledge 等，按主要意图二选一/三选一）\n- Relevant Skills: （列出将要用到的技能簇，如 Inventory / Excel Chat / Clarify / Knowledge）\n- Planned Tool Chain: （按顺序写出计划使用的工具链路，例如 `match_quotation → get_inventory_by_code` 或 `parse_excel_smart`）\n\n示例：\n- User Goal: 查 50 三通 库存\n- Intent Type: inventory\n- Relevant Skills: Inventory\n- Planned Tool Chain: match_quotation → get_inventory_by_code\n\n### 2. Gather Context\n梳理当前已知信息，例如：\n- 用户意图与关键约束（如「用万鼎查」「不要历史」「只看 Excel」）\n- 会话上下文与最近几轮对话中的关键信息\n- 已有的工具返回结果（observation）中可复用的部分\n- 仍然缺失的信息\n\n**Gather 长度上限**：本小节用 bullet 列出，**总条数 ≤6**；每条 **≤1 句**。不要堆砌与本轮决策无关的历史。\n\n### 3. Act\n决定本轮的具体行动：\n- 直接用自然语言回答，或\n- 向用户发出澄清问题，或\n- **调用一个工具**\n\n如果本轮决定调用工具，你 MUST:\n- 先用自然语言简要说明要调用哪个工具以及原因\n- 紧接着输出一个用 `<tool_call>...</tool_call>` 包裹的 JSON，对应唯一一次工具调用，格式为：\n\n<tool_call>\n{\n  "name": "<tool_name>",\n  "arguments": {\n    ... 工具入参，必须是 JSON 对象 ...\n  }\n}\n</tool_call>\n\n约束：\n- `name` 字段必须与后端注册的工具名完全一致\n- `arguments` 必须是 JSON 对象，字段与工具 schema 一一对应\n- **ONE step = ONE tool call**：每轮最多输出一个 `<tool_call>...</tool_call>` 块\n- 不要在 JSON 内加入注释或自然语言解释，相关说明写在 JSON 外面\n- 若本轮不调用工具，则完全省略 `<tool_call>` 部分\n\n### 4. Verify Results\n如果上一轮有工具返回结果(observation)，你需要检查：\n- 是否已经获得完成当前目标所需的关键信息\n- 是否还需要继续调用工具（进入下一轮 Plan/Gather/Act/Verify）\n- 还是可以直接向用户给出最终回答\n\n**Verify 长度上限**：有 observation 时，上述检查 **≤6 条 bullet**；首轮无 observation 时可仅 **1 句** 或省略要点。\n\n在 Verify 阶段，你还 MUST 按以下失败恢复规则处理工具异常或数据缺失场景：\n\n**Failure Handling Rules（失败恢复 — 合并否定约束）**:\n- Don\'t（fabrication + premature conclusion）: 不得将**未出现在本轮或最近轮 tool observation、且未由用户原话明确给出**的内容当作事实；不得在无有效 observation、或工具返回空/低质量结果时，输出**最终业务结论**（如具体库存数、单价、物料编号、Excel 数据行）。会话摘要与纯推理只能作线索，**不能替代** observation 中的数值与文本。\n- When tools fail or data is missing, you MUST either: (1) ask the user for clarification（更清晰的产品名/规格/code 或确认意图），OR (2) try an alternative tool path when Decision Rules 中有明确备选路径（例如 match_quotation 无结果时说明无匹配并提示万鼎/更精准关键词）。\n- IF a tool call fails due to invalid or missing arguments（必填缺失、类型错误），THEN you SHOULD 先在 Verify/Plan 中修正参数或向用户说明问题，再重试，不要基于错误 observation 继续推理。\n\n</think>'
 
-**多轮指代**：用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）。用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_quotation 或 match_wanding_price，勿用用户本句的简称或错字。"""
+# 极简回退正文（intro + 共用全局规则，与 agent_helpers._CORE_OUTPUT_FORMAT 同构）
+_OUTPUT_FORMAT_LEGACY_INTRO = '## 输出格式（极简回退用）\n\n- **think 可省略**（不需要完整 Plan/Gather/Act/Verify 四段）；若需写出思考内容，须使用成对标签 <think> 与 </think> 包裹简短记录（与 CoreAgent `_extract_thinking_block` 一致，兼容 think 标签）。\n- **有工具要调**：直接写 `<tool_call>{"name":"<tool_name>","arguments":{...}}</tool_call>`，无需先写自然语言决策。\n- **工具返回后**：直接展示结果（list 或 chosen 结构），不需要额外解释或复述 reasoning。\n- **reasoning 字段**：`match_quotation` / `select_wanding_match` 返回的 `selection_reasoning` / `reasoning` 是工具 JSON 中的 structured 数据（LLM 推理理由），**由 UI 直接渲染**，模型不需要在 think 里复述。\n'
 
-OUTPUT_FORMAT = """\
-## 输出格式（Claude Agent Loop 规范）
+_RESPONSE_STYLE_CONSTRAINTS = """\
+**Response Style Rules（回答风格）**:
+- Keep replies concise; prefer short lines over long paragraphs.
+- Use line-by-line output for lists/tables/results; avoid large narrative blocks.
+- Don't repeat tool JSON in natural language unless the user asks for detail.
+- When using <redacted_thinking>, put Plan/Gather/Act/Verify ONLY inside that block; after </redacted_thinking> output only the user-facing title + table + at most one short note (no duplicate Verify section).
+- Don't prefix the user-visible reply with `Reasoning:` / `Plan:` / free-form chain-of-thought; if you must reason in prose, keep it inside <think> only."""
 
-每轮推理按以下四段式结构输出 <think> 块，并在需要调用工具时按约定输出 JSON `tool_call`:
+OUTPUT_FORMAT_LEGACY = _OUTPUT_FORMAT_LEGACY_INTRO + "\n\n" + _TOOL_CALL_GLOBAL_RULES_BLOCK + "\n\n" + _RESPONSE_STYLE_CONSTRAINTS
 
-<think>
-
-### 1. Plan
-你 MUST 以半结构化方式输出本轮计划，使用如下字段：
-- User Goal: （用一句话概括当前轮要达成的业务目标）
-- Intent Type: （inventory | price | excel | clarify | knowledge 等，按主要意图二选一/三选一）
-- Relevant Skills: （列出将要用到的技能簇，如 Inventory / Excel Chat / Clarify / Knowledge）
-- Planned Tool Chain: （按顺序写出计划使用的工具链路，例如 `match_quotation → get_inventory_by_code` 或 `parse_excel_smart`）
-
-示例：
-- User Goal: 查 50 三通 库存
-- Intent Type: inventory
-- Relevant Skills: Inventory
-- Planned Tool Chain: match_quotation → get_inventory_by_code
-
-### 2. Gather Context
-梳理当前已知信息，例如：
-- 用户意图与关键约束（如「用万鼎查」「不要历史」「只看 Excel」）
-- 会话上下文与最近几轮对话中的关键信息
-- 已有的工具返回结果（observation）中可复用的部分
-- 仍然缺失的信息
-
-### 3. Act
-决定本轮的具体行动：
-- 直接用自然语言回答，或
-- 向用户发出澄清问题，或
-- **调用一个工具**
-
-如果本轮决定调用工具，你 MUST:
-- 先用自然语言简要说明要调用哪个工具以及原因
-- 紧接着输出一个用 `<tool_call>...</tool_call>` 包裹的 JSON，对应唯一一次工具调用，格式为：
-
-<tool_call>
-{
-  "name": "<tool_name>",
-  "arguments": {
-    ... 工具入参，必须是 JSON 对象 ...
-  }
-}
-</tool_call>
-
-约束：
-- `name` 字段必须与后端注册的工具名完全一致
-- `arguments` 必须是 JSON 对象，字段与工具 schema 一一对应
-- **ONE step = ONE tool call**：每轮最多输出一个 `<tool_call>...</tool_call>` 块
-- 不要在 JSON 内加入注释或自然语言解释，相关说明写在 JSON 外面
-- 若本轮不调用工具，则完全省略 `<tool_call>` 部分
-
-### 4. Verify Results
-如果上一轮有工具返回结果(observation)，你需要检查：
-- 是否已经获得完成当前目标所需的关键信息
-- 是否还需要继续调用工具（进入下一轮 Plan/Gather/Act/Verify）
-- 还是可以直接向用户给出最终回答
-
-在 Verify 阶段，你还 MUST 按以下失败恢复规则处理工具异常或数据缺失场景：
-
-**Failure Handling Rules（失败恢复规则）**:
-- IF a tool returns no results or only clearly low-quality / irrelevant results,
-  - THEN you MUST NOT fabricate任何产品、编码、库存数量、价格或 Excel 行内容；
-  - AND you MUST either:
-    - Ask the user for clarification（例如要求更清晰的产品名/规格/code 或确认意图），OR
-    - Try an alternative tool path WHEN there is a clearly defined alternative in the Decision Rules（例如 match_quotation 无结果时，说明无匹配并视情况提示用户改用万鼎字段匹配或提供更精准关键词）。
-- IF a tool call fails due to invalid or missing arguments（例如必填参数缺失、明显错误的类型），
-  - THEN you SHOULD先在 Verify/Plan 中修正参数或向用户说明问题来源，再重试工具调用，而不是继续基于错误 observation 推理。
-
-</think>
-
-**Tool Call Global Rules（全局约束）**:
-- ONE step = ONE tool call（每一轮推理至多调用一个工具）
-- `name` 必须精确匹配工具名（区分大小写）
-- `arguments` 必须是 JSON 对象，包含所有必需字段
-- NEVER 臆造不存在于用户输入或历史 observation 中的参数值
-- NEVER 在可以直接用自然语言回答时滥用工具调用
-
-**Tool Decision Rules（何时必须/禁止调用工具）**:
-- You MUST call a tool when:
-  - The user请求的是**外部数据**或系统状态（如库存、价格/利润率、Excel 内容或结构、无货/缺货列表与统计等），且
-  - 所需信息在当前对话上下文与最近 observation 中尚未完整可用。
-- You MUST NOT call a tool when:
-  - 答案可以直接基于现有对话上下文与最近工具结果推理得出（如对刚刚展示过的表格做解释、总结或简单计算），或
-  - 用户的问题仅是解释、推理、总结、对比现有结果，而不是请求新的外部数据。
-
-**批量与多行规则**:
-- **涉及多个同类项**（如多行、多编号）时，优先使用批量类工具（*_batch），减少单轮步数
-
-**多轮指代**:
-- 用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）
-- 用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_quotation 或 match_wanding_price，勿用用户本句的简称或错字
-
-**格式灵活性**:
-- 首轮无 observation 时 Verify 部分可简写或略写
-- 允许模型在上述框架内灵活组织思考内容，不要求逐条完整罗列示例中的所有小点"""
+OUTPUT_FORMAT = _OUTPUT_FORMAT_LOOP_BODY + "\n\n" + _TOOL_CALL_GLOBAL_RULES_BLOCK + "\n\n" + _RESPONSE_STYLE_CONSTRAINTS
 
 # 全量技能（含报价单流水线），供需要时复用（DOC/RULES 双版本）
 ALL_SKILL_PROMPT_DOC = "\n\n".join([
+    GLOBAL_HARD_CONSTRAINTS,
     SKILL_INVENTORY_PRICE_DOC,
     SKILL_OOS_DOC,
     SKILL_QUOTE_DOC,
@@ -483,7 +409,7 @@ ALL_SKILL_PROMPT_DOC = "\n\n".join([
 ])
 
 ALL_SKILL_PROMPT_RULES = "\n\n".join([
-    GLOBAL_HARD_CONSTRAINTS_RULES,
+    GLOBAL_HARD_CONSTRAINTS,
     SKILL_INVENTORY_PRICE_RULES,
     SKILL_OOS_RULES,
     SKILL_QUOTE_RULES,
@@ -497,6 +423,7 @@ ALL_SKILL_PROMPT = ALL_SKILL_PROMPT_DOC
 
 # Chat 用 Skill Prompt（DOC 版：说明文档式，RULES 版：Decision Rules 风格）
 CHAT_SKILL_PROMPT_DOC = "\n\n".join([
+    GLOBAL_HARD_CONSTRAINTS,
     SKILL_INVENTORY_PRICE_DOC,
     SKILL_EXCEL_CHAT_DOC,
     SKILL_CLARIFY_DOC,
@@ -504,7 +431,7 @@ CHAT_SKILL_PROMPT_DOC = "\n\n".join([
 ])
 
 CHAT_SKILL_PROMPT_RULES = "\n\n".join([
-    GLOBAL_HARD_CONSTRAINTS_RULES,
+    GLOBAL_HARD_CONSTRAINTS,
     SKILL_INVENTORY_PRICE_RULES,
     SKILL_EXCEL_CHAT_RULES,
     SKILL_CLARIFY_RULES,

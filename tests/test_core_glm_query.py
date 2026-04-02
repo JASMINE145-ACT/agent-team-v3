@@ -12,6 +12,8 @@
 
 说明：
 - 无 API Key 时自动 skip（不失败）。
+- Key/端点不匹配或已失效导致线上返回 401 时 skip（不失败），避免 CI/本地误配时整条用例红。
+- 当前主模型为 GLM-4.5-air（智谱）；fallback 为 gpt-4o-mini（OpenAI）。
 - CoreAgent 仍会间接依赖 backend.config、backend.agent.session；excel 摘要仅在带 file_path 时触发。
 """
 from __future__ import annotations
@@ -21,6 +23,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from typing import Awaitable, Callable
 
 _root = Path(__file__).resolve().parent.parent
 if str(_root) not in sys.path:
@@ -32,6 +35,26 @@ def _has_llm_credentials() -> bool:
 
     key = (getattr(Config, "OPENAI_API_KEY", None) or "").strip()
     return bool(key)
+
+
+def _run_react_test(async_main: Callable[[], Awaitable[None]]) -> None:
+    """执行异步用例；401 鉴权失败时 skip，其它异常照常抛出。"""
+    import openai
+
+    try:
+        asyncio.run(async_main())
+    except openai.AuthenticationError as e:
+        raise unittest.SkipTest(
+            "LLM 鉴权失败（401）：请核对 OPENAI_API_KEY / MINIMAX_API_KEY 与 "
+            "OPENAI_BASE_URL / MINIMAX_BASE_URL（MiniMax 兼容端一般为 …/v1/）。"
+        ) from e
+    except openai.APIStatusError as e:
+        if getattr(e, "status_code", None) == 401:
+            raise unittest.SkipTest(
+                "LLM 鉴权失败（401）：请核对 OPENAI_API_KEY / MINIMAX_API_KEY 与 "
+                "OPENAI_BASE_URL / MINIMAX_BASE_URL。"
+            ) from e
+        raise
 
 
 from backend.core.extension import AgentExtension, ExtensionContext
@@ -100,7 +123,7 @@ class TestCoreGLMQuery(unittest.TestCase):
             self.assertTrue(len(answer) > 0, f"answer 为空: {out!r}")
             self.assertIsNone(out.get("error"))
 
-        asyncio.run(_run())
+        _run_react_test(_run)
 
     def test_echo_tool_once(self) -> None:
         """有工具：模型应调用 core_test_echo，answer 或 trace 中应体现回显结果。"""
@@ -138,7 +161,7 @@ class TestCoreGLMQuery(unittest.TestCase):
             joined = answer + json.dumps(trace, ensure_ascii=False)
             self.assertIn("test-ok", joined, f"未在输出中找到 test-ok: answer={answer!r}")
 
-        asyncio.run(_run())
+        _run_react_test(_run)
 
 
 if __name__ == "__main__":

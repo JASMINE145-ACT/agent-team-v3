@@ -41,7 +41,7 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") or os.getenv("OPENAI_BASE_URL_ZHI
 LLM_API_KEY = os.getenv("ZHIPU_API_KEY") or os.getenv("OPENAI_API_KEY")  # 用智谱时填 ZHIPU_API_KEY
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # 兼容旧代码
 
-LLM_MODEL = os.getenv("LLM_MODEL", "glm-4.7")
+LLM_MODEL = os.getenv("LLM_MODEL", "glm-4.5-air")
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "5000"))
 # Agent 工具返回给模型的最大字符数；过小会导致 get_out_of_stock_records 只看到前 N 条无货行从而少落库（原 4000 约 36 条）
 TOOL_RESULT_MAX_CHARS = int(os.getenv("TOOL_RESULT_MAX_CHARS", "20000"))

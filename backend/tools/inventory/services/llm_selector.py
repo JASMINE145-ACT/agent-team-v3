@@ -39,7 +39,7 @@ _BUSINESS_KNOWLEDGE = """
    - 示例：「32*20内丝三通」= 主径 dn32、副径 20→1/2"，应选「内螺纹三通…dn32x1/2"」，不选 dn32x3/4"；「25*20」= dn25×1/2"，选 x1/2"。
    - 若关键词仅一个数（如「32弯头」无*20），则只按主径匹配，不推断副径。
 11. 【电工套管/印尼常用词】
-   - PIPA COUNDUIT / conduit / 电线管 / 穿线管：选「PVC电线管(B管)」管材（名称含电线管、B管、M/根），不选给水管件。
+   - PIPA ROUNDUIT / conduit / 电线管 / 穿线管：选「PVC电线管(B管)」管材（名称含电线管、B管、M/根），不选给水管件。
    - SOCKET：选「管直通(套筒)」电工套管配件（名称含管直通、套筒），规格与询价一致（如 Φ25）。
    - KLEM：选「管夹」电工套管配件（名称含管夹），规格与询价一致。
    - TDUST 4 cabang / 四通接线盒：选「管四通圆接线盒(带盖)」电工套管配件（名称含管四通圆接线盒），规格如 65x40/4/Φ25。
@@ -98,60 +98,6 @@ def invalidate_business_knowledge_cache() -> None:
     _business_knowledge_cache = {}
 
 
-def _load_relevant_corrections(keywords: str, max_examples: int = 3) -> str:
-    """
-    从 wanding_business_knowledge.md 的「## 用户纠正案例」章节中，
-    查找与当前 keywords 相似的历史纠正案例（few-shot），
-    以提升 LLM 在类似场景中直接选对的概率。
-    使用简单关键词重叠匹配，优先返回重叠最多的案例。
-    """
-    try:
-        from backend.tools.inventory.config import config as inv_config
-        path_str = getattr(inv_config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
-        if not path_str:
-            return ""
-        p = Path(path_str)
-        if not p.exists():
-            return ""
-        content = p.read_text(encoding="utf-8")
-    except Exception:
-        return ""
-
-    # 提取所有 ## 用户纠正案例 章节
-    import re
-    sections = re.split(r"(?=^## 用户纠正案例)", content, flags=re.MULTILINE)
-    kw_lower = keywords.lower()
-    scored: List[tuple[int, str]] = []
-
-    # 收集含关键词的案例
-    for section in sections:
-        if "## 用户纠正案例" not in section:
-            continue
-        section_lower = section.lower()
-        # 简单评分：统计 keywords 中的主要词在该章节出现次数
-        score = sum(1 for kw_word in kw_lower.split() if kw_word in section_lower)
-        if score > 0:
-            # 截取案例部分（去掉章节标题）
-            lines = section.splitlines()
-            example_lines = [l for l in lines if l.strip() and not l.startswith("#")]
-            example_text = "\n".join(example_lines).strip()
-            if example_text:
-                scored.append((score, example_text))
-
-    if not scored:
-        return ""
-
-    # 优先返回得分最高的案例
-    scored.sort(key=lambda x: -x[0])
-    selected = scored[:max_examples]
-    if not selected:
-        return ""
-
-    header = "\n【参考历史纠正案例】（以下案例已由报价员确认，请优先参考）\n"
-    examples_text = "\n".join(f"- {ex}" for _, ex in selected)
-    return header + examples_text + "\n"
-
-
 def llm_select_best(
     keywords: str,
     candidates: List[dict[str, Any]],
@@ -160,7 +106,7 @@ def llm_select_best(
     """
     从候选中选 1 个最佳匹配，或（无把握时）列出几个可能选项及理由。
     返回：
-    - 有把握选中：{code, matched_name, unit_price}
+    - 有把握选中：{code, matched_name, unit_price, reasoning}
     - 无匹配：None
     - 无把握：{"_suggestions": True, "options": [{code, matched_name, unit_price, reasoning}, ...]}
     """
@@ -174,7 +120,6 @@ def llm_select_best(
             max_tokens = 8192
 
     knowledge = _load_business_knowledge()
-    corrections = _load_relevant_corrections(keywords)
 
     lines = []
     for i, c in enumerate(candidates, 1):
@@ -189,7 +134,6 @@ def llm_select_best(
 {candidates_text}
 
 {knowledge}
-{corrections}
 
 请二选一（仅输出一个 JSON）：
 1) **有把握**选出一个最匹配的：用 "confident": true，并给出 "index"（序号 1-{len(candidates)}）和 "reasoning"。
@@ -203,32 +147,95 @@ def llm_select_best(
 无匹配/报无货时输出：{{"confident": true, "index": 0, "reasoning": "<为何无匹配>"}}
 """
 
+    _system_selector = (
+        "你是万鼎产品匹配专家。仅输出一个 JSON，reasoning 字段 **不得为空**，理由至少一句话（10字以上）。"
+        "有把握时 {\"confident\": true, \"index\": 序号或0, \"reasoning\": \"至少10字的具体理由\"}；"
+        "没有把握时 {\"confident\": false, \"options\": [{\"index\": 1, \"reasoning\": \"至少10字的理由\"}, ...]}。"
+        "当候选里没有一个真正匹配时，必须 index: 0 报无货，并在 reasoning 中写明原因。不要其他文字。"
+    )
+
     try:
         from backend.tools.inventory.config import config
-        from openai import OpenAI
 
-        api_key = getattr(config, "LLM_API_KEY", "") or ""
-        base_url = getattr(config, "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
-        model = getattr(config, "LLM_MODEL", "glm-4-flash")
+        content: str = ""
+        model = getattr(config, "LLM_MODEL", "glm-4.5-air")
         timeout = getattr(config, "LLM_TIMEOUT", 60)
+        mt = min(int(max_tokens or 8192), 8192)
 
-        client = OpenAI(api_key=api_key, base_url=base_url)
-        api_kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": "你是万鼎产品匹配专家。仅输出一个 JSON：有把握时 {\"confident\": true, \"index\": 序号或0, \"reasoning\": \"理由\"}；没有把握时 {\"confident\": false, \"options\": [{\"index\": 序号, \"reasoning\": \"理由\"}, ...]}。当候选里没有一个真正匹配时，必须 index: 0 报无货；报无货是重要环节，不要勉强选一个。不要其他文字。"},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0,
-            "max_tokens": max_tokens,
-            "timeout": timeout,
-        }
-        resp = client.chat.completions.create(**api_kwargs)
-        raw_content = resp.choices[0].message.content if resp.choices else None
-        content = (raw_content or "").strip()
+        use_anthropic = False
+        AppConfig: Any = None
+        try:
+            from backend.config import Config as AppConfig
+            use_anthropic = (
+                getattr(AppConfig, "PRIMARY_LLM_PROTOCOL", "") == "anthropic"
+                and (getattr(AppConfig, "ANTHROPIC_API_KEY", None) or "").strip()
+                and (getattr(AppConfig, "ANTHROPIC_BASE_URL", None) or "").strip()
+            )
+        except Exception:
+            AppConfig = None
+
+        if use_anthropic and AppConfig is not None:
+            # 与 CoreAgent 主链路一致：Anthropic Messages（MiniMax 官方兼容网关），避免 OpenAI 兼容层另一套域名/密钥导致 401
+            import anthropic as anthropic_sdk
+            from backend.core.anthropic_react_llm import call_anthropic_messages_sync
+
+            _ak = AppConfig.ANTHROPIC_API_KEY.strip()
+            _bu = AppConfig.ANTHROPIC_BASE_URL.strip().rstrip("/")
+            client = anthropic_sdk.Anthropic(api_key=_ak, base_url=_bu)
+            model = (getattr(AppConfig, "LLM_MODEL", None) or model).strip()
+            logger.info(
+                "llm_select_best: Anthropic SDK model=%s n_candidates=%d",
+                model,
+                len(candidates),
+            )
+            text, _, _, _ = call_anthropic_messages_sync(
+                client,
+                model,
+                [
+                    {"role": "system", "content": _system_selector},
+                    {"role": "user", "content": prompt},
+                ],
+                None,
+                temperature=0.0,
+                max_tokens=mt,
+            )
+            content = (text or "").strip()
+        else:
+            from openai import OpenAI
+
+            api_key = getattr(config, "LLM_API_KEY", "") or ""
+            base_url = getattr(config, "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
+            model = getattr(config, "LLM_MODEL", "glm-4.5-air")
+            logger.info(
+                "llm_select_best: OpenAI-compatible model=%s n_candidates=%d",
+                model,
+                len(candidates),
+            )
+            client = OpenAI(api_key=api_key, base_url=base_url)
+            api_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": _system_selector},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0,
+                "max_tokens": max_tokens,
+                "timeout": timeout,
+            }
+            resp = client.chat.completions.create(**api_kwargs)
+            raw_content = resp.choices[0].message.content if resp.choices else None
+            content = (raw_content or "").strip()
+            if not content:
+                fr = getattr(resp.choices[0], "finish_reason", None) if resp.choices else None
+                logger.warning(
+                    "LLM 返回空内容，raw=%s finish_reason=%s%s",
+                    raw_content,
+                    fr,
+                    "（输出被截断，可增大 LLM_MAX_TOKENS 后重试）" if fr == "length" else "",
+                )
+                raise ValueError("LLM 返回空内容")
+
         if not content:
-            fr = getattr(resp.choices[0], "finish_reason", None) if resp.choices else None
-            logger.warning("LLM 返回空内容，raw=%s finish_reason=%s%s", raw_content, fr, "（输出被截断，可增大 LLM_MAX_TOKENS 后重试）" if fr == "length" else "")
             raise ValueError("LLM 返回空内容")
 
         content = content.strip()
@@ -264,7 +271,7 @@ def llm_select_best(
             if idx > len(candidates):
                 # LLM 返回 index 越界时不再隐式回退第一候选，而是走规则兜底并打上标记，交由上层按低置信度处理
                 return _rule_based_fallback(keywords, candidates, reason="llm_index_out_of_range")
-            return _candidate_to_result(candidates[idx - 1])
+            return _candidate_to_result(candidates[idx - 1], obj.get("reasoning", ""))
 
         # 无把握：返回若干可能选项 + reasoning
         options = obj.get("options") or []
@@ -294,12 +301,13 @@ def llm_select_best(
         return _rule_based_fallback(keywords, candidates, reason="llm_error")
 
 
-def _candidate_to_result(c: dict[str, Any]) -> dict[str, Any]:
-    """单条候选转为 {code, matched_name, unit_price}。"""
+def _candidate_to_result(c: dict[str, Any], reasoning: str = "") -> dict[str, Any]:
+    """单条候选转为 {code, matched_name, unit_price, reasoning}。"""
     return {
         "code": (c.get("code") or "").strip(),
         "matched_name": (c.get("matched_name") or "")[:200],
         "unit_price": float(c.get("unit_price", 0) or 0),
+        "reasoning": reasoning,
     }
 
 
@@ -336,6 +344,7 @@ def _rule_based_fallback(
         "code": (c.get("code") or "").strip(),
         "matched_name": (c.get("matched_name") or "")[:200],
         "unit_price": float(c.get("unit_price", 0) or 0),
+        "reasoning": f"[规则兜底] {reason}",
         "_selection_meta": {
             "from_rule_fallback": True,
             "reason": reason,

@@ -66,12 +66,12 @@ def text_to_inquiry_items(
         from backend.config import Config
         _api_key = api_key or getattr(Config, "OPENAI_API_KEY", None)
         _base_url = base_url or getattr(Config, "OPENAI_BASE_URL", None) or ""
-        _model = model or getattr(Config, "LLM_MODEL", "glm-4-flash")
+        _model = model or getattr(Config, "LLM_MODEL", "glm-4.5-air")
         _max_tokens = getattr(Config, "LLM_MAX_TOKENS", 5000)
     except Exception:
         _api_key = api_key
         _base_url = base_url or ""
-        _model = model or "gpt-4o-mini"
+        _model = model or "glm-4.5-air"
         _max_tokens = 2000
 
     if not _api_key:

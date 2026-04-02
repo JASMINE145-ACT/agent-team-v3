@@ -164,8 +164,6 @@ def main():
 
     try:
         agent = SingleAgent(
-            api_key=Config.OPENAI_API_KEY,
-            base_url=Config.OPENAI_BASE_URL,
             model=Config.LLM_MODEL,
         )
     except Exception as e:

@@ -1,9 +1,7 @@
 """
-验证当前使用的 LLM 为 GLM-4.7（智谱）
-运行方式：在 quotation_tracker 目录下执行
-  python -m tests.test_glm_model
-或
-  cd quotation_tracker && python -m tests.test_glm_model
+验证当前使用的 LLM 为智谱 GLM 系列（默认 glm-4.5-air，与主仓库 fallback 对齐）
+运行方式：在 oos 包上级执行
+  python -m backend.tools.oos.tests.test_glm_model
 """
 import sys
 from pathlib import Path
@@ -19,18 +17,21 @@ def main():
     from services.llm_parser import LLMParser
 
     print("=" * 50)
-    print("LLM 配置检查（期望使用 GLM-4.7）")
+    print("LLM 配置检查（期望使用 glm-4.5-air 或 glm-4 系列）")
     print("=" * 50)
     print(f"  LLM_MODEL (config): {LLM_MODEL}")
     print(f"  OPENAI_BASE_URL:    {OPENAI_BASE_URL or '(未设置，使用 OpenAI 默认)'}")
     print(f"  LLM_API_KEY 已设置: {bool(LLM_API_KEY)}")
     print()
 
-    # 期望使用 glm-4.7
-    assert LLM_MODEL.strip().lower() in ("glm-4.7", "glm-4"), (
-        f"当前 LLM_MODEL 为 {LLM_MODEL}，期望 glm-4.7 或 glm-4"
+    assert LLM_MODEL.strip().lower() in (
+        "glm-4.5-air",
+        "glm-4.7",
+        "glm-4",
+    ), (
+        f"当前 LLM_MODEL 为 {LLM_MODEL}，期望 glm-4.5-air / glm-4.7 / glm-4"
     )
-    print("[OK] LLM_MODEL 为 GLM-4.7 / GLM-4")
+    print("[OK] LLM_MODEL 为智谱 GLM 系列")
 
     parser = LLMParser()
     print(f"  LLMParser.model:     {parser.model}")

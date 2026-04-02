@@ -311,7 +311,7 @@ function renderGroupedMessage(
     return html`${toolCards.map((card) => renderToolCardSidebar(card, onOpenSidebar))}`;
   }
 
-  if (!markdown && !hasToolCards && !hasImages && !hasFiles) {
+  if (!markdown && !reasoningMarkdown && !hasToolCards && !hasImages && !hasFiles) {
     return nothing;
   }
 

@@ -21,6 +21,21 @@ _resolver_failed = False
 _resolver_lock = threading.Lock()
 
 
+def _attach_table_code_hint(payload: dict[str, Any]) -> None:
+    """
+    在 single 结果顶层重复物料编号，降低主模型在 Markdown 表格里用「—」占位而丢失 code 的概率。
+    （最终表格由对话 LLM 生成，非后端渲染。）
+    """
+    if not payload.get("single"):
+        return
+    ch = payload.get("chosen")
+    if not isinstance(ch, dict):
+        return
+    code = str(ch.get("code", "") or "").strip()
+    if code:
+        payload["table_product_code"] = code
+
+
 def _get_table_agent():
     global _table_agent
     if _table_agent is None:
@@ -83,6 +98,7 @@ def _execute_match_by_quotation_history(arguments: dict[str, Any]) -> dict[str, 
         if len(norm) == 1:
             r = norm[0]
             payload = {"single": True, "candidates": norm, "chosen": r, "chosen_index": 1, "match_source": "历史报价"}
+            _attach_table_code_hint(payload)
             return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
         payload = {"needs_selection": True, "keywords": keywords, "candidates": norm, "match_source": "历史报价"}
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
@@ -93,19 +109,14 @@ def _execute_match_by_quotation_history(arguments: dict[str, Any]) -> dict[str, 
 
 def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
     """
-    询价匹配（只读，自动 LLM 选型）：
+    询价匹配（只读）：
     - 输入：keywords（中文产品名+规格）、可选 customer_level。
     - 行为：同时查报价历史与万鼎字段匹配，取并集并按 source（历史报价/字段匹配/共同）标记。
-      多候选时自动调用 llm_select_best 选型，无需 Agent 二次调用 select_wanding_match。
-    - 返回：
-      - 单候选：{ single, candidates, chosen, match_source }
-      - 多候选+LLM有把握：{ single, chosen, match_source, selection_note }
-      - 多候选+LLM无把握：{ needs_human_choice, keywords, options }
-      - 无匹配：{ unmatched, keywords }
+    - 返回：{ single | needs_selection | unmatched, candidates[], chosen?, match_source }，用于查 code/价格/档位。
+    - needs_selection + low_confidence_options：内置 LLM 无把握时返回精简 options（非整表强选）；unmatched+llm_rejected：LLM 判定 index 0 无匹配。
     """
     try:
         from backend.tools.inventory.services.match_and_inventory import match_quotation_union
-        from backend.tools.inventory.services.llm_selector import llm_select_best
 
         keywords = (arguments.get("keywords") or "").strip()
         if not keywords:
@@ -122,62 +133,77 @@ def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
         ]
         max_show = 15
         norm = norm[:max_show]
+        # 即使仅 1 条候选也走 llm_select_best：避免并集只命中「异径三通」等时直接当成 single，
+        # 使业务规则（如等径优于异径）可通过 index:0 / 低置信度 options 纠正。
+        from backend.tools.inventory.services.llm_selector import llm_select_best
 
-        # 单候选快路径：直接返回
-        if len(norm) == 1:
-            r = norm[0]
-            payload = {"single": True, "candidates": norm, "chosen": r, "chosen_index": 1, "match_source": r.get("source", "共同")}
-            return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
-
-        # 多候选：自动调用 LLM 选型
         sources_present = list({c.get("source") for c in norm if c.get("source")})
-        match_source_label = "、".join(sources_present) if sources_present else "共同"
+        match_source_str = "、".join(sources_present) if sources_present else "共同"
 
-        best = llm_select_best(keywords, norm)
-
-        if best is None:
-            # LLM 明确判定无匹配 → 按无货处理
-            return {"success": True, "result": json.dumps({"unmatched": True, "keywords": keywords}, ensure_ascii=False)}
-
-        if best.get("_suggestions"):
-            # LLM 无把握 → 将选择权交给用户
-            options = best.get("options", [])
-            for opt in options:
-                opt["source"] = match_source_label
+        try:
+            r = llm_select_best(keywords, norm)
+        except Exception as e:
+            logger.warning("llm_select_best 调用失败，降级为 needs_selection: %s", e)
             payload = {
-                "needs_human_choice": True,
+                "needs_selection": True,
+                "llm_error": True,
                 "keywords": keywords,
-                "options": options,
-                "match_source": match_source_label,
+                "candidates": norm,
+                "match_source": match_source_str,
+            }
+            return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
+        if r is None:
+            # llm_select_best 返回 None = LLM 判定"无候选真正匹配"（index: 0）
+            # → 改为 unmatched：告知用户无匹配，而不是让用户从 15 条里再挑
+            payload = {
+                "unmatched": True,
+                "llm_rejected": True,
+                "keywords": keywords,
+                "candidates": norm,
+                "match_source": match_source_str,
             }
             return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
 
-        # LLM 有把握：返回选中结果
-        chosen_code = (best.get("code") or "").strip()
-        chosen_name = (best.get("matched_name") or "")[:200]
-        chosen_price = float(best.get("unit_price", 0) or 0)
+        # LLM 无把握（confident: false）：返回精简 options，避免误当成 single 或丢选项
+        if r.get("_suggestions") and r.get("options"):
+            options = r.get("options") or []
+            by_code = {(c.get("code") or "").strip(): c for c in norm}
+            for opt in options:
+                if not isinstance(opt, dict):
+                    continue
+                oc = (opt.get("code") or "").strip()
+                src = (by_code.get(oc) or {}).get("source") or match_source_str
+                opt["source"] = src
+            payload = {
+                "needs_selection": True,
+                "low_confidence_options": True,
+                "keywords": keywords,
+                "options": options,
+                "candidates": norm,
+                "match_source": match_source_str,
+            }
+            return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
 
-        # 补全来源
-        chosen_source = next((c.get("source", "共同") for c in norm if c.get("code") == chosen_code), match_source_label)
+        chosen_code = (r.get("code") or "").strip()
+        chosen_index = 0
+        for i, c in enumerate(norm):
+            if (c.get("code") or "").strip() == chosen_code:
+                chosen_index = i + 1
+                break
 
+        chosen = {"code": r.get("code", ""), "matched_name": r.get("matched_name", ""), "unit_price": r.get("unit_price", 0)}
+        selection_meta = r.get("_selection_meta") or {}
         payload = {
             "single": True,
             "candidates": norm,
-            "chosen": {
-                "code": chosen_code,
-                "matched_name": chosen_name,
-                "unit_price": chosen_price,
-                "source": chosen_source,
-            },
-            "chosen_index": next((i + 1 for i, c in enumerate(norm) if c.get("code") == chosen_code), 1),
-            "match_source": f"llm_selected({chosen_source})",
-            "selection_note": best.get("reasoning", ""),
+            "chosen": chosen,
+            "chosen_index": chosen_index,
+            "selection_reasoning": r.get("reasoning", ""),
+            "match_source": match_source_str,
+            "fallback": selection_meta.get("from_rule_fallback", False),
         }
-        # 透传兜底元信息
-        if best.get("_selection_meta"):
-            payload["_selection_meta"] = best["_selection_meta"]
+        _attach_table_code_hint(payload)
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
-
     except Exception as e:
         logger.exception("match_quotation 失败")
         return {"success": False, "error": str(e), "result": f"询价匹配失败: {e}"}
@@ -210,6 +236,7 @@ def _execute_match_wanding_price(arguments: dict[str, Any]) -> dict[str, Any]:
         if len(norm_truncated) == 1:
             r = norm_truncated[0]
             payload = {"single": True, "candidates": norm_truncated, "chosen": r, "chosen_index": 1, "match_source": "字段匹配"}
+            _attach_table_code_hint(payload)
             return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
         payload = {"needs_selection": True, "keywords": keywords, "candidates": norm_truncated, "match_source": "字段匹配"}
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
@@ -730,6 +757,11 @@ def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(candidates, list) or not candidates:
             return {"success": True, "result": "请提供 candidates（来自历史匹配或字段匹配的 needs_selection 结果）。"}
 
+        logger.info(
+            "select_wanding_match invoked keywords=%r n_candidates=%d",
+            keywords[:120] if keywords else "",
+            len(candidates),
+        )
         r = llm_select_best(keywords, candidates)
         match_source = (arguments.get("match_source") or "").strip() or "未知"
         if r is None:
@@ -765,6 +797,7 @@ def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
         if selection_meta.get("from_rule_fallback"):
             payload["fallback"] = True
             payload["_selection_meta"] = selection_meta
+        _attach_table_code_hint(payload)
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
     except Exception as e:
         logger.exception("select_wanding_match 失败")
@@ -905,7 +938,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
             "type": "function",
             "function": {
                 "name": "match_quotation",
-                "description": "询价匹配（自动 LLM 选型）：同时查报价历史与万鼎字段匹配，结果取并集。多候选时自动调用 LLM 选型，无需二次调用 select_wanding_match。返回：single（含 chosen）/ needs_human_choice（含 options 供用户选）/ unmatched。",
+                "description": "询价匹配：同时查报价历史与万鼎字段匹配，结果取并集，每条带 source（历史报价/字段匹配/共同）。",
                 "parameters": {
                     "type": "object",
                     "properties": {

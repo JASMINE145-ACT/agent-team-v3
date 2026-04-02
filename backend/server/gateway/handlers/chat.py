@@ -32,7 +32,7 @@ def _generate_title_via_llm(user_query: str, assistant_answer: str) -> Optional[
             "你是一个助手。根据下面的一轮对话，生成一个简短的会话标题（5-10个字），只输出标题，不要引号或解释。\n"
             f"用户：{q}\n助手：{a}"
         )
-        model = getattr(Config, "SESSION_TITLE_MODEL", None) or getattr(Config, "LLM_MODEL", "glm-4-flash")
+        model = getattr(Config, "SESSION_TITLE_MODEL", None) or getattr(Config, "LLM_MODEL", "glm-4.5-air")
         resp = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -69,12 +69,22 @@ def handle_chat_history(params: dict) -> dict:
             "content": [{"type": "text", "text": t.query}],
             "timestamp": ts_ms,
         })
+        assistant_blocks: list[dict[str, Any]] = []
+        thinking_text = (getattr(t, "thinking", None) or "").strip()
+        if thinking_text:
+            assistant_blocks.append({"type": "thinking", "thinking": thinking_text})
+        assistant_blocks.append({"type": "text", "text": t.answer})
         messages.append({
             "role": "assistant",
-            "content": [{"type": "text", "text": t.answer}],
+            "content": assistant_blocks,
             "timestamp": ts_ms,
         })
-    payload: dict[str, Any] = {"messages": messages, "thinkingLevel": None}
+    user_facts = session.user_facts or {}
+    payload: dict[str, Any] = {
+        "messages": messages,
+        "thinkingLevel": user_facts.get("_thinking_level"),
+        "reasoningLevel": user_facts.get("_reasoning_level"),
+    }
     # 可选：附带会话摘要，便于前端展示概要（不改变现有字段语义）
     summary = (session.summary or "").strip() if getattr(session, "summary", None) else ""
     if summary:
@@ -252,6 +262,7 @@ async def handle_chat_send(
     await send_res({"ok": True, "runId": run_id})
 
     agent = ws.app.state.agent
+    result: dict[str, Any] = {}
     state = "final"
     try:
         result = await agent.execute_react(
@@ -285,10 +296,23 @@ async def handle_chat_send(
     finally:
         run_unregister(run_id)
 
+    final_answer = (result or {}).get("answer") or accumulated[0] or ""
+    final_thinking = (result or {}).get("thinking") or ""
+    final_content: list[dict[str, Any]] = []
+    if final_thinking:
+        final_content.append({"type": "thinking", "thinking": final_thinking})
+    if final_answer:
+        final_content.append({"type": "text", "text": final_answer})
+
     await send_event({
         "type": "event",
         "event": "chat",
-        "payload": {"runId": run_id, "sessionKey": session_key, "state": state},
+        "payload": {
+            "runId": run_id,
+            "sessionKey": session_key,
+            "state": state,
+            "message": {"role": "assistant", "content": final_content} if final_content else None,
+        },
     })
 
     # 首轮对话结束后，用 LLM 生成会话标题并写回（不阻塞响应）

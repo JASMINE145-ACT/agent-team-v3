@@ -4,45 +4,25 @@ ReAct 循环用到的 LLM 调用、解析与 system prompt 构建。
 """
 import re
 import types as _types
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from backend.core.anthropic_react_llm import (
+    call_anthropic_messages_sync,
+    call_anthropic_messages_stream_sync,
+)
+
+# 极简回退格式（与 skills.py 中 OUTPUT_FORMAT_LEGACY 同构），作 build_system_prompt 的默认回退。
 _CORE_OUTPUT_FORMAT = """\
-## 输出格式（Claude Agent Loop）
+## 输出格式（极简回退用）
 
-每轮推理按四段式在 <think> 中输出 Plan / Gather / Act / Verify：
-
-<think>
-1. Plan
-   - 用 2～4 行概括本轮要完成的「具体目标」（尽量贴近用户措辞，例如「查直径50的价格并给出报价建议」）
-   - 说明本轮打算使用哪些技能簇/工具链（只点名，不在此处输出 JSON），例如：库存与价格、Excel、无货登记、业务知识
-   - 简要列出可能的子任务或步骤（如：先确认意图 → 再查历史报价/万鼎 → 再查库存 → 再汇总结论）
-
-2. Gather Context
-   - 分析用户输入的意图、关键约束（如客户等级、是否只查库存/只看价格、是否需要登记无货）
-   - 概括会话上下文中**已知的关键信息**（最近几轮的问答、工具返回的结论或统计）
-   - 明确当前还缺少哪些关键信息，以及这些信息可能来自哪里（继续向用户提问 / 调用哪个工具）
-
-3. Act
-   - 决定本轮是：
-     - 直接回答用户问题，还是
-     - 先向用户澄清关键信息，还是
-     - 调用一个工具（库存/价格/Excel/无货/业务知识等）
-   - 如果要调用工具：
-     - 用自然语言解释「为什么选这个工具、参数从哪里来」
-     - 再输出一个 `<tool_call>...</tool_call>` 包裹的 JSON，结构为：
-       - `{ "name": "<tool_name>", "arguments": { ... } }`
-     - **每轮最多一个 `<tool_call>`**；本轮不需要调工具时可以完全省略 `<tool_call>`
-
-4. Verify Results
-   - 若上一轮有工具返回结果，检查：
-     - 是否已经得到完成本轮目标所需的关键信息
-     - 是否还需要继续调用工具或向用户澄清
-     - 是否可以直接给出最终回答
-   - 如果信息不足，明确说明还缺什么，并在下一轮 Plan 中补充；不要臆测或捏造库存/价格/Excel 行内容
-</think>
-
-允许模型在上述结构下灵活组织内容，不要求逐条照搬示例。
-**多轮指代**：用户说「选哪个」→ 必须调用 select_wanding_match；用户说「那个产品」→ 用上轮完整名称。"""
+- **think 可省略**；有需要时用成对标签（redacted_thinking 或 think）包裹简短记录即可。
+- **有工具要调**：直接写 `<tool_call>{"name":"<tool_name>","arguments":{...}}</tool_call>`，无需先写自然语言决策。
+- **工具返回后**：直接展示结果，不需要额外解释或复述 reasoning。
+- **reasoning 字段**：`match_quotation` / `select_wanding_match` 返回的 `selection_reasoning` / `reasoning` 是工具 JSON 中的 structured 数据（LLM 推理理由），**由 UI 直接渲染**，模型不需要在 think 里复述。
+- **ONE step = ONE tool call**；`name` 必须与工具注册名完全一致；`arguments` 为 JSON 对象，不得臆造。
+- **Failure Handling**：不得将未出现在 observation/用户原话中的内容当事实；无有效数据时不臆造库存/单价/编码；参数错误时修正后重试。
+- **批量**：多行/多编号优先 `*_batch`。
+- **多轮指代**：「选哪个」→ select_wanding_match；「那个产品」→ 用上轮完整名或 code。"""
 
 
 def _extract_tag(content: str, tag: str) -> Tuple[str, str]:
@@ -51,6 +31,67 @@ def _extract_tag(content: str, tag: str) -> Tuple[str, str]:
     if not match:
         return content, ""
     return pattern.sub("", content).strip(), match.group(1).strip()
+
+
+_RESULT_TITLE_RE = re.compile(
+    r"^\s*(?:#{1,3}\s*)?(?:.{0,50}价格查询结果|.{0,40}(?:询价|报价)查询结果)\s*$",
+    re.UNICODE,
+)
+# 无「…价格查询结果」标题时，从下列行起视为正式答案（前面多为 Reasoning 泄漏）
+_REASONING_ANSWER_ANCHOR_RES = (
+    re.compile(r"^\s*匹配来源\s*[:：]", re.UNICODE),
+    re.compile(r"^\s*查询到以下", re.UNICODE),
+    re.compile(r"^\s*上面\s*\d+\s*个都不是", re.UNICODE),
+    re.compile(r"^\s*(?:#{1,3}\s*)?以下\s*\d+\s*个", re.UNICODE),
+)
+
+
+def strip_untagged_reasoning_preamble(text: str) -> str:
+    """
+    When the model ignores XML thinking tags and emits 'Reasoning:' / chain-of-thought
+    before the real answer, drop everything before the first '…查询结果' title line or
+    the first markdown table — so user-visible answers stay consistent.
+    """
+    if not (text or "").strip():
+        return text or ""
+    head = (text or "")[:2000]
+    if not re.search(r"(?i)reasoning\s*[:：]", head):
+        return text
+    lines = text.splitlines()
+    start_idx = None
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if not s or s.startswith("-"):
+            continue
+        if "|" in s[:3] and s.startswith("|"):
+            continue
+        if _RESULT_TITLE_RE.match(s):
+            start_idx = i
+            break
+        if any(ar.match(s) for ar in _REASONING_ANSWER_ANCHOR_RES):
+            start_idx = i
+            break
+    if start_idx is None:
+        for i, line in enumerate(lines):
+            st = line.strip()
+            if not st.startswith("|"):
+                continue
+            if i + 1 < len(lines) and "|" in lines[i + 1] and "---" in lines[i + 1]:
+                start_idx = max(0, i - 1)
+                break
+    if start_idx is None or start_idx == 0:
+        return text
+    return "\n".join(lines[start_idx:]).strip()
+
+
+def _extract_thinking_block(content: str) -> Tuple[str, str]:
+    """Strip one thinking wrapper: try redacted_thinking tag first (matches OUTPUT_FORMAT), then think tag."""
+    if not (content or "").strip():
+        return content or "", ""
+    body, thought = _extract_tag(content, "redacted_thinking")
+    if thought:
+        return body, thought
+    return _extract_tag(content, "think")
 
 
 def build_system_prompt(skill_prompt: str, output_format: str) -> str:
@@ -105,3 +146,30 @@ def call_llm_streaming_sync(client, kwargs: Dict[str, Any], on_token) -> Tuple[s
         for k in sorted(tool_calls_raw)
     ]
     return content, tool_calls, last_usage, last_finish_reason
+
+
+def call_anthropic_react_streaming_sync(
+    client: Any, kwargs: Dict[str, Any], on_token: Callable[[str], None]
+) -> Tuple[str, List, Any, Any]:
+    """Anthropic Messages 流式调用，与 call_llm_streaming_sync 同返回形状。"""
+    return call_anthropic_messages_stream_sync(
+        client,
+        kwargs["model"],
+        kwargs["messages"],
+        kwargs.get("tools"),
+        temperature=kwargs["temperature"],
+        max_tokens=kwargs["max_tokens"],
+        on_token=on_token,
+    )
+
+
+def call_anthropic_react_non_streaming_sync(client: Any, kwargs: Dict[str, Any]) -> Tuple[str, List, Optional[dict], Optional[str]]:
+    """Anthropic Messages 非流式调用。"""
+    return call_anthropic_messages_sync(
+        client,
+        kwargs["model"],
+        kwargs["messages"],
+        kwargs.get("tools"),
+        temperature=kwargs["temperature"],
+        max_tokens=kwargs["max_tokens"],
+    )

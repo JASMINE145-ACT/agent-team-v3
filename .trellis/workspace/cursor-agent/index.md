@@ -6,30 +6,38 @@
 
 ## Current Status
 
-<!-- @@@auto:current-status -->
-- **Active File**: `journal-1.md`
-- **Total Sessions**: 0
-- **Last Active**: -
-<!-- @@@/auto:current-status -->
+| Item | Status |
+|------|--------|
+| Active File | `journal-2.md` |
+| Total Sessions | 11 |
+| Last Active | 2026-04-03 |
 
 ---
 
 ## Active Documents
 
-<!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~0 | Active |
-<!-- @@@/auto:active-documents -->
+| `journal-1.md` | ~230 | Archived |
+| `journal-2.md` | ~180 | Active |
 
 ---
 
 ## Session History
 
-<!-- @@@auto:session-history -->
-| # | Date | Title | Commits |
-|---|------|-------|---------|
-<!-- @@@/auto:session-history -->
+| # | Date | Title |
+|---|------|-------|
+| 11 | 2026-04-03 | Reasoning 显示修复 + Selector Reasoning 需求确认 |
+| 10 | 2026-04-02 | CoreAgent Anthropic Messages routing (1211 fix, full impl) |
+| 9 | 2026-04-01 | Fix BigModel 1211 model-not-found routing |
+| 8 | 2026-04-01 | Unified reply format (disable 4-phase output) |
+| 7 | 2026-04-01 | Tool-call stall fix + reasoning visibility fix |
+| 6 | 2026-04-01 | LLM four-role policy (MiniMax / GLM-4.5-air / gpt-4o-mini / glm-ocr) |
+| 5 | 2026-04-01 | Auto select_wanding_match + MiniMax-M2.7 switch |
+| 1 | 2026-03-29 | Two-Step LLM Selector |
+| 2 | 2026-03-29 | Chinese/English Size Spec Fix |
+| 3 | 2026-03-29 | Create Frontend Spec Documentation |
+| 4 | 2026-03-30 | Doom-loop Detection + Step Snapshots |
 
 ---
 

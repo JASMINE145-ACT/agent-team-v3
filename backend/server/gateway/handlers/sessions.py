@@ -14,6 +14,9 @@ def handle_sessions_list(params: dict) -> dict:
         sid, updated_at, label = row[0], row[1], row[2]
         in_tok = row[3] if len(row) > 3 else 0
         out_tok = row[4] if len(row) > 4 else 0
+        thinking_level = row[5] if len(row) > 5 else None
+        verbose_level = row[6] if len(row) > 6 else None
+        reasoning_level = row[7] if len(row) > 7 else None
         sessions.append({
             "key": sid,
             "kind": "direct",
@@ -22,6 +25,9 @@ def handle_sessions_list(params: dict) -> dict:
             "inputTokens": in_tok or None,
             "outputTokens": out_tok or None,
             "totalTokens": (in_tok or 0) + (out_tok or 0) or None,
+            "thinkingLevel": thinking_level or None,
+            "verboseLevel": verbose_level or None,
+            "reasoningLevel": reasoning_level or None,
         })
     persist_dir = getattr(store, "_persist_dir", None)
     return {
@@ -36,9 +42,21 @@ def handle_sessions_list(params: dict) -> dict:
 def handle_sessions_patch(params: dict) -> dict:
     key = (params.get("key") or "").strip()
     label = params.get("label")
-    if key and label is not None:
-        store = get_session_store()
+    if not key:
+        return {"ok": True}
+    store = get_session_store()
+    if label is not None:
         store.set_label(key, str(label).strip()[:80])
+
+    user_facts_patch = {}
+    if "thinkingLevel" in params:
+        user_facts_patch["_thinking_level"] = params.get("thinkingLevel")
+    if "verboseLevel" in params:
+        user_facts_patch["_verbose_level"] = params.get("verboseLevel")
+    if "reasoningLevel" in params:
+        user_facts_patch["_reasoning_level"] = params.get("reasoningLevel")
+    if user_facts_patch:
+        store.update_user_facts(key, user_facts_patch)
     return {"ok": True}
 
 

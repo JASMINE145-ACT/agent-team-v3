@@ -6,14 +6,27 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 import openai
 
+try:
+    import anthropic as anthropic_sdk
+except ImportError:
+    anthropic_sdk = None
+
 from backend.agent.session import SessionStore, get_session_store
 from backend.config import Config
-from backend.core.agent_helpers import _extract_tag, build_system_prompt, call_llm_streaming_sync
+from backend.core.agent_helpers import (
+    _extract_thinking_block,
+    strip_untagged_reasoning_preamble,
+    build_system_prompt,
+    call_anthropic_react_non_streaming_sync,
+    call_anthropic_react_streaming_sync,
+    call_llm_streaming_sync,
+)
 from backend.core.context_compression import (
     _trim_context,
     build_tool_call_id_to_name,
@@ -29,6 +42,38 @@ from backend.tools.quotation.excel_summary import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 主链路 Anthropic / OpenAI 超时与断连，均触发 fallback（若已配置）
+if anthropic_sdk:
+    _LLM_TIMEOUT_EXCEPTIONS = (
+        openai.APITimeoutError,
+        openai.APIConnectionError,
+        anthropic_sdk.APITimeoutError,
+        anthropic_sdk.APIConnectionError,
+    )
+else:
+    _LLM_TIMEOUT_EXCEPTIONS = (openai.APITimeoutError, openai.APIConnectionError)
+
+_LOOP_PHASE_HEADER_RE = re.compile(
+    r"(?im)^\s*(?:#+\s*)?(?:\d+\s*[\.\)]\s*)?"
+    r"(?:Plan|Gather(?:\s+Context)?|Act|Verify(?:\s+Results)?)\s*$"
+)
+
+
+def _normalize_user_answer(text: str) -> str:
+    """Remove leaked loop-phase section headings from user-visible answers."""
+    if not text:
+        return text
+    cleaned = strip_untagged_reasoning_preamble(text)
+    cleaned = re.sub(
+        r"(?im)^\s*(?:#+\s*)?(?:\d+\s*[\.\)]\s*)?"
+        r"(?:Plan|Gather(?:\s+Context)?|Act|Verify(?:\s+Results)?)\s*[:：-]?\s+",
+        "",
+        cleaned,
+    )
+    cleaned = _LOOP_PHASE_HEADER_RE.sub("", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
 
 # 单次工具结果最大字符数（过大会导致多轮 ReAct 时 prompt 迅速膨胀）
 TOOL_RESULT_MAX_CHARS = int(os.environ.get("TOOL_RESULT_MAX_CHARS", "16000").replace("_", ""))
@@ -48,6 +93,21 @@ _REWORK_KEYWORDS = ["错了", "不对", "不是这个", "不是这个", "重新�
 def _detect_rework_intent(user_input: str) -> bool:
     """检测用户是否在表达"报价/选型错误"意图，触发 rework 流程。"""
     return any(kw in user_input for kw in _REWORK_KEYWORDS)
+
+
+def _should_use_anthropic_messages_api(base_url: str) -> bool:
+    """
+    是否对当前 base_url 使用 Anthropic Messages SDK（如 MiniMax …/anthropic）。
+    PRIMARY_LLM_PROTOCOL=anthropic 但 base_url 仍指向智谱 OpenAI 兼容层时，必须用 chat.completions（与单测显式传入 OPENAI_BASE_URL 一致）。
+    """
+    if getattr(Config, "PRIMARY_LLM_PROTOCOL", "openai") != "anthropic":
+        return False
+    bu = (base_url or "").strip().lower()
+    if not bu:
+        return False
+    if "bigmodel.cn" in bu:
+        return False
+    return True
 
 
 def _build_rework_injection(pending: dict) -> str:
@@ -76,9 +136,26 @@ class CoreAgent:
         extensions: List[AgentExtension],
         session_store: Optional[SessionStore] = None,
     ):
-        # 主模型 client
-        self.client = get_openai_client(api_key=api_key, base_url=base_url)
+        # 主模型：anthropic 协议且 base 非智谱 OpenAI 兼容层时，用 Anthropic Messages（如 MiniMax …/anthropic）
+        self._use_anthropic = _should_use_anthropic_messages_api(base_url)
+        self.client = get_openai_client(
+            api_key=api_key,
+            base_url=base_url,
+            anthropic_messages=self._use_anthropic,
+        )
         self.model = model
+        # 智谱 OpenAI 兼容层不接受 MiniMax 模型名；主 .env 在 anthropic 主链路下仍可能为 LLM_MODEL=MiniMax-M2.7
+        if not self._use_anthropic:
+            bu = (base_url or "").lower()
+            mlow = (model or "").lower()
+            if "bigmodel.cn" in bu and "minimax" in mlow:
+                resolved = (os.getenv("OPENAI_MODEL") or os.getenv("CHAT_LLM_MODEL") or "glm-4.5-air").strip()
+                logger.info(
+                    "智谱 chat.completions：模型 %s 无效于该端点，已改用 %s",
+                    model,
+                    resolved,
+                )
+                self.model = resolved
 
         # 备用模型（可选）：例如 GLM 超时时 fallback 到 gpt-4o-mini
         fb_api_key = getattr(Config, "FALLBACK_LLM_API_KEY", None)
@@ -108,6 +185,29 @@ class CoreAgent:
             if of:
                 output_fmt = of
         self._system_prompt = build_system_prompt("\n\n".join(skill_parts), output_fmt)
+
+        # #region agent log
+        try:
+            _sp = self._system_prompt or ""
+            _payload = {
+                "sessionId": "d48870",
+                "hypothesisId": "H5",
+                "location": "CoreAgent.__init__",
+                "message": "system_prompt_injection",
+                "data": {
+                    "use_claude_loop_prompt": bool(getattr(Config, "USE_CLAUDE_LOOP_PROMPT", False)),
+                    "use_decision_rule_skills": bool(getattr(Config, "USE_DECISION_RULE_SKILLS", False)),
+                    "prompt_has_redacted_thinking": "redacted_thinking" in _sp.lower(),
+                    "prompt_has_claude_loop_header": "Claude Agent Loop" in _sp,
+                    "prompt_mentions_think_tag": bool(re.search(r"<\s*think\s*>", _sp, re.I)),
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+            with open(r"d:\Projects\agent-jk\debug-d48870.log", "a", encoding="utf-8") as _df:
+                _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+        # #endregion
 
     async def execute_react(
         self,
@@ -276,8 +376,13 @@ class CoreAgent:
             step_usage = None
             step_finish_reason = None
             if on_token is not None:
+                stream_fn = (
+                    call_anthropic_react_streaming_sync
+                    if self._use_anthropic
+                    else call_llm_streaming_sync
+                )
                 llm_task = asyncio.create_task(
-                    asyncio.to_thread(call_llm_streaming_sync, self.client, kwargs, on_token)
+                    asyncio.to_thread(stream_fn, self.client, kwargs, on_token)
                 )
                 try:
                     while not llm_task.done():
@@ -289,6 +394,8 @@ class CoreAgent:
                         llm_task.cancel()
                     raise
                 except openai.APIStatusError as e:
+                    if self._use_anthropic:
+                        raise
                     body = ""
                     try:
                         body = e.response.text if hasattr(e, "response") else str(e)
@@ -300,7 +407,7 @@ class CoreAgent:
                         body[:2000],
                     )
                     raise
-                except (openai.APITimeoutError, openai.APIConnectionError):
+                except _LLM_TIMEOUT_EXCEPTIONS:
                     if self._fallback_client and self._fallback_model:
                         logger.warning("本步模型调用超时，fallback 到备用模型: %s", self._fallback_model)
                         fb_kwargs: Dict[str, Any] = {**kwargs, "model": self._fallback_model}
@@ -315,11 +422,46 @@ class CoreAgent:
                     else:
                         logger.exception("主模型调用失败（无 fallback 配置）")
                         raise
+                except Exception as e:
+                    if (
+                        anthropic_sdk
+                        and self._use_anthropic
+                        and isinstance(e, anthropic_sdk.APIStatusError)
+                    ):
+                        logger.error(
+                            "Anthropic API 错误(流式) status=%s body=%s",
+                            getattr(e, "status_code", None),
+                            str(e)[:2000],
+                        )
+                        raise
+                    raise
             else:
                 _raise_if_cancelled()
                 try:
-                    resp = self.client.chat.completions.create(**kwargs)
+                    if self._use_anthropic:
+                        content, tool_calls, step_usage, step_finish_reason = await asyncio.to_thread(
+                            call_anthropic_react_non_streaming_sync, self.client, kwargs
+                        )
+                    else:
+                        resp = self.client.chat.completions.create(**kwargs)
+                        msg = resp.choices[0].message if resp.choices else None
+                        if not msg:
+                            content, tool_calls = "", []
+                            step_finish_reason = None
+                        else:
+                            content = (msg.content or "").strip()
+                            tool_calls = list(getattr(msg, "tool_calls", None) or [])
+                            u = getattr(resp, "usage", None)
+                            if u:
+                                step_usage = {
+                                    "prompt_tokens": u.prompt_tokens or 0,
+                                    "completion_tokens": u.completion_tokens or 0,
+                                }
+                            if resp.choices:
+                                step_finish_reason = getattr(resp.choices[0], "finish_reason", None)
                 except openai.APIStatusError as e:
+                    if self._use_anthropic:
+                        raise
                     body = ""
                     try:
                         body = e.response.text if hasattr(e, "response") else str(e)
@@ -331,25 +473,43 @@ class CoreAgent:
                         body[:2000],
                     )
                     raise
-                except (openai.APITimeoutError, openai.APIConnectionError):
+                except _LLM_TIMEOUT_EXCEPTIONS:
                     if self._fallback_client and self._fallback_model:
                         logger.warning("本步模型调用超时，fallback 到备用模型: %s", self._fallback_model)
                         fb_kwargs: Dict[str, Any] = {**kwargs, "model": self._fallback_model}
                         resp = self._fallback_client.chat.completions.create(**fb_kwargs)
                         trace.append({"step": step + 1, "type": "fallback", "model": self._fallback_model})
+                        msg = resp.choices[0].message if resp.choices else None
+                        if not msg:
+                            content, tool_calls = "", []
+                            step_finish_reason = None
+                        else:
+                            content = (msg.content or "").strip()
+                            tool_calls = list(getattr(msg, "tool_calls", None) or [])
+                            u = getattr(resp, "usage", None)
+                            if u:
+                                step_usage = {
+                                    "prompt_tokens": u.prompt_tokens or 0,
+                                    "completion_tokens": u.completion_tokens or 0,
+                                }
+                            if resp.choices:
+                                step_finish_reason = getattr(resp.choices[0], "finish_reason", None)
                     else:
                         logger.exception("主模型调用失败（无 fallback 配置）")
                         raise
-                msg = resp.choices[0].message if resp.choices else None
-                if not msg:
-                    break
-                content = (msg.content or "").strip()
-                tool_calls = list(getattr(msg, "tool_calls", None) or [])
-                u = getattr(resp, "usage", None)
-                if u:
-                    step_usage = {"prompt_tokens": u.prompt_tokens or 0, "completion_tokens": u.completion_tokens or 0}
-                if resp.choices:
-                    step_finish_reason = getattr(resp.choices[0], "finish_reason", None)
+                except Exception as e:
+                    if (
+                        anthropic_sdk
+                        and self._use_anthropic
+                        and isinstance(e, anthropic_sdk.APIStatusError)
+                    ):
+                        logger.error(
+                            "Anthropic API 错误(非流式) status=%s body=%s",
+                            getattr(e, "status_code", None),
+                            str(e)[:2000],
+                        )
+                        raise
+                    raise
             if step_usage:
                 last_usage = step_usage
                 pt = step_usage.get("prompt_tokens") or 0
@@ -363,15 +523,65 @@ class CoreAgent:
                         "LLM 输出因达到 max_tokens 被截断（finish_reason=length），可增大 LLM_MAX_TOKENS 后重试"
                     )
 
-            content, thought = _extract_tag(content, "think")
+            content, thought = _extract_thinking_block(content)
+            # #region agent log
+            try:
+                _raw = content or ""
+                _has_redacted = bool(re.search(r"<\s*redacted_thinking\s*>", _raw, re.I))
+                _has_think = bool(re.search(r"<\s*think\s*>", _raw, re.I))
+                _payload = {
+                    "sessionId": "d48870",
+                    "hypothesisId": "H1",
+                    "location": "CoreAgent.execute_react:post_extract_think",
+                    "message": "llm_step_thinking_extract",
+                    "data": {
+                        "step": step + 1,
+                        "streaming": on_token is not None,
+                        "has_redacted_thinking_tag": _has_redacted,
+                        "has_think_tag": _has_think,
+                        "thought_len_after_extract": len(thought or ""),
+                        "content_len_after_extract": len(content or ""),
+                        "tool_calls_n": len(tool_calls) if tool_calls else 0,
+                        "finish_reason": str(step_finish_reason),
+                    },
+                    "timestamp": int(time.time() * 1000),
+                }
+                with open(r"d:\Projects\agent-jk\debug-d48870.log", "a", encoding="utf-8") as _df:
+                    _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+            # #endregion
             if thought:
                 thinking_parts.append(thought)
                 trace.append({"step": step + 1, "type": "thinking", "content": thought})
 
             if not tool_calls:
                 if content:
-                    last_answer = content
-                    trace.append({"step": step + 1, "type": "response", "content": content})
+                    normalized_content = _normalize_user_answer(content)
+                    last_answer = normalized_content
+                    trace.append({"step": step + 1, "type": "response", "content": normalized_content})
+                    # #region agent log
+                    try:
+                        _payload2 = {
+                            "sessionId": "d48870",
+                            "hypothesisId": "H2",
+                            "location": "CoreAgent.execute_react:final_answer",
+                            "message": "final_user_visible_answer",
+                            "data": {
+                                "step": step + 1,
+                                "normalized_len": len(normalized_content or ""),
+                                "normalized_has_verify_results": bool(
+                                    re.search(r"(?i)verify\s+results", normalized_content or "")
+                                ),
+                                "normalized_has_redacted_tag": "redacted_thinking" in (normalized_content or "").lower(),
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }
+                        with open(r"d:\Projects\agent-jk\debug-d48870.log", "a", encoding="utf-8") as _df:
+                            _df.write(json.dumps(_payload2, ensure_ascii=False) + "\n")
+                    except Exception:
+                        pass
+                    # #endregion
                 break
 
             tool_calls_for_msg = [
@@ -613,13 +823,17 @@ class CoreAgent:
             except Exception:
                 logger.debug("clarification JSON parse failed", exc_info=True)
 
+        last_answer = _normalize_user_answer(last_answer)
+
         if session_id and self._store and last_answer:
             try:
+                thinking_for_store = "\n".join(thinking_parts).strip() or None
                 self._store.save_turn(
                     session_id=session_id,
                     query=user_input,
                     agent="single",
                     answer=last_answer,
+                    thinking=thinking_for_store,
                     file_path=ctx.get("file_path"),
                     input_tokens=last_usage.get("prompt_tokens") if last_usage else None,
                     output_tokens=last_usage.get("completion_tokens") if last_usage else None,

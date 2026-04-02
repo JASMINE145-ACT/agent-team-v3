@@ -90,7 +90,7 @@ def extract_spec_from_quote_name_llm(
         from backend.config import Config
         _api_key = api_key or getattr(Config, "OPENAI_API_KEY", None)
         _base_url = base_url or getattr(Config, "OPENAI_BASE_URL", None) or ""
-        _model = model or getattr(Config, "LLM_MODEL", "glm-4-flash")
+        _model = model or getattr(Config, "LLM_MODEL", "glm-4.5-air")
     except Exception:
         return rule_result
     if not _api_key or len((quote_name or "").strip()) < 4:
@@ -164,7 +164,7 @@ def extract_specs_batch_llm(
             return []
         _api_key = api_key or getattr(Config, "OPENAI_API_KEY", None)
         _base_url = base_url or getattr(Config, "OPENAI_BASE_URL", None) or ""
-        _model = model or getattr(Config, "LLM_MODEL", "glm-4-flash")
+        _model = model or getattr(Config, "LLM_MODEL", "glm-4.5-air")
         logger.info(f"LLM spec extraction: model={_model}, api_key={'***' if _api_key else 'None'}")
     except Exception:
         return []

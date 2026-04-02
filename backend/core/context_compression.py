@@ -87,7 +87,7 @@ def summarize_tool_result_sync(
     timeout: float = LLM_TIMEOUT,
 ) -> str:
     """
-    同步摘要：优先用 LLM（gpt-4o-mini），超时或失败则用规则 fallback。
+    同步摘要：优先用 LLM（默认 gpt-4o-mini，由 SUMMARY_LLM_* 配置），超时或失败则用规则 fallback。
     api_key/base_url 为空时跳过 LLM 直接用规则。
     """
     if not content or len(content.strip()) < 50:

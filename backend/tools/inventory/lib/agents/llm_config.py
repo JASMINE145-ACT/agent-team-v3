@@ -40,7 +40,7 @@ def create_llm(
     temperature: float = 0.0
 ):
     provider = os.getenv(f"{agent_name.upper()}_LLM_PROVIDER") or os.getenv("LLM_PROVIDER", "zhipu")
-    default_model = "glm-4.7" if provider.lower() == "zhipu" else "gpt-4o-mini"
+    default_model = "glm-4.5-air" if provider.lower() == "zhipu" else "MiniMax-M2.7"
     model_name = model_name or os.getenv(f"{agent_name.upper()}_MODEL") or os.getenv("LLM_MODEL", default_model)
 
     logger.info(f"为 {agent_name} 创建 LLM: {provider}/{model_name}")

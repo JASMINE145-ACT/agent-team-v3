@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from backend.config import Config
+from backend.config import Config, get_primary_react_llm_credentials
 from backend.core.agent import CoreAgent
 from backend.plugins.jagent.extension import JAgentExtension
 from backend.wecom_bot.client import run_wecom_bot
@@ -34,9 +34,10 @@ logger = logging.getLogger(__name__)
 
 def create_agent() -> CoreAgent:
     Config.validate()
+    pk, pb = get_primary_react_llm_credentials()
     agent = CoreAgent(
-        api_key=Config.OPENAI_API_KEY,
-        base_url=Config.OPENAI_BASE_URL,
+        api_key=pk,
+        base_url=pb,
         model=Config.LLM_MODEL,
         extensions=[JAgentExtension()],
     )

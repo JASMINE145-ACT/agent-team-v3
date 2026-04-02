@@ -36,7 +36,7 @@ def _client_and_model():
         raise ImportError("pip install openai")
     api_key = LLM_API_KEY or OPENAI_API_KEY or ""
     base_url = OPENAI_BASE_URL or ZHIPU_BASE
-    model = LLM_MODEL or "glm-4-flash"
+    model = LLM_MODEL or "glm-4.5-air"
     if (not base_url or base_url == "https://api.openai.com/v1") and "glm" in (model or "").lower():
         base_url = ZHIPU_BASE
     return OpenAI(api_key=api_key, base_url=base_url), model

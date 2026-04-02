@@ -18,13 +18,50 @@ class Turn:
     agent: str
     answer: str
     ts: float
+    thinking: Optional[str] = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "Turn":
-        return cls(query=d.get("query", ""), agent=d.get("agent", ""), answer=d.get("answer", ""), ts=float(d.get("ts", 0.0)))
+        return cls(
+            query=d.get("query", ""),
+            agent=d.get("agent", ""),
+            answer=d.get("answer", ""),
+            ts=float(d.get("ts", 0.0)),
+            thinking=d.get("thinking"),
+        )
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass
+class Snapshot:
+    """ReAct 单步指标（供测试与可观测性；非持久化会话字段）。"""
+
+    step: int
+    ts: float
+    tool_calls: List[str]
+    input_tokens: int
+    output_tokens: int
+    cost: float
+    duration_ms: float
+    model: str
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Snapshot":
+        return cls(
+            step=int(d.get("step", 0)),
+            ts=float(d.get("ts", 0.0)),
+            tool_calls=list(d.get("tool_calls") or []),
+            input_tokens=int(d.get("input_tokens", 0)),
+            output_tokens=int(d.get("output_tokens", 0)),
+            cost=float(d.get("cost", 0.0)),
+            duration_ms=float(d.get("duration_ms", 0.0)),
+            model=str(d.get("model", "")),
+        )
 
 
 @dataclass
@@ -41,8 +78,6 @@ class Session:
     tool_memory: Optional[Dict[str, Any]] = None
     # 用户偏好等长期事实（User Facts）
     user_facts: Optional[Dict[str, Any]] = None
-    # Rework 机制：最近一次需要用户确认的选择（来自 match_quotation 的 needs_human_choice）
-    pending_human_choice: Optional[Dict[str, Any]] = None
 
     @classmethod
     def empty(cls, session_id: str) -> "Session":
@@ -55,7 +90,6 @@ class Session:
             summary=None,
             tool_memory=None,
             user_facts=None,
-            pending_human_choice=None,
         )
 
 
@@ -96,7 +130,6 @@ class SessionStore:
                     summary=raw.get("summary"),
                     tool_memory=raw.get("tool_memory") or None,
                     user_facts=raw.get("user_facts") or None,
-                    pending_human_choice=raw.get("pending_human_choice") or None,
                 )
                 self._mem[session_id] = s
                 return s
@@ -132,7 +165,6 @@ class SessionStore:
                 "summary": session.summary,
                 "tool_memory": session.tool_memory,
                 "user_facts": session.user_facts,
-                "pending_human_choice": session.pending_human_choice,
                 "label": existing_label,
             }
             if input_tokens is not None:
@@ -149,13 +181,22 @@ class SessionStore:
         query: str,
         agent: str,
         answer: str,
+        thinking: Optional[str] = None,
         file_path: Optional[str] = None,
         input_tokens: Optional[int] = None,
         output_tokens: Optional[int] = None,
     ):
         session = self.load(session_id)
         # 存盘保留完整 answer，不截断；build_injection 也注入完整回答，保证模型能看到上一轮完整表格/明细
-        session.turns.append(Turn(query=query[:200], agent=agent or "", answer=(answer or ""), ts=time.time()))
+        session.turns.append(
+            Turn(
+                query=query[:200],
+                agent=agent or "",
+                answer=(answer or ""),
+                ts=time.time(),
+                thinking=(thinking or None),
+            )
+        )
         if len(session.turns) > self.MAX_TURNS:
             session.turns = session.turns[-self.MAX_TURNS:]
         if file_path:
@@ -276,20 +317,8 @@ class SessionStore:
         session.user_facts = base
         self._persist_session(session)
 
-    def set_pending_human_choice(self, session_id: str, choice_data: Dict[str, Any]) -> None:
-        """记录最近一次需要用户确认的选择，供 rework 时使用。"""
-        session = self.load(session_id)
-        session.pending_human_choice = choice_data
-        self._persist_session(session)
-
-    def clear_pending_human_choice(self, session_id: str) -> None:
-        """清除待确认选择（用户已确认或放弃时调用）。"""
-        session = self.load(session_id)
-        session.pending_human_choice = None
-        self._persist_session(session)
-
     def list_sessions(self) -> list:
-        """扫描持久化目录，返回 [(session_id, updated_at_ts, label, input_tokens, output_tokens)]。"""
+        """扫描持久化目录，返回会话摘要元组列表。"""
         out = []
         if not self._persist_dir or not self._persist_dir.exists():
             return out
@@ -299,10 +328,27 @@ class SessionStore:
                 sid = raw.get("session_id", "")
                 turns = raw.get("turns", [])
                 updated_at = turns[-1].get("ts", 0.0) if turns else 0.0
-                label = (turns[0].get("query", "")[:20]) if turns else ""
+                label = raw.get("label")
+                if not label:
+                    label = (turns[0].get("query", "")[:20]) if turns else ""
                 in_tok = raw.get("last_input_tokens")
                 out_tok = raw.get("last_output_tokens")
-                out.append((sid, updated_at, label, in_tok, out_tok))
+                user_facts = raw.get("user_facts") or {}
+                thinking_level = user_facts.get("_thinking_level")
+                verbose_level = user_facts.get("_verbose_level")
+                reasoning_level = user_facts.get("_reasoning_level")
+                out.append(
+                    (
+                        sid,
+                        updated_at,
+                        label,
+                        in_tok,
+                        out_tok,
+                        thinking_level,
+                        verbose_level,
+                        reasoning_level,
+                    )
+                )
             except Exception as e:
                 logger.debug("list_sessions 跳过 %s: %s", f.name, e)
         return out

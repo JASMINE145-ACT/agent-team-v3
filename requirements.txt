@@ -3,11 +3,14 @@
 # Web
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
-pydantic>=2.9.0
+# pydantic 与 pydantic-core 必须成对；2.11 及以下会 import validate_core_schema，与新 core 不兼容
+pydantic>=2.12.0
 python-multipart>=0.0.6
 
 # LLM
 openai>=1.50.0
+# MiniMax Anthropic 兼容层（messages API，与 OpenAI chat.completions 二选一作为主模型）
+anthropic>=0.40.0
 # 可选：LangSmith 追踪（Work/Chat 的 token 消耗与调用历程）
 langsmith>=0.2.0
 

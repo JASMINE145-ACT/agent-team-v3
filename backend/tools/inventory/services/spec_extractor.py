@@ -41,7 +41,7 @@ def extract_specs_by_llm(phrase: str) -> List[str] | None:
 
         api_key = config.LLM_API_KEY or ""
         base_url = getattr(config, "LLM_BASE_URL", None) or "https://open.bigmodel.cn/api/paas/v4"
-        model = config.LLM_MODEL or "glm-4-flash"
+        model = config.LLM_MODEL or "glm-4.5-air"
         timeout = getattr(config, "LLM_TIMEOUT", 60)
         if not api_key:
             return None

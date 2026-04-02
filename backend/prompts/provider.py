@@ -26,9 +26,15 @@ class LocalPromptProvider(PromptProvider):
     """
 
     def get_skill_prompt(self) -> str:
-        from backend.plugins.jagent.skills import CHAT_SKILL_PROMPT
-        return CHAT_SKILL_PROMPT
+        from backend.config import Config
+        from backend.plugins.jagent.skills import CHAT_SKILL_PROMPT_DOC, CHAT_SKILL_PROMPT_RULES
+
+        use_rules = getattr(Config, "USE_DECISION_RULE_SKILLS", False)
+        return CHAT_SKILL_PROMPT_RULES if use_rules else CHAT_SKILL_PROMPT_DOC
 
     def get_output_format_prompt(self) -> str:
-        from backend.plugins.jagent.skills import OUTPUT_FORMAT
-        return OUTPUT_FORMAT
+        from backend.config import Config
+        from backend.plugins.jagent.skills import OUTPUT_FORMAT, OUTPUT_FORMAT_LEGACY
+
+        use_loop = getattr(Config, "USE_CLAUDE_LOOP_PROMPT", False)
+        return OUTPUT_FORMAT if use_loop else OUTPUT_FORMAT_LEGACY

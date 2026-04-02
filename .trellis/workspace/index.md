@@ -27,7 +27,7 @@ workspace/
 
 | Developer | Last Active | Sessions | Active File |
 |-----------|-------------|----------|-------------|
-| (none yet) | - | - | - |
+| cursor-agent | 2026-04-02 | 10 | `cursor-agent/journal-2.md` |
 
 ---
 

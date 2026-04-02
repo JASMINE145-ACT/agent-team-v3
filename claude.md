@@ -1,5 +1,32 @@
 # Agent Team version3 — 项目说明（Claude 用）
 
+### LLM 策略（2026-04）
+
+- **主对话 / ReAct（二选一）**  
+  - **OpenAI 兼容（默认）**：`PRIMARY_LLM_PROTOCOL=openai` 或未设；`LLM_MODEL=MiniMax-M2.7`，`OPENAI_BASE_URL` 指向 MiniMax `/v1`；密钥 `OPENAI_API_KEY` 或 `MINIMAX_API_KEY`。  
+  - **Anthropic 兼容（MiniMax 官方网关）**：`PRIMARY_LLM_PROTOCOL=anthropic`，`ANTHROPIC_BASE_URL`（如 `https://api.minimaxi.com/anthropic`），`ANTHROPIC_API_KEY`（控制台签发的、适用于 Anthropic Messages API 的 Key）；`CoreAgent` 走 `anthropic` SDK 的 `messages.create`，实现见 `backend/core/anthropic_react_llm.py`。与 OpenAI `chat.completions` **互斥**，需有效 Key，否则启动会报错。  
+- **智谱 URL + MiniMax 模型名**：若未开 `anthropic`，仍会按 `config.py` 把主 chat 模型改回 `glm-4.5-air`；若主链路为 `anthropic`，则**不**自动改写 `LLM_MODEL`，以便保留 `MiniMax-M2.7`。
+- **主模型失败 fallback**（超时/连接错误等）：`FALLBACK_MODEL=glm-4.5-air`，`FALLBACK_BASE_URL` 智谱，`FALLBACK_API_KEY`；与 `backend/config.py` 中「智谱 URL + MiniMax 模型名」冲突时的聊天回退模型一致（默认 `glm-4.5-air`）。
+- **记忆 / 上下文压缩**：`SUMMARY_LLM_MODEL=gpt-4o-mini`，建议配置独立 `SUMMARY_LLM_BASE_URL` + `SUMMARY_LLM_API_KEY`（OpenAI 兼容）；实现见 `backend/core/context_compression.py`、`Work` 中 `_work_context_summarizer()`。
+- **图片 OCR**：智谱 `GLM_OCR_MODEL=glm-ocr`（`files/ocr` 接口，非 chat completions）。
+- **向量检索**：万鼎/Resolver 使用 Embeddings API（如 `text-embedding-3-large`），**不属于**上述四类 chat 模型；见 `INVENTORY_OPENAI_EMBEDDING_MODEL`、`ENABLE_WANDING_VECTOR`。
+
+### Inventory Agent 路径统一（2026-03-30）
+
+- 修改文件：`backend/tools/inventory/services/agent_runner.py`、`doc/待办事宜.md`。
+- 架构变更：`run_inventory_agent()` 不再走 standalone `_system_prompt` 路径，改为内部调用 `SingleAgent.execute_react()`，统一复用 `core/agent.py` + `skills.py` 的 prompt 与工具注册链路。
+- 兼容处理：保留原函数签名与返回契约（`answer/thinking/steps/trace/trace_text/error`），并对 `steps`/`trace.steps` 做旧格式适配（`content` 字段）以兼容现有调用方与测试脚本。
+
+### 上下文压缩/截断机制核对（2026-03-30）
+
+- 修改文件：`doc/待办事宜.md`（第 8/9 节）。
+- 核对结论（代码实况）：
+  - `_trim_context` 只压缩 `role=="tool"` 且长度 >200 的消息，从最旧开始压到总长度达标；
+  - `system/user/assistant` 不在 `_trim_context` 阶段被压缩；
+  - Chat 与 Work ReAct 的触发阈值不同（Chat 默认 16000，Work ReAct 默认 8000）；
+  - 当前代码无“保留最新 2 条 tool message”的硬规则。
+- 已将上述机制与风险点（短输入触发 tool memory 注入）同步回 `待办事宜.md`，便于后续优化与验收。
+
 ### 采购批准后触发缺货提醒（2026-03-25）
 
 - 修改文件：`backend/server/api/routes_procurement.py`
@@ -26,6 +53,7 @@
 - **能力**：`CoreAgent`（`backend/core/agent.py`）+ `AgentExtension` 注册工具 + `ToolRegistry`，即可用自定义 **system/skill 文案**（由各 extension 的 `get_skill_prompt()` 拼接）和 **OpenAI 格式 tool** 跑 ReAct；入口为 `execute_react()`。
 - **并非零业务依赖**：`README.md` 称「纯框架」，但 `agent.py` 仍 `import backend.config`、`backend.agent.session.SessionStore`，并在带 `file_path`/`file_id` 的 context 时使用 `backend.tools.quotation.excel_summary`。新工程「只拷贝 core 目录」不够，至少需同仓库的 `backend/config.py`、`backend/agent/session.py` 等，或自行 fork 去掉 Excel 分支。
 - **集成测试**：`tests/test_core_glm_query.py` — 仅用 `CoreAgent` + 最小扩展（工具名 `core_test_echo`），读取当前 `.env` 的 `LLM_MODEL`（如 `glm-4.5-air`）与智谱 Key/Base，验证（1）无工具纯文本回复；（2）白名单 `allowed_tools` 下单次工具调用。无 API Key 时 `skip`。运行：`py -3 tests/test_core_glm_query.py`（在 version3 根目录）。
+- **业务集成（JAgent 全工具 + 查价场景）**：`tests/test_integration_agent_react.py` —（1）无网络：校验 `match_quotation` / `search_inventory` / `match_wanding_price` 已注册，system prompt 含技能与输出结构；（2）`@pytest.mark.live`：真实 ReAct「查 DN50 直通价格」，Anthropic 主链路断言 `_anthropic` 已初始化、`client` 为 `None`；401 时 `skip`。仅跑结构：`pytest tests/test_integration_agent_react.py -m "not live"`；含真实调用：`pytest -m live`。
 
 ### API 确认消息功能（2026-03-21）
 
@@ -364,7 +392,7 @@ Agent Team version3/
 
 ## 技能与工具（prompt 内描述）
 
-1. **库存与万鼎价格**：search_inventory、get_inventory_by_code、get_inventory_by_code_batch、match_wanding_price、select_wanding_match、get_profit_by_price、get_profit_by_price_batch。目标：查库存、万鼎报价、各档位价格/利润率。**批量利润率** get_profit_by_price_batch 返回 **data.items**（与输入严格 1:1，含 input_index、item_status、name；matched 时有 matched_price/matched_profit/matched_price_level；skipped 时 skip_reason 仅 missing_code|missing_price|invalid_price），见 `doc/tool-orchestration-and-contract-issues.md`。**批量库存** get_inventory_by_code_batch 接受多个物料编号 codes，单次最多 50 条，返回 data.items（与输入 1:1，含 input_index、code、item_status、item）与 stats（found/not_found/invalid 等），用于一次性获取多产品库存而不在 ReAct 里逐条循环调用 get_inventory_by_code。**逻辑与数据源差异**（先万鼎 LLM 选型→code 查库存、有 code 直查、英文直查库存；Accurate 仅英文有库存无价格、万鼎有中英文与价格）见 `doc/库存与万鼎匹配逻辑与数据源差异.md`。
+1. **库存与万鼎价格**：search_inventory、get_inventory_by_code、get_inventory_by_code_batch、match_quotation、match_wanding_price、select_wanding_match、get_profit_by_price、get_profit_by_price_batch。目标：查库存、万鼎报价、各档位价格/利润率。**match_quotation**（主要询价入口）：并行报价历史 + 万鼎字段匹配并集；**单候选**直接 `single`（不调选型 LLM）；**多候选**时在工具内调用 `llm_select_best`（与 `select_wanding_match` 同源），成功则返回 `single`+`chosen`；LLM 失败或无匹配时返回 `needs_selection`（含 `llm_error`）或 unmatched。后端日志可查 `llm_select_best: calling LLM model=... n_candidates=...`。**match_wanding_price**：多候选时**不**内置选型，返回 `needs_selection`，需对话中再调 **`select_wanding_match`**（日志 `select_wanding_match invoked`）。若用户要「全部价格/列出所有候选」，`skills.py` 允许只展示候选表而不调选型。选型使用 `backend/tools/inventory/config.py` 的 `LLM_MODEL`/`LLM_MAX_TOKENS` 等（默认与 MiniMax 选型一致）。`select_wanding_match` / `llm_select_best` 注入万鼎业务知识（三角阀≠角阀、PPR/PVC 等）。**批量利润率** get_profit_by_price_batch 返回 **data.items**（与输入严格 1:1，含 input_index、item_status、name；matched 时有 matched_price/matched_profit/matched_price_level；skipped 时 skip_reason 仅 missing_code|missing_price|invalid_price），见 `doc/tool-orchestration-and-contract-issues.md`。**批量库存** get_inventory_by_code_batch 接受多个物料编号 codes，单次最多 50 条，返回 data.items（与输入 1:1，含 input_index、code、item_status、item）与 stats（found/not_found/invalid 等），用于一次性获取多产品库存而不在 ReAct 里逐条循环调用 get_inventory_by_code。**逻辑与数据源差异**（先万鼎 LLM 选型→code 查库存、有 code 直查、英文直查库存；Accurate 仅英文有库存无价格、万鼎有中英文与价格）见 `doc/库存与万鼎匹配逻辑与数据源差异.md`。
 2. **无货**：get_oos_list、get_oos_stats、register_oos（从报价单）、register_oos_from_text（用户直接说「XX 无货」时登记，无需文件）。目标：无货登记（文件/文字两种途径）、无货列表、无货统计。OOS 工具的 OpenAI tools schema 现集中定义在 `backend/tools/oos/oos_tools.py`（`get_oos_tools_openai_format`），`backend/agent/tools.py` 通过 `_get_oos_tools()` 聚合到统一工具列表中，便于与库存/报价工具保持同一接入模式。
 3. **报价单**：parse_excel_smart（统一 Excel 解析）、fill_quotation_sheet、edit_excel。目标：提取/填表/普适 Excel；仅暴露 parse_excel_smart 做解析，extract_quotation_data 已从工具列表移除（edit_excel 的 tool schema 已修正为二维数组 `values` 明确 inner `items` 类型）。
 4. **询价填充**：run_quotation_fill。目标：整单流水线（提取→万鼎匹配→库存→回填）。

@@ -177,11 +177,6 @@ def match_quotation_union(
                     c["unit_price"] = float(price_row.get("unit_price", 0) or 0)
             except Exception as e:
                 logger.debug("按 code 查万鼎价格失败: %s", e)
-    # 按来源优先级排序，保证返回顺序确定性（共同 > 历史报价 > 字段匹配）
-    merged = sorted(
-        merged,
-        key=lambda c: _SOURCE_PRIORITY.get(c.get("source", "字段匹配"), 2),
-    )
     return merged
 
 

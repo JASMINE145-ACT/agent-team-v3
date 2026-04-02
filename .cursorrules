@@ -11,16 +11,15 @@
 ## Quick Reference
 
 - **Architecture**: Single-agent ReAct loop (`CoreAgent`), tools registered via `AgentExtension`
-- **Core flow**: `match_quotation` → parallel search → auto LLM selection via `llm_select_best`
-- **Rework**: User says "错了"/"不对" → `_detect_rework_intent()` → `_build_rework_injection()` → `record_correction_to_knowledge()`
+- **Core flow**: `match_quotation` 返回 `single` / `needs_selection` / `unmatched`；**多候选**时在工具内调用 `llm_select_best` 选型，成功则 `single`；`match_wanding_price` 多候选仅 `needs_selection`，需另调 `select_wanding_match`
 - **Tool result shape**: Always `{"success": true/false, "result": "..."}`
-- **match_quotation return types**: `single` | `needs_human_choice` | `unmatched`
+- **match_quotation return types**: `single` | `needs_selection` | `unmatched`
 - **Key files**:
   - `backend/core/agent.py` — CoreAgent ReAct loop
-  - `backend/agent/session.py` — SessionStore with `pending_human_choice`
-  - `backend/tools/inventory/services/inventory_agent_tools.py` — `_execute_match_quotation`
-  - `backend/tools/inventory/services/llm_selector.py` — `llm_select_best`, `_load_relevant_corrections`
-  - `backend/plugins/jagent/skills.py` — `SKILL_KNOWLEDGE_DOC`, `SKILL_KNOWLEDGE_RULES`
+  - `backend/agent/session.py` — SessionStore
+  - `backend/tools/inventory/services/inventory_agent_tools.py` — `_execute_match_quotation`, `select_wanding_match`
+  - `backend/tools/inventory/services/llm_selector.py` — `llm_select_best`（供 `select_wanding_match` 使用）
+  - `backend/plugins/jagent/skills.py` — `SKILL_*` prompts
 
 ---
 
@@ -31,4 +30,3 @@
 3. Use `logging.getLogger(__name__)` — not print statements
 4. Do NOT import version3 modules in other projects — use `version3_tools` borrowing layer
 5. New tools must be registered via `AgentExtension.register(ctx)` → `ctx.register_tool()`
-6. `session.pending_human_choice` access ONLY via `SessionStore.set_pending_human_choice()` / `clear_pending_human_choice()`
