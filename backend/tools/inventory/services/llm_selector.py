@@ -160,80 +160,44 @@ def llm_select_best(
         content: str = ""
         model = getattr(config, "LLM_MODEL", "glm-4.5-air")
         timeout = getattr(config, "LLM_TIMEOUT", 60)
-        mt = min(int(max_tokens or 8192), 8192)
+        # 选型任务始终使用 inventory config 的 OpenAI 兼容 LLM（GLM）。
+        # 主链路协议（anthropic/openai）不影响选型路径，避免切换主链路时意外升级选型模型。
+        # 选型输出为小 JSON（30–80 token），max_tokens 512 绰绰有余。
+        mt = min(int(max_tokens or 512), 512)
 
-        use_anthropic = False
-        AppConfig: Any = None
-        try:
-            from backend.config import Config as AppConfig
-            use_anthropic = (
-                getattr(AppConfig, "PRIMARY_LLM_PROTOCOL", "") == "anthropic"
-                and (getattr(AppConfig, "ANTHROPIC_API_KEY", None) or "").strip()
-                and (getattr(AppConfig, "ANTHROPIC_BASE_URL", None) or "").strip()
-            )
-        except Exception:
-            AppConfig = None
+        from openai import OpenAI
 
-        if use_anthropic and AppConfig is not None:
-            # 与 CoreAgent 主链路一致：Anthropic Messages（MiniMax 官方兼容网关），避免 OpenAI 兼容层另一套域名/密钥导致 401
-            import anthropic as anthropic_sdk
-            from backend.core.anthropic_react_llm import call_anthropic_messages_sync
-
-            _ak = AppConfig.ANTHROPIC_API_KEY.strip()
-            _bu = AppConfig.ANTHROPIC_BASE_URL.strip().rstrip("/")
-            client = anthropic_sdk.Anthropic(api_key=_ak, base_url=_bu)
-            model = (getattr(AppConfig, "LLM_MODEL", None) or model).strip()
-            logger.info(
-                "llm_select_best: Anthropic SDK model=%s n_candidates=%d",
-                model,
-                len(candidates),
+        api_key = getattr(config, "LLM_API_KEY", "") or ""
+        base_url = getattr(config, "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
+        model = getattr(config, "LLM_MODEL", "glm-4.5-air")
+        logger.info(
+            "llm_select_best: OpenAI-compatible model=%s n_candidates=%d",
+            model,
+            len(candidates),
+        )
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        api_kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": _system_selector},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+            "max_tokens": mt,
+            "timeout": timeout,
+        }
+        resp = client.chat.completions.create(**api_kwargs)
+        raw_content = resp.choices[0].message.content if resp.choices else None
+        content = (raw_content or "").strip()
+        if not content:
+            fr = getattr(resp.choices[0], "finish_reason", None) if resp.choices else None
+            logger.warning(
+                "LLM 返回空内容，raw=%s finish_reason=%s%s",
+                raw_content,
+                fr,
+                "（输出被截断，可增大 LLM_MAX_TOKENS 后重试）" if fr == "length" else "",
             )
-            text, _, _, _ = call_anthropic_messages_sync(
-                client,
-                model,
-                [
-                    {"role": "system", "content": _system_selector},
-                    {"role": "user", "content": prompt},
-                ],
-                None,
-                temperature=0.0,
-                max_tokens=mt,
-            )
-            content = (text or "").strip()
-        else:
-            from openai import OpenAI
-
-            api_key = getattr(config, "LLM_API_KEY", "") or ""
-            base_url = getattr(config, "LLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
-            model = getattr(config, "LLM_MODEL", "glm-4.5-air")
-            logger.info(
-                "llm_select_best: OpenAI-compatible model=%s n_candidates=%d",
-                model,
-                len(candidates),
-            )
-            client = OpenAI(api_key=api_key, base_url=base_url)
-            api_kwargs: dict[str, Any] = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": _system_selector},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0,
-                "max_tokens": max_tokens,
-                "timeout": timeout,
-            }
-            resp = client.chat.completions.create(**api_kwargs)
-            raw_content = resp.choices[0].message.content if resp.choices else None
-            content = (raw_content or "").strip()
-            if not content:
-                fr = getattr(resp.choices[0], "finish_reason", None) if resp.choices else None
-                logger.warning(
-                    "LLM 返回空内容，raw=%s finish_reason=%s%s",
-                    raw_content,
-                    fr,
-                    "（输出被截断，可增大 LLM_MAX_TOKENS 后重试）" if fr == "length" else "",
-                )
-                raise ValueError("LLM 返回空内容")
+            raise ValueError("LLM 返回空内容")
 
         if not content:
             raise ValueError("LLM 返回空内容")
