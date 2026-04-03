@@ -59,8 +59,8 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         )
 
     @patch("openai.OpenAI")
-    def test_max_tokens_capped_at_512(self, mock_openai_cls):
-        """max_tokens passed to OpenAI must be <= 512."""
+    def test_max_tokens_capped_at_8000(self, mock_openai_cls):
+        """max_tokens passed to OpenAI must be <= 8000."""
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = _make_openai_response(_GOOD_RESPONSE)
         mock_openai_cls.return_value = mock_client
@@ -70,7 +70,7 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         mt = call_kwargs.get("max_tokens", 99999)
-        self.assertLessEqual(mt, 512, f"max_tokens={mt} exceeds 512")
+        self.assertLessEqual(mt, 8000, f"max_tokens={mt} exceeds 8000")
 
     @patch("openai.OpenAI")
     def test_result_has_reasoning(self, mock_openai_cls):

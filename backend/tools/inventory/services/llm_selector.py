@@ -162,8 +162,7 @@ def llm_select_best(
         timeout = getattr(config, "LLM_TIMEOUT", 60)
         # 选型任务始终使用 inventory config 的 OpenAI 兼容 LLM（GLM）。
         # 主链路协议（anthropic/openai）不影响选型路径，避免切换主链路时意外升级选型模型。
-        # 选型输出为小 JSON（30–80 token），max_tokens 512 绰绰有余。
-        mt = min(int(max_tokens or 512), 512)
+        mt = min(int(max_tokens or 8000), 8000)
 
         from openai import OpenAI
 
