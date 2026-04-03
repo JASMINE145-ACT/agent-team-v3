@@ -3,11 +3,11 @@ import unittest
 
 from backend.core.anthropic_react_llm import (
     _blocks_to_content_and_tool_calls,
-    _filter_think_tokens,
     convert_openai_to_anthropic_messages,
     openai_tools_to_anthropic,
     split_system_and_rest,
 )
+from backend.core.thinking_stream_filter import filter_redacted_thinking_stream
 
 
 class TestAnthropicReactMessages(unittest.TestCase):
@@ -112,18 +112,18 @@ class TestConvertStripsThinking(unittest.TestCase):
         )
 
     def test_strips_think_block_from_assistant_history(self) -> None:
-        """<think>...</think> must not appear in assistant content sent back to MiniMax."""
+        """<redacted_thinking>...</redacted_thinking> must not appear in assistant content sent back to MiniMax."""
         msgs = [
             {"role": "user", "content": "查询价格"},
             {
                 "role": "assistant",
-                "content": "<think>\n根据路由规则，应该调用 match_quotation\n</think>\n价格是 100 元",
+                "content": "<redacted_thinking>\n根据路由规则，应该调用 match_quotation\n</redacted_thinking>\n价格是 100 元",
             },
         ]
         result = convert_openai_to_anthropic_messages(msgs)
         asst = next(m for m in result if m["role"] == "assistant")
         text = self._extract_text(asst)
-        self.assertNotIn("<think>", text)
+        self.assertNotIn("<redacted_thinking>", text)
         self.assertNotIn("根据路由规则", text)
         self.assertIn("价格是 100 元", text)
 
@@ -146,9 +146,9 @@ class TestConvertStripsThinking(unittest.TestCase):
 
 class TestFilterThinkTokens(unittest.TestCase):
     def _collect(self, chunks):
-        """Run _filter_think_tokens over chunks, return emitted text."""
+        """Run filter_redacted_thinking_stream over chunks, return emitted text."""
         emitted: list[str] = []
-        _filter_think_tokens(iter(chunks), emitted.append)
+        filter_redacted_thinking_stream(iter(chunks), emitted.append)
         return "".join(emitted)
 
     def test_passthrough_without_think(self) -> None:
@@ -156,15 +156,15 @@ class TestFilterThinkTokens(unittest.TestCase):
         self.assertEqual(result, "Hello world")
 
     def test_removes_inline_think_block(self) -> None:
-        result = self._collect(["Hello <think>reasoning</think> world"])
+        result = self._collect(["Hello <redacted_thinking>reasoning</redacted_thinking> world"])
         self.assertEqual(result, "Hello  world")
 
     def test_think_split_across_chunks(self) -> None:
-        result = self._collect(["Hello <thi", "nk>reas", "oning</think> world"])
+        result = self._collect(["Hello <redact", "ed_thinking>reas", "oning</redacted_thinking> world"])
         self.assertEqual(result, "Hello  world")
 
     def test_text_before_and_after_think(self) -> None:
-        result = self._collect(["pre <think>hidden</think> post"])
+        result = self._collect(["pre <redacted_thinking>hidden</redacted_thinking> post"])
         self.assertEqual(result, "pre  post")
 
     def test_empty_chunks_ignored(self) -> None:
@@ -172,7 +172,7 @@ class TestFilterThinkTokens(unittest.TestCase):
         self.assertEqual(result, "Hello world")
 
     def test_unclosed_think_suppresses_remainder(self) -> None:
-        result = self._collect(["visible <think>never closed"])
+        result = self._collect(["visible <redacted_thinking>never closed"])
         self.assertEqual(result, "visible ")
 
     def test_no_think_long_text(self) -> None:

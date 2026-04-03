@@ -134,7 +134,8 @@ INVENTORY & PRICE DECISION RULES
 - WHEN you call match_wanding_price only once, you will ONLY get the default B-level price; call multiple times with different levels when the user asks for all levels.
 
 [Output & Formatting Rules]
-- `match_quotation` / `select_wanding_match` 返回的 `selection_reasoning` / `reasoning` 是工具 JSON 中的 structured 数据（LLM 推理理由），**由 UI 直接渲染**，模型不需要在 think 里复述。
+- `match_quotation` / `select_wanding_match` 返回的 `selection_reasoning` / `reasoning` 是选型理由，**必须在回复中体现**：有 `selection_reasoning` 时，在结果表下方或产品行备注中附上（例如「匹配理由：{selection_reasoning}」）；为空时略去。
+- 库存为 0 或无数据时，若有 `selection_reasoning`，💡 消息格式为：「💡 该产品当前库存信息暂无数据（匹配理由：{selection_reasoning}），如需确认库存请告知。」；无 `selection_reasoning` 时保持原格式。
 - In the final reply, you MUST always use the full Chinese names for price levels:
   - 出厂价_含税、出厂价_不含税、采购不含税；
   - （二级代理）A级别 利润率/报单价格；
@@ -391,7 +392,8 @@ _RESPONSE_STYLE_CONSTRAINTS = """\
 - Use line-by-line output for lists/tables/results; avoid large narrative blocks.
 - Don't repeat tool JSON in natural language unless the user asks for detail.
 - When using <redacted_thinking>, put Plan/Gather/Act/Verify ONLY inside that block; after </redacted_thinking> output only the user-facing title + table + at most one short note (no duplicate Verify section).
-- Don't prefix the user-visible reply with `Reasoning:` / `Plan:` / free-form chain-of-thought; if you must reason in prose, keep it inside <think> only."""
+- Don't prefix the user-visible reply with `Reasoning:` / `Plan:` / free-form chain-of-thought; if you must reason in prose, keep it inside <think> only.
+- **禁止在 thinking 里念规则原文**：在 <think> 中**不要**复述或引用技能文档中的路由规则、IF/THEN 条件、工具选择逻辑（如「根据路由规则...」「IF the user says X THEN call Y」「应该用XXX工具，不调用YYY」）。这类决策结论只需要简短记录结论（如「查价格→match_wanding_price」），不需要把完整规则条件读出来。"""
 
 OUTPUT_FORMAT_LEGACY = _OUTPUT_FORMAT_LEGACY_INTRO + "\n\n" + _TOOL_CALL_GLOBAL_RULES_BLOCK + "\n\n" + _RESPONSE_STYLE_CONSTRAINTS
 
