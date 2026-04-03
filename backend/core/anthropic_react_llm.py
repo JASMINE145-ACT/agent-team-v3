@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import time
 import types as _types
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -58,6 +60,11 @@ def convert_openai_to_anthropic_messages(rest: List[dict]) -> List[dict]:
         if role == "assistant":
             tool_calls = m.get("tool_calls") or []
             content = m.get("content") or ""
+            # Strip thinking wrappers — prevent reasoning from polluting conversation
+            # history and being re-emitted by MiniMax as "what the assistant said".
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+            content = re.sub(r"<redacted_thinking>.*?</redacted_thinking>", "", content, flags=re.DOTALL)
+            content = content.strip()
             blocks: List[dict] = []
             if isinstance(content, str) and content.strip():
                 blocks.append({"type": "text", "text": content})
@@ -223,8 +230,13 @@ def _blocks_to_content_and_tool_calls(content: Any) -> Tuple[str, List[_types.Si
 
     merged_text = merged_text.strip()
     if thinking_parts:
-        think = "<" + "think" + ">\n" + "".join(thinking_parts) + "\n<" + "/think" + ">"
-        merged_text = think if not merged_text else (think + "\n" + merged_text)
+        think_content = "".join(thinking_parts)
+        # NOTE: When MiniMax returns thinking via internal attributes (no text-level XML tag),
+        # we wrap it here so _extract_thinking_block can correctly strip it on the agent side.
+        # Without this wrap, bare thinking text lands in merged_text and gets rendered verbatim
+        # in the thinking bubble — visible as "根据路由规则..." rule narrations instead of hidden.
+        wrapped = "<" + "think" + ">\n" + think_content + "\n<" + "/think" + ">"
+        merged_text = wrapped if not merged_text else (wrapped + "\n" + merged_text)
 
 
     return merged_text, tool_calls
@@ -309,11 +321,27 @@ def call_anthropic_messages_stream_sync(
         kwargs["tools"] = tools
     kwargs["temperature"] = temperature
 
+    _thinking_keywords = ("根据路由", "IF ", "THEN ", "用户说", "匹配来源", "应该用", "不要历史",
+                         "rule", "routing", "route to", "should call", "must call")
+    _token_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "debug_stream_tokens.log")
+    # Clear log on each call so each run is isolated
+    try:
+        with open(_token_log_path, "w", encoding="utf-8") as _f:
+            _f.write("")
+    except Exception:
+        pass
+
     with client.messages.stream(**kwargs) as stream:
         if on_token is not None:
             try:
                 for text in stream.text_stream:
                     if text:
+                        # Log token fragments for debugging thinking leakage in streaming mode
+                        try:
+                            with open(_token_log_path, "a", encoding="utf-8") as _f:
+                                _f.write(f"[{int(time.time() * 1000)}] {repr(text[:80])}\n")
+                        except Exception:
+                            pass
                         on_token(text)
             except Exception:
                 logger.debug("anthropic text_stream iteration failed; fallback to final_message", exc_info=True)

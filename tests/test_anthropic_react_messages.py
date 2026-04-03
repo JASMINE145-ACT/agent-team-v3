@@ -98,5 +98,50 @@ class TestAnthropicReactMessages(unittest.TestCase):
         self.assertEqual(text, "")
 
 
+class TestConvertStripsThinking(unittest.TestCase):
+    @staticmethod
+    def _extract_text(asst_msg: dict) -> str:
+        """Extract concatenated text from an Anthropic assistant message."""
+        val = asst_msg.get("content", "")
+        if isinstance(val, str):
+            return val
+        # Anthropic format: list of blocks
+        return " ".join(
+            b.get("text", "") for b in val if isinstance(b, dict) and b.get("type") == "text"
+        )
+
+    def test_strips_think_block_from_assistant_history(self) -> None:
+        """<think>...</think> must not appear in assistant content sent back to MiniMax."""
+        msgs = [
+            {"role": "user", "content": "查询价格"},
+            {
+                "role": "assistant",
+                "content": "<think>\n根据路由规则，应该调用 match_quotation\n</think>\n价格是 100 元",
+            },
+        ]
+        result = convert_openai_to_anthropic_messages(msgs)
+        asst = next(m for m in result if m["role"] == "assistant")
+        text = self._extract_text(asst)
+        self.assertNotIn("<think>", text)
+        self.assertNotIn("根据路由规则", text)
+        self.assertIn("价格是 100 元", text)
+
+    def test_strips_redacted_thinking_from_assistant_history(self) -> None:
+        """<redacted_thinking>...</redacted_thinking> must also be stripped."""
+        msgs = [
+            {"role": "user", "content": "test"},
+            {
+                "role": "assistant",
+                "content": "<redacted_thinking>\nhidden\n</redacted_thinking>\nactual answer",
+            },
+        ]
+        result = convert_openai_to_anthropic_messages(msgs)
+        asst = next(m for m in result if m["role"] == "assistant")
+        text = self._extract_text(asst)
+        self.assertNotIn("<redacted_thinking>", text)
+        self.assertNotIn("hidden", text)
+        self.assertIn("actual answer", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
