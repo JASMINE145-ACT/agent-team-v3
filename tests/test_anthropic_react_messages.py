@@ -3,6 +3,7 @@ import unittest
 
 from backend.core.anthropic_react_llm import (
     _blocks_to_content_and_tool_calls,
+    _filter_think_tokens,
     convert_openai_to_anthropic_messages,
     openai_tools_to_anthropic,
     split_system_and_rest,
@@ -141,6 +142,43 @@ class TestConvertStripsThinking(unittest.TestCase):
         self.assertNotIn("<redacted_thinking>", text)
         self.assertNotIn("hidden", text)
         self.assertIn("actual answer", text)
+
+
+class TestFilterThinkTokens(unittest.TestCase):
+    def _collect(self, chunks):
+        """Run _filter_think_tokens over chunks, return emitted text."""
+        emitted: list[str] = []
+        _filter_think_tokens(iter(chunks), emitted.append)
+        return "".join(emitted)
+
+    def test_passthrough_without_think(self) -> None:
+        result = self._collect(["Hello ", "world"])
+        self.assertEqual(result, "Hello world")
+
+    def test_removes_inline_think_block(self) -> None:
+        result = self._collect(["Hello <think>reasoning</think> world"])
+        self.assertEqual(result, "Hello  world")
+
+    def test_think_split_across_chunks(self) -> None:
+        result = self._collect(["Hello <thi", "nk>reas", "oning</think> world"])
+        self.assertEqual(result, "Hello  world")
+
+    def test_text_before_and_after_think(self) -> None:
+        result = self._collect(["pre <think>hidden</think> post"])
+        self.assertEqual(result, "pre  post")
+
+    def test_empty_chunks_ignored(self) -> None:
+        result = self._collect(["Hello ", "", "world"])
+        self.assertEqual(result, "Hello world")
+
+    def test_unclosed_think_suppresses_remainder(self) -> None:
+        result = self._collect(["visible <think>never closed"])
+        self.assertEqual(result, "visible ")
+
+    def test_no_think_long_text(self) -> None:
+        text = "abcdef" * 50
+        result = self._collect([text])
+        self.assertEqual(result, text)
 
 
 if __name__ == "__main__":
