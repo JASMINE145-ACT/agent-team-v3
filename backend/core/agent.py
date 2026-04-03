@@ -186,29 +186,6 @@ class CoreAgent:
                 output_fmt = of
         self._system_prompt = build_system_prompt("\n\n".join(skill_parts), output_fmt)
 
-        # #region agent log
-        try:
-            _sp = self._system_prompt or ""
-            _payload = {
-                "sessionId": "d48870",
-                "hypothesisId": "H5",
-                "location": "CoreAgent.__init__",
-                "message": "system_prompt_injection",
-                "data": {
-                    "use_claude_loop_prompt": bool(getattr(Config, "USE_CLAUDE_LOOP_PROMPT", False)),
-                    "use_decision_rule_skills": bool(getattr(Config, "USE_DECISION_RULE_SKILLS", False)),
-                    "prompt_has_redacted_thinking": "redacted_thinking" in _sp.lower(),
-                    "prompt_has_claude_loop_header": "Claude Agent Loop" in _sp,
-                    "prompt_mentions_think_tag": bool(re.search(r"<\s*think\s*>", _sp, re.I)),
-                },
-                "timestamp": int(time.time() * 1000),
-            }
-            with open(r"d:\Projects\agent-jk\debug-d48870.log", "a", encoding="utf-8") as _df:
-                _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-        # #endregion
-
     async def execute_react(
         self,
         user_input: str,
@@ -524,33 +501,6 @@ class CoreAgent:
                     )
 
             content, thought = _extract_thinking_block(content)
-            # #region agent log
-            try:
-                _raw = content or ""
-                _has_redacted = bool(re.search(r"<\s*redacted_thinking\s*>", _raw, re.I))
-                _has_think = bool(re.search(r"<\s*think\s*>", _raw, re.I))
-                _payload = {
-                    "sessionId": "d48870",
-                    "hypothesisId": "H1",
-                    "location": "CoreAgent.execute_react:post_extract_think",
-                    "message": "llm_step_thinking_extract",
-                    "data": {
-                        "step": step + 1,
-                        "streaming": on_token is not None,
-                        "has_redacted_thinking_tag": _has_redacted,
-                        "has_think_tag": _has_think,
-                        "thought_len_after_extract": len(thought or ""),
-                        "content_len_after_extract": len(content or ""),
-                        "tool_calls_n": len(tool_calls) if tool_calls else 0,
-                        "finish_reason": str(step_finish_reason),
-                    },
-                    "timestamp": int(time.time() * 1000),
-                }
-                with open(r"d:\Projects\agent-jk\debug-d48870.log", "a", encoding="utf-8") as _df:
-                    _df.write(json.dumps(_payload, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
-            # #endregion
             if thought:
                 thinking_parts.append(thought)
                 trace.append({"step": step + 1, "type": "thinking", "content": thought})
@@ -560,28 +510,6 @@ class CoreAgent:
                     normalized_content = _normalize_user_answer(content)
                     last_answer = normalized_content
                     trace.append({"step": step + 1, "type": "response", "content": normalized_content})
-                    # #region agent log
-                    try:
-                        _payload2 = {
-                            "sessionId": "d48870",
-                            "hypothesisId": "H2",
-                            "location": "CoreAgent.execute_react:final_answer",
-                            "message": "final_user_visible_answer",
-                            "data": {
-                                "step": step + 1,
-                                "normalized_len": len(normalized_content or ""),
-                                "normalized_has_verify_results": bool(
-                                    re.search(r"(?i)verify\s+results", normalized_content or "")
-                                ),
-                                "normalized_has_redacted_tag": "redacted_thinking" in (normalized_content or "").lower(),
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                        with open(r"d:\Projects\agent-jk\debug-d48870.log", "a", encoding="utf-8") as _df:
-                            _df.write(json.dumps(_payload2, ensure_ascii=False) + "\n")
-                    except Exception:
-                        pass
-                    # #endregion
                 break
 
             tool_calls_for_msg = [

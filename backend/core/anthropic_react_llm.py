@@ -12,6 +12,8 @@ import time
 import types as _types
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from backend.core.thinking_stream_filter import filter_redacted_thinking_stream
+
 logger = logging.getLogger(__name__)
 
 
@@ -267,52 +269,6 @@ def _finish_reason_from_stop(stop_reason: Optional[str]) -> Optional[str]:
     return stop_reason
 
 
-def _filter_think_tokens(chunks, on_token: Callable[[str], None]) -> None:
-    """Filter <think>...</think> segments from a streaming text iterator.
-
-    Calls on_token only for non-thinking content. Designed for use with
-    stream.text_stream from the Anthropic SDK when MiniMax returns thinking
-    as plain-text XML tags rather than native thinking blocks.
-
-    Args:
-        chunks: Iterable of str chunks (e.g. stream.text_stream).
-        on_token: Callable[[str], None] — receives only non-thinking text.
-    """
-    OPEN = "<think>"
-    CLOSE = "</think>"
-    buf = ""
-    in_think = False
-
-    for chunk in chunks:
-        if not chunk:
-            continue
-        buf += chunk
-        while True:
-            if not in_think:
-                idx = buf.find(OPEN)
-                if idx == -1:
-                    # Guard: retain (len(OPEN)-1) bytes in case tag spans chunks
-                    safe = max(0, len(buf) - (len(OPEN) - 1))
-                    if safe > 0:
-                        on_token(buf[:safe])
-                        buf = buf[safe:]
-                    break
-                if idx > 0:
-                    on_token(buf[:idx])
-                buf = buf[idx:]
-                in_think = True
-            else:
-                idx = buf.find(CLOSE)
-                if idx == -1:
-                    break  # wait for more chunks
-                buf = buf[idx + len(CLOSE):]
-                in_think = False
-
-    # Flush remainder — only if not inside an unclosed <think>
-    if not in_think and buf:
-        on_token(buf)
-
-
 def call_anthropic_messages_sync(
     client: Any,
     model: str,
@@ -370,7 +326,7 @@ def call_anthropic_messages_stream_sync(
     with client.messages.stream(**kwargs) as stream:
         if on_token is not None:
             try:
-                _filter_think_tokens(stream.text_stream, on_token)
+                filter_redacted_thinking_stream(stream.text_stream, on_token)
             except Exception:
                 logger.debug("anthropic text_stream iteration failed; fallback to final_message", exc_info=True)
         final = stream.get_final_message()

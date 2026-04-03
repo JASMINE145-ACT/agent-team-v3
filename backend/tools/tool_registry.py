@@ -93,12 +93,18 @@ tool_registry = ToolRegistry()
 
 
 def register_builtin_tools() -> None:
-    """在应用启动时调用，注册所有内建后端工具。"""
-    from backend.tools.alert_tool import AlertTool
-    from backend.tools.inventory_tool import InventoryLookupTool
-    from backend.tools.oos_register_tool import OosRegisterTool
-
-    tool_registry.register(InventoryLookupTool())
-    tool_registry.register(OosRegisterTool())
-    tool_registry.register(AlertTool())
-    logger.info("tool_registry: 已注册内建工具 %s", tool_registry.names())
+    """在应用启动时调用，注册所有内建后端工具。各工具独立 try，避免单模块缺失拖垮全部。"""
+    _pairs = [
+        ("backend.tools.inventory_tool", "InventoryLookupTool"),
+        ("backend.tools.oos_register_tool", "OosRegisterTool"),
+        ("backend.tools.alert_tool", "AlertTool"),
+    ]
+    for mod_name, cls_name in _pairs:
+        try:
+            mod = __import__(mod_name, fromlist=[cls_name])
+            cls = getattr(mod, cls_name)
+            tool_registry.register(cls())
+            logger.info("tool_registry: 已注册 %s.%s", mod_name, cls_name)
+        except Exception as e:
+            logger.warning("tool_registry: 跳过 %s.%s — %s", mod_name, cls_name, e)
+    logger.info("tool_registry: 当前已注册 %s", tool_registry.names())

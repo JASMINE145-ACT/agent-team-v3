@@ -135,3 +135,77 @@
 - `backend/core/agent.py` L802 附近：在 tool observation 入消息之前，把 `selection_reasoning` 从 JSON 里提出来，拼成 `【选型依据】<理由>` 追加到 observation 文本后，让模型在下一轮自然把它写进 answer。
 
 **未决定**：是放在 answer 正文里（Option A）还是单独一块 UI（Option B）——用户倾向 Option A，等待确认后实施。
+
+---
+
+## Session 12: 2026-04-03 — match_quotation 三项修复（selection_reasoning 显示 + GLM 路由 + 来源优先级）
+
+**Date**: 2026-04-03
+**Task**: match-quotation-fix
+
+### Summary
+
+三项修复：① `selection_reasoning` 现在必须在回复正文体现；② `llm_select_best` 始终走 GLM OpenAI-compat 路径，不随主链路协议切换；③ 业务知识库追加来源优先级规则。
+
+### Main Changes
+
+- **`backend/plugins/jagent/skills.py`**：
+  - 删除「`selection_reasoning` 由 UI 直接渲染，模型不需要复述」，改为明确指令：有 `selection_reasoning` 时在结果表下方附上「匹配理由：{selection_reasoning}」。
+  - 库存为 0 时若有 `selection_reasoning`，💡 消息格式更新为含匹配理由的版本。
+  - `fallback: true` 时 `chosen.code` 仍有效，须展示（DOC + RULES 双版本均更新）。
+- **`backend/tools/inventory/services/llm_selector.py`**：
+  - 删除 `use_anthropic` 分支，始终走 OpenAI SDK（GLM `open.bigmodel.cn`）。
+  - `max_tokens` cap 从 512 → 8000。
+- **`backend/tools/data/wanding_business_knowledge.md`**：追加来源优先级规则：`source="共同"` > `"历史报价"` > `"字段匹配"`。
+- **新增测试**：
+  - `tests/test_llm_selector_protocol.py`：3 项，验证始终走 OpenAI、max_tokens ≤ 8000、返回 reasoning。
+  - `tests/test_skills_reasoning_display.py`：3 项，验证旧指令已删除、新指令存在。
+
+### Testing
+
+- [OK] `pytest tests/test_llm_selector_protocol.py tests/test_skills_reasoning_display.py` — 6 passed
+- [OK] `pytest tests/test_anthropic_react_messages.py` — 13 passed（含修复 `<redacted_thinking>` 拆分测试）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 观察 GLM 在 `glm-4.5-air` 下是否仍有 `finish_reason=length` + `content=""` 问题（见 Session 13）
+
+---
+
+## Session 13: 2026-04-03 — GLM 思考模型 Plan B（reasoning_content fallback + max_tokens 16000）
+
+**Date**: 2026-04-03
+**Task**: match-quotation-fix (follow-up)
+
+### Summary
+
+`glm-4.5-air` 为思考模型，内部推理消耗 token 后 `message.content` 为空，答案实际在 `message.reasoning_content`。实现 Plan B：当 `content` 为空时自动从 `reasoning_content` 提取 JSON；同步把 max_tokens cap 提升到 16000。
+
+### Root Cause
+
+`glm-4.5-air` 是思考模型：选型 JSON 放在 `message.reasoning_content`，`message.content` 返回空字符串，导致 `llm_selector.py` 抛「LLM 返回空内容」并走规则兜底。日志特征：`finish_reason=length, raw=`（48 秒延迟）。
+
+### Main Changes
+
+- **`backend/tools/inventory/services/llm_selector.py`**：
+  - `mt` cap 从 8000 → 16000。
+  - `raw_content` 为空时，用 `re.search(r'\{[^{}]*"confident"[^{}]*\}', reasoning_content)` 从 `message.reasoning_content` 提取 JSON；成功则继续正常解析，失败则 warning + 规则兜底。
+  - warning 日志新增 `reasoning_content_len` 字段，便于诊断。
+- **`tests/test_llm_selector_protocol.py`**：`test_max_tokens_capped_at_8000` → `test_max_tokens_capped_at_16000`（`assertLessEqual(mt, 16000)`）。
+
+### Testing
+
+- [OK] `pytest tests/test_llm_selector_protocol.py tests/test_anthropic_react_messages.py tests/test_skills_reasoning_display.py` — **20 passed**
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 验证真实 `glm-4.5-air` 调用时 Plan B 是否正确提取 JSON（观察日志「从 reasoning_content 提取到 JSON」）
+- 若 `reasoning_content` 也无 JSON（纯推理链），可考虑换用非思考版 GLM（如 `glm-4-flash`）

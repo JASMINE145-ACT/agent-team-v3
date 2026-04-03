@@ -162,7 +162,7 @@ def llm_select_best(
         timeout = getattr(config, "LLM_TIMEOUT", 60)
         # 选型任务始终使用 inventory config 的 OpenAI 兼容 LLM（GLM）。
         # 主链路协议（anthropic/openai）不影响选型路径，避免切换主链路时意外升级选型模型。
-        mt = min(int(max_tokens or 8000), 8000)
+        mt = min(int(max_tokens or 16000), 16000)
 
         from openai import OpenAI
 
@@ -188,12 +188,24 @@ def llm_select_best(
         resp = client.chat.completions.create(**api_kwargs)
         raw_content = resp.choices[0].message.content if resp.choices else None
         content = (raw_content or "").strip()
+        if not content and resp.choices:
+            # Plan B: GLM 思考模型（如 glm-4.5-air）可能把输出放在 reasoning_content
+            reasoning_content = getattr(resp.choices[0].message, "reasoning_content", None)
+            if reasoning_content:
+                logger.info("content 为空，尝试从 reasoning_content 提取 JSON")
+                m = re.search(r'\{[^{}]*"confident"[^{}]*\}', reasoning_content, re.DOTALL)
+                if m:
+                    raw_content = m.group(0)
+                    content = raw_content.strip()
+                    logger.info("从 reasoning_content 提取到 JSON: %s", content[:200])
         if not content:
             fr = getattr(resp.choices[0], "finish_reason", None) if resp.choices else None
+            reasoning_len = len(getattr(resp.choices[0].message, "reasoning_content", "") or "") if resp.choices else 0
             logger.warning(
-                "LLM 返回空内容，raw=%s finish_reason=%s%s",
+                "LLM 返回空内容，raw=%s finish_reason=%s reasoning_content_len=%d%s",
                 raw_content,
                 fr,
+                reasoning_len,
                 "（输出被截断，可增大 LLM_MAX_TOKENS 后重试）" if fr == "length" else "",
             )
             raise ValueError("LLM 返回空内容")

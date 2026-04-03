@@ -10,6 +10,7 @@ from backend.core.anthropic_react_llm import (
     call_anthropic_messages_sync,
     call_anthropic_messages_stream_sync,
 )
+from backend.core.thinking_stream_filter import RedactedThinkingStreamFilter
 
 # 极简回退格式（与 skills.py 中 OUTPUT_FORMAT_LEGACY 同构），作 build_system_prompt 的默认回退。
 _CORE_OUTPUT_FORMAT = """\
@@ -26,9 +27,19 @@ _CORE_OUTPUT_FORMAT = """\
 
 
 def _extract_tag(content: str, tag: str) -> Tuple[str, str]:
+    """Strip thinking tag pair; return (remaining_text, inner_content).
+    Handles both well-formed <tag>...</tag> and self-closing or incomplete tags
+    that may come from MiniMax internal attribute paths."""
     pattern = re.compile(rf"<{tag}>(.*?)</{tag}>", re.DOTALL | re.IGNORECASE)
     match = pattern.search(content)
     if not match:
+        # Guard: if the content starts with an opening tag but has no closing tag,
+        # strip everything from the opening tag onward to avoid leaking raw thinking.
+        open_pat = re.compile(rf"<{tag}\s*>", re.IGNORECASE)
+        om = open_pat.search(content)
+        if om:
+            before = content[: om.start()]
+            return before.strip(), ""
         return content, ""
     return pattern.sub("", content).strip(), match.group(1).strip()
 
@@ -113,6 +124,9 @@ def call_llm_streaming_sync(client, kwargs: Dict[str, Any], on_token) -> Tuple[s
     tool_calls_raw: Dict[int, dict] = {}
     last_usage = None
     last_finish_reason = None
+    think_filter: Optional[RedactedThinkingStreamFilter] = (
+        RedactedThinkingStreamFilter(on_token) if on_token is not None else None
+    )
     for chunk in stream:
         if getattr(chunk, "usage", None):
             u = chunk.usage
@@ -124,8 +138,11 @@ def call_llm_streaming_sync(client, kwargs: Dict[str, Any], on_token) -> Tuple[s
             last_finish_reason = c0.finish_reason
         delta = c0.delta
         if delta.content:
-            on_token(delta.content)
             content_parts.append(delta.content)
+            if think_filter is not None:
+                think_filter.feed(delta.content)
+            elif on_token is not None:
+                on_token(delta.content)
         if delta.tool_calls:
             for tc in delta.tool_calls:
                 idx = tc.index
@@ -137,6 +154,8 @@ def call_llm_streaming_sync(client, kwargs: Dict[str, Any], on_token) -> Tuple[s
                         tool_calls_raw[idx]["name"] += fn.name
                     if fn.arguments:
                         tool_calls_raw[idx]["arguments"] += fn.arguments
+    if think_filter is not None:
+        think_filter.flush()
     content = "".join(content_parts)
     tool_calls = [
         _types.SimpleNamespace(

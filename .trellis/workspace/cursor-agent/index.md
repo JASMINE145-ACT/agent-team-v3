@@ -9,7 +9,7 @@
 | Item | Status |
 |------|--------|
 | Active File | `journal-2.md` |
-| Total Sessions | 11 |
+| Total Sessions | 13 |
 | Last Active | 2026-04-03 |
 
 ---
@@ -27,6 +27,8 @@
 
 | # | Date | Title |
 |---|------|-------|
+| 13 | 2026-04-03 | GLM 思考模型 Plan B（reasoning_content fallback + max_tokens 16000） |
+| 12 | 2026-04-03 | match_quotation 三项修复（selection_reasoning 显示 + GLM 路由 + 来源优先级） |
 | 11 | 2026-04-03 | Reasoning 显示修复 + Selector Reasoning 需求确认 |
 | 10 | 2026-04-02 | CoreAgent Anthropic Messages routing (1211 fix, full impl) |
 | 9 | 2026-04-01 | Fix BigModel 1211 model-not-found routing |
