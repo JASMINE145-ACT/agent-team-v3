@@ -229,6 +229,7 @@ async def query_stream(
 
         async def _run():
             try:
+                context["push_event"] = _push
                 await agent.execute_react(
                     query_text,
                     context=context,
