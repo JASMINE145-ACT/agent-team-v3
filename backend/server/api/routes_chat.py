@@ -240,6 +240,8 @@ async def query_stream(
             except Exception as e:
                 logger.exception("query_stream 执行失败")
                 _push({"type": "loop_error", "session_id": session_id, "error": str(e)})
+            finally:
+                context.pop("push_event", None)
 
         task = asyncio.create_task(_run())
         while True:

@@ -142,6 +142,9 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
         sources_present = list({c.get("source") for c in norm if c.get("source")})
         match_source_str = "、".join(sources_present) if sources_present else "共同"
 
+        # tool_candidates is always pushed when candidates exist.
+        # tool_selection_done is only pushed in the single-choice path (confident LLM result).
+        # SSE consumers must NOT treat tool_selection_done as a mandatory terminal event.
         _push_event("tool_candidates", {
             "candidates": norm,
             "match_source": match_source_str,
