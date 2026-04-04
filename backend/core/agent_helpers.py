@@ -121,6 +121,7 @@ def call_llm_streaming_sync(client, kwargs: Dict[str, Any], on_token) -> Tuple[s
     create_kw = {**kwargs, "stream": True, "stream_options": {"include_usage": True}}
     stream = client.chat.completions.create(**create_kw)
     content_parts: List[str] = []
+    reasoning_parts: List[str] = []  # GLM thinking model: reasoning_content field
     tool_calls_raw: Dict[int, dict] = {}
     last_usage = None
     last_finish_reason = None
@@ -137,6 +138,11 @@ def call_llm_streaming_sync(client, kwargs: Dict[str, Any], on_token) -> Tuple[s
         if getattr(c0, "finish_reason", None):
             last_finish_reason = c0.finish_reason
         delta = c0.delta
+        # GLM thinking models (e.g. glm-4.5-air) emit reasoning in a separate field.
+        # Accumulate silently — do NOT call on_token so it stays hidden from live stream.
+        rc = getattr(delta, "reasoning_content", None)
+        if rc:
+            reasoning_parts.append(rc)
         if delta.content:
             content_parts.append(delta.content)
             if think_filter is not None:
@@ -157,6 +163,11 @@ def call_llm_streaming_sync(client, kwargs: Dict[str, Any], on_token) -> Tuple[s
     if think_filter is not None:
         think_filter.flush()
     content = "".join(content_parts)
+    # Wrap GLM reasoning so _extract_thinking_block in agent.py can extract it,
+    # identical to how anthropic_react_llm.py wraps MiniMax ThinkingBlock.
+    if reasoning_parts:
+        wrapped = "<think>\n" + "".join(reasoning_parts) + "\n</think>"
+        content = wrapped + ("\n" + content if content else "")
     tool_calls = [
         _types.SimpleNamespace(
             id=tool_calls_raw[k]["id"],
