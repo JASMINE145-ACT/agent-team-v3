@@ -29,6 +29,12 @@ class TestSkillsOutputRules:
         from backend.plugins.jagent.skills import SKILL_INVENTORY_PRICE_RULES
         assert "DO NOT add" in SKILL_INVENTORY_PRICE_RULES and "empty or absent" in SKILL_INVENTORY_PRICE_RULES
 
+    def test_candidates_table_shown_before_result(self):
+        """Output rules must require candidates table before the selected result."""
+        from backend.plugins.jagent.skills import SKILL_INVENTORY_PRICE_RULES
+        assert "候选产品" in SKILL_INVENTORY_PRICE_RULES
+        assert "DO NOT skip the candidates table" in SKILL_INVENTORY_PRICE_RULES
+
 
 class TestSelectorSystemPrompt:
     def test_leads_with_output_only(self):

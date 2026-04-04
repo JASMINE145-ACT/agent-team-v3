@@ -170,9 +170,25 @@ INVENTORY & PRICE DECISION RULES
 - DO NOT write 「—」 or leave 产品编号(code) blank when the JSON has a non-empty code.
 - DO NOT add 「匹配理由：」 when the field is empty or absent.
 
-# ── Candidate count ──────────────────────────────────────────────────
-- IF match_quotation returns `single: true` with N candidates (N > 1 in the `candidates` array),
-  THEN you MUST append to the reply: 「共有 N 个候选，如需查看全部请告知。」（Replace N with the actual length of the `candidates` array.）
+# ── Candidates display (ALWAYS show before selected result) ──────────
+- WHEN match_quotation returns `candidates[]` with N items (N ≥ 1),
+  you MUST output a candidates table FIRST, then the selected product below.
+
+  Required format (replace N and rows with actual data):
+
+  **候选产品**（共 N 条）
+
+  | # | 产品编号(code) | 产品名称 | 来源 | 单价（B级代理） |
+  |---|---|---|---|---|
+  | 1 | {code} | {name} | {source} | {price} |
+  | 2 | {code} | {name} | {source} | {price} |
+
+  **已选：第 {chosen_index} 条**
+
+  [then the standard 查询结果 table immediately below]
+
+- DO NOT skip the candidates table and jump directly to 查询结果.
+- DO NOT write 「共有 N 个候选，如需查看全部请告知。」instead of showing the table.
 
 # ── Inventory-zero format ────────────────────────────────────────────
 - 库存为 0 或无数据时，若有 `selection_reasoning`，💡 消息格式为：「💡 该产品当前库存信息暂无数据（匹配理由：{selection_reasoning}），如需确认库存请告知。」；无 `selection_reasoning` 时保持原格式。
