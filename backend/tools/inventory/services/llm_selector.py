@@ -46,6 +46,18 @@ _BUSINESS_KNOWLEDGE = """
    - 热熔器 / 热熔机 / 熔接器：选「焊接机」PPR 配件（名称含焊接机），规格范围覆盖询价 dn（如 dn20-63）。
 """
 
+_SYSTEM_SELECTOR = (
+    "Output ONLY a single JSON object. "
+    "No prose. No markdown fences. No text outside the JSON.\n"
+    "RULE: Every `reasoning` field MUST be ≥10 Chinese characters. "
+    "Empty string or missing reasoning is INVALID.\n"
+    "Confident:   {\"confident\": true,  \"index\": <1-N>,  \"reasoning\": \"具体理由≥10字\"}\n"
+    "Unsure:      {\"confident\": false, \"options\": [{\"index\": 1, \"reasoning\": \"理由≥10字\"}, ...]}\n"
+    "No match:    {\"confident\": true,  \"index\": 0,     \"reasoning\": \"无匹配原因≥10字\"}\n"
+    "DO NOT force-select a candidate when none truly fits; "
+    "index:0 no-match is required, not optional."
+)
+
 
 def _load_business_knowledge() -> str:
     """
@@ -147,13 +159,6 @@ def llm_select_best(
 无匹配/报无货时输出：{{"confident": true, "index": 0, "reasoning": "<为何无匹配>"}}
 """
 
-    _system_selector = (
-        "你是万鼎产品匹配专家。仅输出一个 JSON，reasoning 字段 **不得为空**，理由至少一句话（10字以上）。"
-        "有把握时 {\"confident\": true, \"index\": 序号或0, \"reasoning\": \"至少10字的具体理由\"}；"
-        "没有把握时 {\"confident\": false, \"options\": [{\"index\": 1, \"reasoning\": \"至少10字的理由\"}, ...]}。"
-        "当候选里没有一个真正匹配时，必须 index: 0 报无货，并在 reasoning 中写明原因。不要其他文字。"
-    )
-
     try:
         from backend.tools.inventory.config import config
 
@@ -178,7 +183,7 @@ def llm_select_best(
         api_kwargs: dict[str, Any] = {
             "model": model,
             "messages": [
-                {"role": "system", "content": _system_selector},
+                {"role": "system", "content": _SYSTEM_SELECTOR},
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0,

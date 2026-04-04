@@ -33,20 +33,20 @@ class TestSkillsOutputRules:
 class TestSelectorSystemPrompt:
     def test_leads_with_output_only(self):
         """System selector must lead with 'Output ONLY' negative constraint."""
-        from backend.tools.inventory.services.llm_selector import _system_selector
+        from backend.tools.inventory.services.llm_selector import _SYSTEM_SELECTOR as _system_selector
         assert _system_selector.startswith("Output ONLY")
 
     def test_has_quantified_reasoning_constraint(self):
         """System selector must specify ≥10 Chinese characters for reasoning."""
-        from backend.tools.inventory.services.llm_selector import _system_selector
+        from backend.tools.inventory.services.llm_selector import _SYSTEM_SELECTOR as _system_selector
         assert "≥10 Chinese characters" in _system_selector
 
     def test_reasoning_invalid_is_stated(self):
         """System selector must state that empty reasoning is INVALID."""
-        from backend.tools.inventory.services.llm_selector import _system_selector
+        from backend.tools.inventory.services.llm_selector import _SYSTEM_SELECTOR as _system_selector
         assert "INVALID" in _system_selector
 
     def test_prohibits_force_select(self):
         """System selector must prohibit force-selecting when no candidate fits."""
-        from backend.tools.inventory.services.llm_selector import _system_selector
+        from backend.tools.inventory.services.llm_selector import _SYSTEM_SELECTOR as _system_selector
         assert "DO NOT force-select" in _system_selector
