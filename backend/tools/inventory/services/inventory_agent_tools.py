@@ -21,6 +21,60 @@ _resolver_failed = False
 _resolver_lock = threading.Lock()
 
 
+def _build_formatted_response(payload: dict[str, Any]) -> str:
+    """
+    为 single 结果预渲染 Markdown 输出，供主 LLM 原文复用，避免弱模型字段解析失败。
+    格式：候选全表 → 已选标注 → 查询结果标准表 → 匹配理由。
+    """
+    candidates = payload.get("candidates") or []
+    chosen_index = payload.get("chosen_index", 0)
+    chosen = payload.get("chosen") or {}
+    match_source = payload.get("match_source", "")
+    reasoning = payload.get("selection_reasoning", "")
+
+    lines: list[str] = []
+
+    # ── 候选全表 ──────────────────────────────────────────────────────
+    n = len(candidates)
+    lines.append(f"**候选产品**（共 {n} 条）")
+    lines.append("")
+    lines.append("| # | 产品编号(code) | 产品名称 | 来源 | 单价（B级代理） |")
+    lines.append("|---|---|---|---|---|")
+    for i, c in enumerate(candidates, 1):
+        code = c.get("code") or "—"
+        name = c.get("matched_name") or "—"
+        source = c.get("source") or "—"
+        price = c.get("unit_price", "—")
+        lines.append(f"| {i} | {code} | {name} | {source} | {price} |")
+
+    lines.append("")
+    if chosen_index:
+        lines.append(f"**已选：第 {chosen_index} 条**")
+        lines.append("")
+
+    # ── 查询结果标准表 ────────────────────────────────────────────────
+    lines.append("**查询结果**")
+    lines.append("")
+    lines.append(f"匹配来源：{match_source}")
+    lines.append("")
+    lines.append("| 产品编号(code) | 产品名称 | 来源 | 单价（B级代理） |")
+    lines.append("|---|---|---|---|")
+    code = chosen.get("code") or "—"
+    name = chosen.get("matched_name") or "—"
+    price = chosen.get("unit_price", "—")
+    source = next(
+        (c.get("source") for c in candidates if (c.get("code") or "") == code),
+        match_source,
+    )
+    lines.append(f"| {code} | {name} | {source} | {price} |")
+
+    if reasoning:
+        lines.append("")
+        lines.append(f"匹配理由：{reasoning}")
+
+    return "\n".join(lines)
+
+
 def _attach_table_code_hint(payload: dict[str, Any]) -> None:
     """
     在 single 结果顶层重复物料编号，降低主模型在 Markdown 表格里用「—」占位而丢失 code 的概率。
@@ -223,6 +277,7 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
             "match_source": match_source_str,
             "fallback": selection_meta.get("from_rule_fallback", False),
         }
+        payload["formatted_response"] = _build_formatted_response(payload)
         _push_event("tool_selection_done", {
             "chosen_index": chosen_index,
             "reasoning": r.get("reasoning", ""),
