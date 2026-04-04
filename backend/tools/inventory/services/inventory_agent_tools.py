@@ -122,6 +122,7 @@ def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
         if not keywords:
             return {"success": True, "result": "请提供 keywords（产品名+规格）。"}
         customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
+        show_all = bool(arguments.get("show_all_candidates", False))
 
         candidates = match_quotation_union(keywords, customer_level=customer_level)
         if not candidates:
@@ -139,6 +140,17 @@ def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
 
         sources_present = list({c.get("source") for c in norm if c.get("source")})
         match_source_str = "、".join(sources_present) if sources_present else "共同"
+
+        # Fast-path: user wants full list, skip LLM selection entirely
+        if show_all:
+            payload = {
+                "needs_selection": True,
+                "show_all_candidates": True,
+                "keywords": keywords,
+                "candidates": norm[:max_show],
+                "match_source": match_source_str,
+            }
+            return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
 
         try:
             r = llm_select_best(keywords, norm)
@@ -944,6 +956,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     "properties": {
                         "keywords": {"type": "string", "description": "产品名+规格，如 直接50mm、直径25PPR"},
                         "customer_level": {"type": "string", "description": "价格档位：A/B/C/D/D_low/E（报单）或 出厂价_含税/出厂价_不含税/采购不含税。用户说「二级代理」用 A、「青山大客户」用 D、「出厂价含税」用 出厂价_含税。默认 B"},
+                        "show_all_candidates": {"type": "boolean", "description": "true 时跳过 LLM 选型，直接返回全部候选列表（用户说「全部list/所有候选/我想自己选/列出所有」时传 true）"},
                     },
                     "required": ["keywords"],
                 },
