@@ -14,7 +14,7 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **get_inventory_by_code(code)**：已知 10 位物料编号时直接查库存。
 - **get_inventory_by_code_batch(codes)**：当用户要求对**多个**编号（如整张表、或 5 个以上编号）查库存时，**必须**使用本工具，一次传入多个物料编号 codes；禁止对每个产品单独多次调用 get_inventory_by_code。单次最多 50 条，更多请分批调用；结果在 data.items 中与输入 1:1 对齐（含 input_index、code、item_status、item）。
 - **modify_inventory(code, action, quantity, memo?)**：**锁定可售**（action=lock，占位）或**增补/归零**（action=supplement）。需物料编号（code）；建议先 get_inventory_by_code 确认。supplement 时 quantity>0 为增补，quantity=0 为将用户仓/可售归零。仅当用户明确说「锁定/预留」「增补/入库/加库存」或「改回 0/归零」时使用。需 INVENTORY_MODIFY_ENABLED=1 才真实写 ACCURATE。
-- **match_quotation(keywords, customer_level?)**：**询价/查 code 时优先用本工具**。同时查报价历史与万鼎字段匹配，结果取并集，每条候选带 **source**（历史报价/字段匹配/共同）。返回格式含 candidates、match_source，单条时含 chosen。这样「直接50mm」等既能命中历史也能命中万鼎时，会显示 共同 或 历史报价。
+- **match_quotation(keywords, customer_level?)**：**询价/查 code 时优先用本工具**。同时查报价历史与万鼎字段匹配，结果取并集，每条候选带 **source**（历史报价/字段匹配/共同）。返回格式含 candidates、match_source，单条时含 chosen。这样「直接50mm」等既能命中历史也能命中万鼎时，会显示 共同 或 历史报价。可选参数 `show_all_candidates=true`：跳过 LLM 选型，直接返回所有候选列表（用户说「全部list/所有候选/我想自己选」时使用）。
 - **match_by_quotation_history(keywords)**：仅历史匹配（单独用较少，一般用 match_quotation）。
 - **match_wanding_price(keywords, customer_level?)**：仅字段匹配（万鼎）。用户明确说「**用万鼎查**」「**不要历史**」「**直接万鼎**」时**只调用本工具**，不调 match_quotation。
 - **select_wanding_match(keywords, candidates)**：LLM 选型。needs_selection 且用户要「选一个」时调用；传入 match_source（来自上一步 observation）。
@@ -58,15 +58,22 @@ INVENTORY & PRICE DECISION RULES
 - IF the user explicitly wants **库存/可售** OR **价格/报价/万鼎/档位**, THEN you MUST route to the inventory/price tools in this section.
 - IF the user clearly says 「用万鼎查」「不要历史」「只用万鼎」,
   THEN you MUST ALWAYS override other routing rules and use match_wanding_price(keywords, customer_level?) ONLY, and you MUST NOT call match_quotation in that scenario.
+- IF the user asks for **价格/报价/万鼎/档位** AND has NOT said 「用万鼎查」「不要历史」「只用万鼎」,
+  THEN you MUST call match_quotation(keywords, customer_level?) as the default price tool — DO NOT call match_wanding_price for a standard price query; match_quotation covers both history and wanding in one call.
+  - Example (Correct): 「直接50 价格」→ match_quotation(keywords="直接50") ✅
+  - Example (Incorrect): 「直接50 价格」→ match_wanding_price(keywords="直接50") ❌（用户未说「只用万鼎」，默认走 match_quotation）
 - IF the user has already provided an exact **10-digit material code**, THEN you MUST call get_inventory_by_code(code) directly for inventory, without going through match_quotation.
-- IF the request is a **Chinese inventory request** (e.g.「50三通的库存」「DN40弯头还有多少」) AND no exact 10-digit product code is already known,
+- IF the request is a **Chinese inventory request** (user mentions 「库存」「可售」「有多少」「还有吗」「有没有货」, e.g.「50三通的库存」「DN40弯头还有多少」) AND no exact 10-digit product code is already known,
   THEN you MUST follow this mandatory chain:
   1) call match_quotation(keywords),
   2) obtain the chosen code from its candidates,
   3) call get_inventory_by_code(code) to check inventory.
+  **CRITICAL**: This 3-step chain is triggered ONLY when the user's intent is **库存/可售**. For price-only queries (user says 「价格/报价/万鼎/档位」 without mentioning 「库存/可售」), you MUST STOP after step 1 — DO NOT proceed to step 3 (get_inventory_by_code).
 - Inline examples (Chinese inventory chain):
   - Example (Correct): 「50三通库存」 → match_quotation(keywords="50三通") → get_inventory_by_code(code from chosen candidate).
+  - Example (Correct): 「三通50 价格」 → match_quotation(keywords="三通50") → STOP. Do NOT call get_inventory_by_code ✅
   - Example (Incorrect): 「50三通库存」 → search_inventory(keywords="50三通") ❌（违反中文库存链路与 Hard Constraints：中文库存不得直接 search_inventory）。
+  - Example (Incorrect): 「三通50 价格」 → match_quotation(...) → get_inventory_by_code(...) ❌（用户没说库存，价格查询不触发 step 3）。
 - IF the request is an **English product name inventory request**, THEN you MAY call search_inventory(keywords) directly for inventory lookup.
 - IF the user asks for **多个产品的库存** (e.g. whole sheet, or clearly 5+ codes) AND you have multiple codes, THEN you MUST use get_inventory_by_code_batch(codes) instead of looping get_inventory_by_code.
 - IF the user asks for **利润率/各档位价格** for a single product with known code or full product name plus a price,
@@ -75,6 +82,13 @@ INVENTORY & PRICE DECISION RULES
   THEN you MUST call get_profit_by_price_batch(items) INSTEAD OF multiple single get_profit_by_price calls.
 - IF the user intent is only “查XX / 查询XX / 查一下25管卡” and has NOT clarified inventory vs price,
   THEN you MUST call ask_clarification to decide whether to follow inventory routing or price routing before choosing tools here.
+- IF the user says 「全部list」「所有候选」「我想自己选」「列出所有」「给我看看所有的」,
+  THEN call match_quotation(keywords, show_all_candidates=true) to return all candidates without auto-selection.
+  DO NOT re-call match_quotation without this flag.
+  DO NOT use match_by_quotation_history as a workaround (history-only, misses wanding matches).
+  - Example (Correct): 「三通50 我想自己选」→ match_quotation(keywords=”三通50”, show_all_candidates=true) ✅
+  - Example (Incorrect): 「三通50 我想自己选」→ match_quotation(keywords=”三通50”) [re-call without flag] ❌
+  - Example (Incorrect): 「三通50 我想自己选」→ match_by_quotation_history(keywords=”三通50”) ❌
 
 [Context Continuity Rules]
 - IF the current user query is incomplete or very short (e.g. only product name or spec like 「50三通」「DN40弯头」),
@@ -107,6 +121,7 @@ INVENTORY & PRICE DECISION RULES
 - DO NOT call search_inventory for **Chinese generic product terms** (管件名 + 规格，如「50三通」「弯头dn40」) when the Chinese inventory chain applies; Chinese inventory in this case MUST go through match_quotation → get_inventory_by_code unless an exact code is already given.
 - DO NOT skip match_quotation for Chinese inventory requests without an exact 10-digit code.
 - DO NOT mix match_quotation and match_wanding_price in the same step unless the user has explicitly requested a separate 万鼎-only comparison; by default, you MUST treat match_quotation as the combined 历史报价 + 万鼎 view.
+- DO NOT call get_inventory_by_code after match_quotation when the user's intent is **price-only** (「价格/报价/万鼎/档位」); get_inventory_by_code is ONLY required in the Chinese inventory chain (when user explicitly mentions 「库存/可售」). Receiving a code from match_quotation does NOT automatically mean you should check inventory.
 - DO NOT call get_inventory_by_code_batch OR get_profit_by_price_batch for more than 50 items in one call; split into batches instead.
 - DO NOT fabricate product codes, price levels, or inventory quantities if tools return no match or low-quality matches.
 
@@ -135,6 +150,8 @@ INVENTORY & PRICE DECISION RULES
 
 [Output & Formatting Rules]
 - `match_quotation` / `select_wanding_match` 返回的 `selection_reasoning` / `reasoning` 是选型理由，**必须在回复中体现**：有 `selection_reasoning` 时，在结果表下方或产品行备注中附上（例如「匹配理由：{selection_reasoning}」）；为空时略去。
+- IF match_quotation returns `single: true` with N candidates (N > 1 in the `candidates` array),
+  THEN you MUST append to the reply: 「共有 N 个候选，如需查看全部请告知。」（Replace N with the actual length of the `candidates` array.）
 - 库存为 0 或无数据时，若有 `selection_reasoning`，💡 消息格式为：「💡 该产品当前库存信息暂无数据（匹配理由：{selection_reasoning}），如需确认库存请告知。」；无 `selection_reasoning` 时保持原格式。
 - In the final reply, you MUST always use the full Chinese names for price levels:
   - 出厂价_含税、出厂价_不含税、采购不含税；
