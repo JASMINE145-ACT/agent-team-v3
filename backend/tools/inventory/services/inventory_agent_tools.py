@@ -107,7 +107,7 @@ def _execute_match_by_quotation_history(arguments: dict[str, Any]) -> dict[str, 
         return {"success": False, "error": str(e), "result": f"历史匹配失败: {e}"}
 
 
-def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
+def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict[str, Any]:
     """
     询价匹配（只读）：
     - 输入：keywords（中文产品名+规格）、可选 customer_level。
@@ -116,6 +116,7 @@ def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
     - needs_selection + low_confidence_options：内置 LLM 无把握时返回精简 options（非整表强选）；unmatched+llm_rejected：LLM 判定 index 0 无匹配。
     """
     try:
+        _push_event = push_event if callable(push_event) else (lambda *_: None)
         from backend.tools.inventory.services.match_and_inventory import match_quotation_union
 
         keywords = (arguments.get("keywords") or "").strip()
@@ -140,6 +141,11 @@ def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
 
         sources_present = list({c.get("source") for c in norm if c.get("source")})
         match_source_str = "、".join(sources_present) if sources_present else "共同"
+
+        _push_event("tool_candidates", {
+            "candidates": norm,
+            "match_source": match_source_str,
+        })
 
         # Fast-path: user wants full list, skip LLM selection entirely
         if show_all:
@@ -214,6 +220,10 @@ def _execute_match_quotation(arguments: dict[str, Any]) -> dict[str, Any]:
             "match_source": match_source_str,
             "fallback": selection_meta.get("from_rule_fallback", False),
         }
+        _push_event("tool_selection_done", {
+            "chosen_index": chosen_index,
+            "reasoning": r.get("reasoning", ""),
+        })
         _attach_table_code_hint(payload)
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
     except Exception as e:
@@ -1045,11 +1055,11 @@ def get_inventory_tools_openai_format() -> list[dict]:
     ]
 
 
-def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any], push_event=None) -> dict[str, Any]:
     """实际执行逻辑（含 get_table_agent / get_resolver），供带超时调用。"""
     # 询价相关工具不依赖 table/sql_agent，可单独执行
     if name == "match_quotation":
-        return _execute_match_quotation(arguments)
+        return _execute_match_quotation(arguments, push_event=push_event)
     if name == "match_by_quotation_history":
         return _execute_match_by_quotation_history(arguments)
     if name == "match_wanding_price":
@@ -1134,10 +1144,10 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any]) -> dict[s
     return {"success": False, "error": f"未知工具: {name}", "result": ""}
 
 
-def execute_inventory_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+def execute_inventory_tool(name: str, arguments: dict[str, Any], push_event=None) -> dict[str, Any]:
     """同步执行库存工具。超时由调用方（execute_tool via asyncio.wait_for）控制。"""
     try:
-        return _execute_inventory_tool_impl(name, arguments)
+        return _execute_inventory_tool_impl(name, arguments, push_event=push_event)
     except Exception as e:
         if "src" in str(e):
             return {

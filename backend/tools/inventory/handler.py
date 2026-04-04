@@ -14,9 +14,10 @@ def _make_inventory_handler(name: str) -> Callable:
     async def handler(args: dict, context: dict) -> str:
         from backend.tools.inventory.services.inventory_agent_tools import execute_inventory_tool, config as inv_config
         timeout_sec = getattr(inv_config, "TOOL_EXEC_TIMEOUT", 35)
+        push_event = context.get("push_event") if isinstance(context, dict) else None
         try:
             out = await asyncio.wait_for(
-                asyncio.to_thread(execute_inventory_tool, name, args),
+                asyncio.to_thread(execute_inventory_tool, name, args, push_event),
                 timeout=timeout_sec,
             )
             return unwrap_tool_result(out)
