@@ -50,6 +50,7 @@ All tools are exposed through a single `CoreAgent` ReAct loop. No multi-agent or
 - Single candidate → returns `single` with `chosen` directly（不调选型 LLM）
 - Multiple candidates → `_execute_match_quotation` 内部调用 `llm_select_best`；成功则 `single`+`chosen`；失败则 `needs_selection`（或带 `llm_error`）
 - No match → `unmatched` / `needs_selection` 等
+- Selector token budget uses `LLM_SELECTOR_MAX_TOKENS`（default `3000`）; on `finish_reason=length`, parser first attempts truncated `reasoning_content` recovery (`index/reason`) before rule fallback.
 
 `match_wanding_price` 多候选时仅 `needs_selection`，需另调 `select_wanding_match`（`llm_select_best`）。`skills.py` 仍约束用户在需人工确认时的行为。
 

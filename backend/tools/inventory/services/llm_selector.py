@@ -41,8 +41,8 @@ _SYSTEM_SELECTOR = (
 
 _SELECTOR_DEFAULT_CANDIDATE_LIMIT = 8
 _SELECTOR_DEFAULT_KNOWLEDGE_CHAR_LIMIT = 1500
-_SELECTOR_DEFAULT_MAX_TOKENS = 192
-_SELECTOR_MAX_TOKENS_CAP = 512
+_SELECTOR_DEFAULT_MAX_TOKENS = 3000
+_SELECTOR_MAX_TOKENS_CAP = 3000
 _SELECTOR_REASON_MAX_LEN = 40
 _SOURCE_PRIORITY = {"共同": 0, "历史报价": 1, "字段匹配": 2}
 
@@ -209,6 +209,19 @@ def _extract_content_from_openai_response(resp: Any) -> tuple[str, str, int]:
             if '"index"' in candidate or '"options"' in candidate:
                 content = candidate
                 logger.info("selector JSON extracted from reasoning_content")
+        if not content:
+            # reasoning_content may be truncated without balanced braces; salvage index/reason by regex.
+            m_idx = re.search(r'"index"\s*:\s*(-?\d+)', reasoning_content)
+            m_reason = re.search(r'"(?:reason|reasoning)"\s*:\s*"([^"]*)"', reasoning_content)
+            if m_idx:
+                content = json.dumps(
+                    {
+                        "index": int(m_idx.group(1)),
+                        "reason": (m_reason.group(1) if m_reason else "").strip(),
+                    },
+                    ensure_ascii=False,
+                )
+                logger.info("selector index/reason salvaged from truncated reasoning_content")
 
     return content, str(finish_reason or ""), reasoning_len
 

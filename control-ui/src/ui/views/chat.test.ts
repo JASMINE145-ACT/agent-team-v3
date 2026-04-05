@@ -101,6 +101,68 @@ describe("chat view", () => {
     expect(container.textContent).toContain("查询结果");
   });
 
+  it("replaces marker messages with cards in chronological order", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          messages: [
+            { role: "user", content: [{ type: "text", text: "查询 直接50 价格" }], timestamp: 1000 },
+            {
+              role: "assistant",
+              content: [{ type: "text", text: `${RENDERED_MARKER} 第一条` }],
+              timestamp: 1001,
+            },
+            { role: "user", content: [{ type: "text", text: "查询 三通50 价格" }], timestamp: 2000 },
+            {
+              role: "assistant",
+              content: [{ type: "text", text: `${RENDERED_MARKER} 第二条` }],
+              timestamp: 2001,
+            },
+          ],
+          toolRenderItems: [
+            {
+              id: "run1:9",
+              runId: "run1",
+              seq: 9,
+              ts: 1001,
+              payload: {
+                formatted_response: "卡片A",
+                chosen: {},
+                chosen_index: 1,
+                match_source: "共同",
+                selection_reasoning: "A",
+              },
+            },
+            {
+              id: "run2:10",
+              runId: "run2",
+              seq: 10,
+              ts: 2001,
+              payload: {
+                formatted_response: "卡片B",
+                chosen: {},
+                chosen_index: 1,
+                match_source: "共同",
+                selection_reasoning: "B",
+              },
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("查询 直接50 价格");
+    expect(text).toContain("卡片A");
+    expect(text).toContain("查询 三通50 价格");
+    expect(text).toContain("卡片B");
+    expect(text.indexOf("查询 直接50 价格")).toBeLessThan(text.indexOf("卡片A"));
+    expect(text.indexOf("卡片A")).toBeLessThan(text.indexOf("查询 三通50 价格"));
+    expect(text.indexOf("查询 三通50 价格")).toBeLessThan(text.indexOf("卡片B"));
+  });
+
   it("renders compacting indicator as a badge", () => {
     const container = document.createElement("div");
     render(
@@ -205,5 +267,44 @@ describe("chat view", () => {
     newSessionButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onNewSession).toHaveBeenCalledTimes(1);
     expect(container.textContent).not.toContain("Stop");
+  });
+
+  it("maps newest card to newest marker when only one card exists", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          messages: [
+            { role: "user", content: [{ type: "text", text: "Q1" }], timestamp: 1000 },
+            { role: "assistant", content: [{ type: "text", text: `${RENDERED_MARKER} old` }], timestamp: 1001 },
+            { role: "user", content: [{ type: "text", text: "Q2" }], timestamp: 2000 },
+            { role: "assistant", content: [{ type: "text", text: `${RENDERED_MARKER} new` }], timestamp: 2001 },
+          ],
+          toolRenderItems: [
+            {
+              id: "run2:10",
+              runId: "run2",
+              seq: 10,
+              ts: 2001,
+              payload: {
+                formatted_response: "CARD-NEW",
+                chosen: {},
+                chosen_index: 1,
+                match_source: "共同",
+                selection_reasoning: "new",
+              },
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("Q1");
+    expect(text).toContain("Q2");
+    expect(text).toContain("CARD-NEW");
+    expect(text.indexOf("Q2")).toBeLessThan(text.indexOf("CARD-NEW"));
+    expect(text.indexOf("CARD-NEW")).toBeGreaterThan(text.indexOf("Q1"));
   });
 });

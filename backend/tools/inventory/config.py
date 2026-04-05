@@ -157,6 +157,7 @@ class InventoryConfig:
     # 与主后端 Config.LLM_MODEL 解耦：优先 INVENTORY_LLM_MODEL，否则沿用全局 LLM_MODEL
     LLM_MODEL: str = _inv_llm_model_raw
     LLM_MAX_TOKENS: int = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
+    LLM_SELECTOR_MAX_TOKENS: int = int(os.environ.get("LLM_SELECTOR_MAX_TOKENS", "3000"))
     TOOL_RESULT_MAX_CHARS: int = int(os.environ.get("TOOL_RESULT_MAX_CHARS", "8000"))
     LLM_TIMEOUT: int = int(os.environ.get("LLM_TIMEOUT", "60"))
     TOOL_EXEC_TIMEOUT: int = int(os.environ.get("TOOL_EXEC_TIMEOUT", "90"))  # AOL 多 code 时需多次 API 调用，35s 易超时

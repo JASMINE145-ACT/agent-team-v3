@@ -58,6 +58,7 @@ _LOOP_PHASE_HEADER_RE = re.compile(
     r"(?im)^\s*(?:#+\s*)?(?:\d+\s*[\.\)]\s*)?"
     r"(?:Plan|Gather(?:\s+Context)?|Act|Verify(?:\s+Results)?)\s*$"
 )
+_RENDERED_MARKER_PREFIX = "[已渲染到前端]"
 
 
 def _normalize_user_answer(text: str) -> str:
@@ -336,6 +337,7 @@ class CoreAgent:
         for step in range(max_steps):
             _raise_if_cancelled()
             is_last = step == max_steps - 1
+            force_final_answer: Optional[str] = None
             if is_last:
                 messages.append({"role": "user", "content": _MAX_STEPS_HINT})
 
@@ -652,6 +654,15 @@ class CoreAgent:
                         except Exception:
                             logger.warning("ext.on_after_tool 失败，已跳过 name=%s", name, exc_info=True)
 
+                    # 工程兜底：match_quotation 已通过 SSE 渲染到前端时，禁止再走下一跳 LLM 生成正文。
+                    # 这样可稳定保证「一个 query 对应一个卡片」而不是 query/card 分离堆积。
+                    if (
+                        name == "match_quotation"
+                        and isinstance(obs, str)
+                        and obs.startswith(_RENDERED_MARKER_PREFIX)
+                    ):
+                        force_final_answer = obs
+
                     tool_obs_cache[cache_key] = obs
 
                     # Rework 机制：当 match_quotation 返回 needs_human_choice 时，存入 session
@@ -729,6 +740,12 @@ class CoreAgent:
                 trace.append({"step": step + 1, "type": "observation", "content": obs})
                 messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": obs})
                 _raise_if_cancelled()
+
+            if force_final_answer:
+                normalized_content = _normalize_user_answer(force_final_answer)
+                last_answer = normalized_content
+                trace.append({"step": step + 1, "type": "response", "content": normalized_content})
+                break
 
             id_to_name = build_tool_call_id_to_name(messages)
             summarizer = make_summarizer(

@@ -144,6 +144,60 @@ CSS variables for theming:
 
 ---
 
+## Scenario: `tool_render` card must stay at conversation level (2026-04-04)
+
+### 1. Scope / Trigger
+- Trigger: New query caused tool card to appear at top/replace old turn, breaking message chronology.
+- Scope: `src/ui/app-tool-stream.ts`, `src/ui/views/chat.ts`.
+
+### 2. Signatures
+- Event payload:
+  - `AgentEventPayload { runId, seq, sessionKey?, stream, ts, data }`
+- Card state:
+  - `ToolRenderItem { id, runId, seq, ts, sessionKey?, payload }`
+- Marker:
+  - `RENDERED_MARKER = "[已渲染到前端]"`
+
+### 3. Contracts
+- `tool_render` events are accepted only for active chat run/session.
+- Marker text from assistant history is replaced by rendered card message.
+- Replacement mapping rule:
+  - newest card maps to newest marker (reverse pairing), not FIFO.
+- If no matching marker exists yet, card is appended as live fallback.
+
+### 4. Validation & Error Matrix
+- malformed payload (`formatted_response` missing/empty):
+  - ignore event and log warning.
+- marker exists + matching card exists:
+  - replace marker bubble with card at same chronological position.
+- marker exists + no card yet:
+  - keep marker message temporarily (history-safe).
+- card exists + no marker in refreshed history:
+  - append fallback card at end of current stream items.
+
+### 5. Good / Base / Bad Cases
+- Good:
+  - Q1→Card1, Q2→Card2 stay in chronological order.
+- Base:
+  - only latest card arrives; it binds to latest marker, old turn untouched.
+- Bad:
+  - FIFO marker replacement causes latest card to replace first historical marker.
+
+### 6. Tests Required (assertion points)
+- `src/ui/views/chat.test.ts`
+  - `replaces marker messages with cards in chronological order`
+  - `maps newest card to newest marker when only one card exists`
+  - `suppresses rendered-marker assistant bubble when tool_render card exists`
+
+### 7. Wrong vs Correct
+#### Wrong
+- Use only single latest `toolRenderData` and FIFO replacement by `pendingCards.shift()`.
+
+#### Correct
+- Persist `toolRenderItems[]`, filter by active run/session, and pair cards-to-markers from newest to oldest.
+
+---
+
 ## Anti-Patterns
 
 ❌ **Don't** put business logic in render methods

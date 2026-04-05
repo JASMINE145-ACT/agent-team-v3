@@ -6,7 +6,14 @@ import {
   refreshActiveTab,
   setLastActiveSessionKey,
 } from "./app-settings.ts";
-import { handleAgentEvent, resetToolRender, resetToolStream, type AgentEventPayload, type ToolRenderPayload } from "./app-tool-stream.ts";
+import {
+  handleAgentEvent,
+  resetToolRender,
+  resetToolStream,
+  type AgentEventPayload,
+  type ToolRenderItem,
+  type ToolRenderPayload,
+} from "./app-tool-stream.ts";
 import type { OpenClawApp } from "./app.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
@@ -53,6 +60,7 @@ type GatewayHost = {
   chatRunId: string | null;
   toolRenderData: ToolRenderPayload | null;
   toolRenderSeq: number | null;
+  toolRenderItems: ToolRenderItem[];
   refreshSessionsAfterChat: Set<string>;
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;

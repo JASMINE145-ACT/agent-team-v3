@@ -4,8 +4,8 @@ const TOOL_STREAM_LIMIT = 50;
 const TOOL_STREAM_THROTTLE_MS = 80;
 const TOOL_OUTPUT_CHAR_LIMIT = 120_000;
 
-// 涓?backend/plugins/jagent/extension.py::RENDERED_MARKER 淇濇寔鍚屾
-export const RENDERED_MARKER = "[宸叉覆鏌撳埌鍓嶇]";
+// Keep in sync with backend/plugins/jagent/extension.py::RENDERED_MARKER
+export const RENDERED_MARKER = "[已渲染到前端]";
 
 export type AgentEventPayload = {
   runId: string;
@@ -167,6 +167,7 @@ export function resetToolStream(host: ToolStreamHost) {
 export function resetToolRender(host: ToolRenderHost) {
   host.toolRenderData = null;
   host.toolRenderSeq = null;
+  host.toolRenderItems = [];
 }
 
 export type CompactionStatus = {
@@ -220,9 +221,19 @@ export type ToolRenderPayload = {
   selection_reasoning: string;
 };
 
+export type ToolRenderItem = {
+  id: string;
+  runId: string;
+  seq: number;
+  ts: number;
+  sessionKey?: string;
+  payload: ToolRenderPayload;
+};
+
 export type ToolRenderHost = ToolStreamHost & {
   toolRenderData?: ToolRenderPayload | null;
   toolRenderSeq?: number | null;
+  toolRenderItems?: ToolRenderItem[];
 };
 
 export function handleToolRenderEvent(host: ToolRenderHost, payload: AgentEventPayload) {
@@ -253,6 +264,38 @@ export function handleToolRenderEvent(host: ToolRenderHost, payload: AgentEventP
     selection_reasoning: typeof data.selection_reasoning === "string" ? data.selection_reasoning : "",
   };
   host.toolRenderSeq = payload.seq;
+  if (!Array.isArray(host.toolRenderItems)) {
+    host.toolRenderItems = [];
+  }
+  const itemId = `${payload.runId}:${payload.seq}`;
+  const nextItem: ToolRenderItem = {
+    id: itemId,
+    runId: payload.runId,
+    seq: payload.seq,
+    ts: typeof payload.ts === "number" ? payload.ts : Date.now(),
+    sessionKey: typeof payload.sessionKey === "string" ? payload.sessionKey : undefined,
+    payload: host.toolRenderData,
+  };
+  const existing = host.toolRenderItems.find((x) => x.id === itemId);
+  if (existing) {
+    existing.payload = nextItem.payload;
+    existing.ts = nextItem.ts;
+    existing.sessionKey = nextItem.sessionKey;
+    return;
+  }
+  const dedup = host.toolRenderItems.find(
+    (x) =>
+      x.runId === nextItem.runId &&
+      x.payload.formatted_response === nextItem.payload.formatted_response,
+  );
+  if (dedup) {
+    dedup.seq = nextItem.seq;
+    dedup.ts = nextItem.ts;
+    dedup.sessionKey = nextItem.sessionKey;
+    dedup.payload = nextItem.payload;
+    return;
+  }
+  host.toolRenderItems.push(nextItem);
 }
 
 export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPayload) {
@@ -268,8 +311,20 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
 
   // Handle tool_render SSE events
   if (payload.stream === "tool_render") {
+    const sessionKey = typeof payload.sessionKey === "string" ? payload.sessionKey : undefined;
+    if (sessionKey && sessionKey !== host.sessionKey) {
+      return;
+    }
+    if (!sessionKey && host.chatRunId && payload.runId !== host.chatRunId) {
+      return;
+    }
+    if (host.chatRunId && payload.runId !== host.chatRunId) {
+      return;
+    }
+    if (!host.chatRunId) {
+      return;
+    }
     handleToolRenderEvent(host as ToolRenderHost, payload);
-    // TODO: render PriceResultCard with the stored toolRenderData
     return;
   }
 

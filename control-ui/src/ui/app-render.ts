@@ -984,6 +984,7 @@ export function renderApp(state: AppViewState) {
                 compactionStatus: state.compactionStatus,
                 toolRenderData: state.toolRenderData,
                 toolRenderSeq: state.toolRenderSeq,
+                toolRenderItems: state.toolRenderItems,
                 assistantAvatarUrl: chatAvatarUrl,
                 messages: state.chatMessages,
                 toolMessages: state.chatToolMessages,

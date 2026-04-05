@@ -113,6 +113,22 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         self.assertEqual(result.get("code"), "1000000002")
 
     @patch("openai.OpenAI")
+    def test_salvages_index_from_truncated_reasoning_content(self, mock_openai_cls):
+        """When reasoning_content JSON is truncated, selector should salvage index by regex."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _make_openai_response_empty_with_reasoning(
+            '...thinking... "index": 2, "reason": "规格场景更匹配" ...',
+            finish_reason="length",
+        )
+        mock_openai_cls.return_value = mock_client
+
+        from backend.tools.inventory.services.llm_selector import llm_select_best
+        result = llm_select_best("等径三通 dn20", CANDIDATES)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("code"), "1000000002")
+
+    @patch("openai.OpenAI")
     def test_rule_fallback_respects_source_priority(self, mock_openai_cls):
         """Fallback path should prefer source priority: 共同 > 历史报价 > 字段匹配."""
         mock_client = MagicMock()

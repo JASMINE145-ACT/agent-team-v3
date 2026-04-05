@@ -10,7 +10,11 @@ import { extractTextCached } from "../chat/message-extract.ts";
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
 import { icons } from "../icons.ts";
 import { detectTextDirection } from "../text-direction.ts";
-import { RENDERED_MARKER, type ToolRenderPayload } from "../app-tool-stream.ts";
+import {
+  RENDERED_MARKER,
+  type ToolRenderItem,
+  type ToolRenderPayload,
+} from "../app-tool-stream.ts";
 import type { SessionsListResult } from "../types.ts";
 import type { ChatItem, MessageGroup } from "../types/chat-types.ts";
 import type { ChatAttachment, ChatQueueItem, ChatUploadedFile } from "../ui-types.ts";
@@ -35,6 +39,7 @@ export type ChatProps = {
   compactionStatus?: CompactionIndicatorStatus | null;
   toolRenderData?: ToolRenderPayload | null;
   toolRenderSeq?: number | null;
+  toolRenderItems?: ToolRenderItem[];
   messages: unknown[];
   toolMessages: unknown[];
   stream: string | null;
@@ -606,7 +611,70 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   const items: ChatItem[] = [];
   const history = Array.isArray(props.messages) ? props.messages : [];
   const tools = Array.isArray(props.toolMessages) ? props.toolMessages : [];
+  const renderCards = Array.isArray(props.toolRenderItems) ? props.toolRenderItems : [];
+  let pendingCards = [...renderCards].sort((a, b) => a.ts - b.ts);
+  if (pendingCards.length === 0 && props.toolRenderData) {
+    pendingCards.push({
+      id: `legacy:${props.toolRenderSeq ?? Date.now()}`,
+      runId: "",
+      seq: props.toolRenderSeq ?? 0,
+      ts: Date.now(),
+      payload: props.toolRenderData,
+    });
+  }
+  const markerAliases = new Set<string>([RENDERED_MARKER, "[已渲染到前端]"]);
+  const isRenderedMarker = (text: string) => {
+    for (const marker of markerAliases) {
+      if (marker && text.startsWith(marker)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const pushCardFromItem = (card: ToolRenderItem, fallbackTimestamp: number, fallbackIndex: number) => {
+    const rendered = card.payload.formatted_response?.trim() ?? "";
+    if (!rendered) {
+      return;
+    }
+    items.push({
+      kind: "message",
+      key: `tool-render:${props.sessionKey}:${card.id}:${fallbackIndex}`,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: rendered }],
+        timestamp: fallbackTimestamp,
+        __openclaw: { kind: "tool_render", runId: card.runId, seq: card.seq },
+      },
+    });
+  };
+
   const historyStart = Math.max(0, history.length - CHAT_HISTORY_RENDER_LIMIT);
+  const markerIndexList: number[] = [];
+  for (let i = historyStart; i < history.length; i++) {
+    const msg = history[i];
+    const normalized = normalizeMessage(msg);
+    const renderedMarkerText = extractTextCached(msg)?.trim() ?? "";
+    if (normalized.role.toLowerCase() === "assistant" && isRenderedMarker(renderedMarkerText)) {
+      markerIndexList.push(i);
+    }
+  }
+  const markerCardByIndex = new Map<number, ToolRenderItem>();
+  if (markerIndexList.length > 0 && pendingCards.length > 0) {
+    // Pair newest card with newest marker so a fresh query never replaces old rows at the top.
+    const freeMarkers = [...markerIndexList];
+    const freeCards = [...pendingCards];
+    while (freeMarkers.length > 0 && freeCards.length > 0) {
+      const markerIndex = freeMarkers.pop();
+      const card = freeCards.pop();
+      if (markerIndex == null || card == null) {
+        break;
+      }
+      markerCardByIndex.set(markerIndex, card);
+    }
+    pendingCards = freeCards;
+  }
+
   if (historyStart > 0) {
     items.push({
       kind: "message",
@@ -622,14 +690,6 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
     const msg = history[i];
     const normalized = normalizeMessage(msg);
     const renderedMarkerText = extractTextCached(msg)?.trim() ?? "";
-    // Once tool_render card is present, suppress compact marker-only assistant bubbles.
-    if (
-      props.toolRenderData &&
-      normalized.role.toLowerCase() === "assistant" &&
-      renderedMarkerText.startsWith(RENDERED_MARKER)
-    ) {
-      continue;
-    }
     const raw = msg as Record<string, unknown>;
     const marker = raw.__openclaw as Record<string, unknown> | undefined;
     if (marker && marker.kind === "compaction") {
@@ -649,6 +709,24 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       continue;
     }
 
+    // Replace compact rendered-marker assistant text with the corresponding tool_render card.
+    if (
+      normalized.role.toLowerCase() === "assistant" &&
+      isRenderedMarker(renderedMarkerText)
+    ) {
+      const card = markerCardByIndex.get(i);
+      if (card) {
+        pushCardFromItem(card, normalized.timestamp ?? Date.now(), i);
+      } else {
+        items.push({
+          kind: "message",
+          key: messageKey(msg, i),
+          message: msg,
+        });
+      }
+      continue;
+    }
+
     items.push({
       kind: "message",
       key: messageKey(msg, i),
@@ -665,20 +743,10 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
     }
   }
 
-  // Render the latest tool-rendered quotation card as an assistant markdown block.
-  const rendered = props.toolRenderData?.formatted_response?.trim() ?? "";
-  if (rendered) {
-    const seq = props.toolRenderSeq ?? Date.now();
-    items.push({
-      kind: "message",
-      key: `tool-render:${props.sessionKey}:${seq}`,
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: rendered }],
-        timestamp: seq,
-        __openclaw: { kind: "tool_render", seq },
-      },
-    });
+  // Live fallback: cards received before history refresh (no marker in history yet).
+  for (let i = 0; i < pendingCards.length; i++) {
+    const card = pendingCards[i];
+    pushCardFromItem(card, card.ts || Date.now(), history.length + i);
   }
 
   if (props.stream !== null) {
