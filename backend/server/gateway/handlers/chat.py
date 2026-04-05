@@ -81,16 +81,22 @@ def handle_chat_history(params: dict) -> dict:
                 "timestamp": ts_ms,
                 "__openclaw": {"kind": "tool_render", "runId": f"history-{idx}", "seq": seq},
             })
-        assistant_blocks: list[dict[str, Any]] = []
-        thinking_text = (getattr(t, "thinking", None) or "").strip()
-        if thinking_text:
-            assistant_blocks.append({"type": "thinking", "thinking": thinking_text})
-        assistant_blocks.append({"type": "text", "text": t.answer})
-        messages.append({
-            "role": "assistant",
-            "content": assistant_blocks,
-            "timestamp": ts_ms,
-        })
+        # When tool_renders are present and the answer is a pure compact marker,
+        # skip the assistant message — virtual renders already cover it and
+        # the marker would trigger duplicate card pairing in buildChatItems.
+        answer_text = t.answer or ""
+        is_pure_marker = bool(tool_renders) and answer_text.startswith("[已渲染到前端]")
+        if not is_pure_marker:
+            assistant_blocks: list[dict[str, Any]] = []
+            thinking_text = (getattr(t, "thinking", None) or "").strip()
+            if thinking_text:
+                assistant_blocks.append({"type": "thinking", "thinking": thinking_text})
+            assistant_blocks.append({"type": "text", "text": answer_text})
+            messages.append({
+                "role": "assistant",
+                "content": assistant_blocks,
+                "timestamp": ts_ms,
+            })
     user_facts = session.user_facts or {}
     payload: dict[str, Any] = {
         "messages": messages,

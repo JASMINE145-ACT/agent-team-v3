@@ -106,3 +106,51 @@ def test_chat_history_no_tool_renders(tmp_path):
         result = handle_chat_history({"sessionKey": "sess-plain"})
 
     assert len(result["messages"]) == 2
+
+
+def test_chat_history_suppresses_compact_marker_when_tool_renders_present(tmp_path):
+    """Pure compact marker answer is suppressed when tool_renders exist (avoids duplicate card pairing)."""
+    from backend.server.gateway.handlers.chat import handle_chat_history
+
+    store = SessionStore(persist_dir=tmp_path)
+    renders = [{"formatted_response": "**查询关键词：三通50**\n卡片内容", "keywords": "三通50"}]
+    store.save_turn(
+        session_id="sess-marker",
+        query="三通50 价格",
+        agent="single",
+        answer="[已渲染到前端] 「三通50」查询结果：已选第1条 code=xxx",
+        extra={"tool_renders": renders},
+    )
+
+    with patch("backend.server.gateway.handlers.chat.get_session_store", return_value=store):
+        result = handle_chat_history({"sessionKey": "sess-marker"})
+
+    messages = result["messages"]
+    # Only user + virtual tool_render; compact marker assistant is suppressed
+    assert len(messages) == 2
+    assert messages[0]["role"] == "user"
+    assert messages[1]["__openclaw"]["kind"] == "tool_render"
+
+
+def test_chat_history_wrapper_text_preserved_when_tool_renders_present(tmp_path):
+    """Meaningful wrapper text alongside tool_renders is kept in history."""
+    from backend.server.gateway.handlers.chat import handle_chat_history
+
+    store = SessionStore(persist_dir=tmp_path)
+    renders = [{"formatted_response": "卡片内容", "keywords": "直接50"}]
+    store.save_turn(
+        session_id="sess-wrapper",
+        query="直接50 三通50 价格",
+        agent="single",
+        answer="以下是直接50和三通50的报价：",
+        extra={"tool_renders": renders},
+    )
+
+    with patch("backend.server.gateway.handlers.chat.get_session_store", return_value=store):
+        result = handle_chat_history({"sessionKey": "sess-wrapper"})
+
+    messages = result["messages"]
+    # user + virtual tool_render + wrapper text
+    assert len(messages) == 3
+    assert messages[1]["__openclaw"]["kind"] == "tool_render"
+    assert "以下是" in messages[2]["content"][-1]["text"]

@@ -298,23 +298,7 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
             "chosen_index": chosen_index,
             "reasoning": r.get("reasoning", ""),
         })
-        # Direct UI render event (do not rely only on extension on_after_tool).
-        _push_event("tool_render", {
-            "formatted_response": payload.get("formatted_response", ""),
-            "keywords": keywords,
-            "chosen": {
-                "code": chosen.get("code", ""),
-                "matched_name": chosen.get("matched_name", ""),
-                "unit_price": chosen.get("unit_price", 0),
-                "source": next(
-                    (c.get("source") for c in norm if (c.get("code") or "") == (chosen.get("code") or "")),
-                    match_source_str,
-                ),
-            },
-            "chosen_index": chosen_index,
-            "match_source": match_source_str,
-            "selection_reasoning": r.get("reasoning", ""),
-        })
+        # tool_render is handled exclusively by extension.py on_after_tool to avoid duplicate SSE pushes.
         _attach_table_code_hint(payload)
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
     except Exception as e:
