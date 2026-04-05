@@ -19,7 +19,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import httpx
 
@@ -78,7 +78,7 @@ class DummyWeComBotClient:
 
     def __init__(
         self,
-        on_message: Callable[[StandardWeComMessage], Awaitable[str]],
+        on_message: Callable[[StandardWeComMessage], Awaitable[List[str]]],
         from_user: str = "debug-user",
         to_user: str = "wecom-bot",
     ) -> None:
@@ -114,12 +114,14 @@ class DummyWeComBotClient:
             }
 
             try:
-                reply = await self._on_message(msg)
+                replies = await self._on_message(msg)
             except Exception as e:  # noqa: BLE001
                 logger.exception("处理 Dummy WeCom 消息失败: %s", e)
-                reply = "系统处理消息时出错，请稍后再试。"
+                print("\n[Agent 回复] 系统处理消息时出错，请稍后再试。\n", flush=True)
+                continue
 
-            print(f"\n[Agent 回复] {reply}\n", flush=True)
+            for reply in replies:
+                print(f"\n[Agent 回复] {reply}\n", flush=True)
 
 
 class WeComBotClient:
@@ -186,14 +188,14 @@ class WeComBotClient:
 
             # 然后处理实际请求
             try:
-                answer = await handle_wecom_message(self._agent, msg)
+                messages = await handle_wecom_message(self._agent, msg)
             except Exception as e:  # noqa: BLE001
                 logger.exception("处理 WeCom 文本消息失败: %s", e)
-                answer = "系统处理消息时出错，请稍后再试。"
+                messages = ["系统处理消息时出错，请稍后再试。"]
 
-            # 发送实际结果
-            stream_id = generate_req_id("stream")
-            await self._ws.reply_stream(frame, stream_id, answer, True)
+            # 每条卡片或回复独立发送
+            for msg_text in messages:
+                await self._ws.reply_stream(frame, generate_req_id("stream"), msg_text, True)
 
         self._ws.on("message.text", _on_text_message)
 
@@ -342,11 +344,12 @@ class WeComBotClient:
                     "raw": frame,
                 }
                 try:
-                    answer = await handle_wecom_message(self._agent, ocr_msg)
+                    ocr_messages = await handle_wecom_message(self._agent, ocr_msg)
                 except Exception as e:  # noqa: BLE001
                     logger.exception("处理 WeCom 图片 OCR 后续消息失败: %s", e)
-                    answer = "系统处理消息时出错，请稍后再试。"
-                await self._ws.reply_stream(frame, generate_req_id("stream"), answer, True)
+                    ocr_messages = ["系统处理消息时出错，请稍后再试。"]
+                for msg_text in ocr_messages:
+                    await self._ws.reply_stream(frame, generate_req_id("stream"), msg_text, True)
                 return
 
             # ---------- Excel 分支：落盘 + 摘要绑定 ----------
