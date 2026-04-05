@@ -447,9 +447,23 @@ KNOWLEDGE RECORDING DECISION RULES
 - IF the user asks you to 「记住」「记录到知识库」「记在 knowledge 里」「润色后记录」「把这个记下来」 (any phrasing),
   THEN you MUST call append_business_knowledge(content) with a polished, complete single piece of knowledge.
 
+- IF the user expresses that the selected product was wrong
+  (「不对」「选错了」「应该是/选 XXX」「我要的是 X 不是 Y」 or any correction of a prior match_quotation result),
+  THEN follow the Correction Learning flow:
+  1. If no reason given → ask: "请问为什么选 XXX 更合适？这样我可以把规则记下来。"
+  2. Once reason is known → compose a draft rule and show it to the user:
+     "准备写入知识库：\n- IF 用户询价「<query>」，THEN 优先选 <product>（<code if known>）。\n  原因：<reason>。[用户纠正]\n确认写入吗？"
+  3. ONLY call append_business_knowledge(content=<rule>) AFTER the user explicitly confirms (「对」「确认」「写入」「可以」).
+  4. DO NOT call append_business_knowledge without confirmation.
+
+[Content Format — MUST USE for corrections]
+- content MUST follow: "- IF 用户询价「<query>」，THEN 优先选 <product name>（<code>）。\n  原因：<reason>。[用户纠正]"
+- Include product code only when known from conversation context; omit if unknown.
+
 [Hard Constraints — MUST FOLLOW]
 - The `content` you pass to append_business_knowledge MUST be a cleaned-up, self-contained knowledge statement (one or several sentences), not raw, noisy chat fragments.
-- DO NOT record casual remarks or off-topic small talk as business knowledge unless the user explicitly requests it to be recorded.
+- DO NOT record casual remarks or off-topic small talk as business knowledge unless the user explicitly requests it.
+- DO NOT call append_business_knowledge for a correction without user confirmation.
 
 [What NOT to save]
 - Don't save facts derivable from code or public specs alone (no long-term value as "knowledge").
@@ -457,7 +471,10 @@ KNOWLEDGE RECORDING DECISION RULES
 
 [Examples]
 - Correct: 用户说「PVC160 不是标准规格，应该理解成 DN150(6\")，帮我记到知识库」 -> you rewrite to a clean sentence and call append_business_knowledge with that sentence.
+- Correct: 用户说「选错了，正三通 DN50 应选 AW给水系列，因为这是给水场景」 -> show IF/THEN draft, wait for user confirmation, then call append_business_knowledge.
+- Correct: 用户只说「选错了」没给原因 -> ask "请问为什么 XXX 更合适？" before doing anything.
 - Incorrect: 用户只是随口说「这客户好难搞」时就调用 append_business_knowledge 记录 ❌.
+- Incorrect: 用户说「选错了」，没经确认就直接调用 append_business_knowledge ❌.
 """
 
 # 极简回退格式：`USE_CLAUDE_LOOP_PROMPT=False` 时注入。去掉强制四段式，聚焦工具调用与结果展示，减少 150–300 tokens/call。
