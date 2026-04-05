@@ -78,6 +78,8 @@ class Session:
     tool_memory: Optional[Dict[str, Any]] = None
     # 用户偏好等长期事实（User Facts）
     user_facts: Optional[Dict[str, Any]] = None
+    # 待人工确认的选型候选（Rework 机制使用）
+    pending_human_choice: Optional[Dict[str, Any]] = None
 
     @classmethod
     def empty(cls, session_id: str) -> "Session":
@@ -90,6 +92,7 @@ class Session:
             summary=None,
             tool_memory=None,
             user_facts=None,
+            pending_human_choice=None,
         )
 
 
@@ -377,6 +380,16 @@ class SessionStore:
             except Exception as e:
                 logger.warning("delete_session 删文件失败 %s: %s", session_id, e)
         return True
+
+    def set_pending_human_choice(self, session_id: str, data: Dict[str, Any]) -> None:
+        """记录待人工确认的选型候选（Rework 机制）。"""
+        session = self.load(session_id)
+        session.pending_human_choice = data
+
+    def clear_pending_human_choice(self, session_id: str) -> None:
+        """清除待人工确认状态。"""
+        session = self.load(session_id)
+        session.pending_human_choice = None
 
 
 _store: Optional[SessionStore] = None
