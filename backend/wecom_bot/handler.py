@@ -8,7 +8,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 from backend.config import Config
 from backend.core.agent import CoreAgent
@@ -131,7 +131,7 @@ def _build_excel_summary_entry(file_path: str) -> Tuple[Dict[str, Any], ExcelSum
     return summary, entry
 
 
-async def handle_wecom_message(agent: CoreAgent, msg: StandardWeComMessage) -> str:
+async def handle_wecom_message(agent: CoreAgent, msg: StandardWeComMessage) -> List[str]:
     """Forward standard WeCom message to CoreAgent and return text answer."""
     msg_type = (msg.get("msg_type") or "").lower()
     if msg_type != "text":
@@ -158,6 +158,17 @@ async def handle_wecom_message(agent: CoreAgent, msg: StandardWeComMessage) -> s
     context["detected_lang"] = detected
     context["preferred_lang"] = "en" if detected == "en" else "zh"
 
+    # Collect formatted card content pushed by extension.py on_after_tool
+    collected_cards: List[str] = []
+
+    def _push_event(event_type: str, data: Dict[str, Any]) -> None:
+        if event_type == "tool_render":
+            card_text = (data.get("formatted_response") or "").strip()
+            if card_text:
+                collected_cards.append(card_text)
+
+    context["push_event"] = _push_event
+
     logger.info("WeCom[%s] -> Agent: %s", session_id, user_text)
 
     async def _call_agent() -> str:
@@ -181,10 +192,12 @@ async def handle_wecom_message(agent: CoreAgent, msg: StandardWeComMessage) -> s
         answer = await asyncio.wait_for(_call_agent(), timeout=90)
     except asyncio.TimeoutError:
         logger.warning("WeCom text timeout, session_id=%s", session_id)
-        return "处理超时，请稍后重试。"
+        return ["处理超时，请稍后重试。"]
 
     logger.info("Agent -> WeCom[%s]: %s", session_id, answer)
-    return answer
+    if collected_cards:
+        return collected_cards
+    return [answer]
 
 
 async def handle_wecom_file(agent: CoreAgent, from_user: str, file_path: str) -> str:
