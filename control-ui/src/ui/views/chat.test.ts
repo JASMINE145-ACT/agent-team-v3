@@ -1,5 +1,6 @@
 import { render } from "lit";
 import { describe, expect, it, vi } from "vitest";
+import { RENDERED_MARKER } from "../app-tool-stream.ts";
 import type { SessionsListResult } from "../types.ts";
 import { renderChat, type ChatProps } from "./chat.ts";
 
@@ -49,6 +50,57 @@ function createProps(overrides: Partial<ChatProps> = {}): ChatProps {
 }
 
 describe("chat view", () => {
+  it("renders tool_render markdown payload when present", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          toolRenderData: {
+            formatted_response: "**查询结果**\n\n| 编号 | 名称 |\n|---|---|\n| 8020020755 | 直通 DN50 |",
+            chosen: { code: "8020020755" },
+            chosen_index: 1,
+            match_source: "共同",
+            selection_reasoning: "规格与来源均匹配",
+          },
+          toolRenderSeq: 1,
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("查询结果");
+    expect(container.textContent).toContain("直通 DN50");
+  });
+
+  it("suppresses rendered-marker assistant bubble when tool_render card exists", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: `${RENDERED_MARKER} 「直通50」查询结果已推送` }],
+              timestamp: Date.now(),
+            },
+          ],
+          toolRenderData: {
+            formatted_response: "**查询结果**\n\n直通 DN50",
+            chosen: { code: "8020020755" },
+            chosen_index: 1,
+            match_source: "共同",
+            selection_reasoning: "规格匹配",
+          },
+          toolRenderSeq: 2,
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).not.toContain(RENDERED_MARKER);
+    expect(container.textContent).toContain("查询结果");
+  });
+
   it("renders compacting indicator as a badge", () => {
     const container = document.createElement("div");
     render(

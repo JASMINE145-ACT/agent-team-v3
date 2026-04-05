@@ -214,6 +214,27 @@ async def handle_chat_send(
     loop = asyncio.get_event_loop()
     event_seq = 0
 
+    def _emit_agent_stream(stream: str, data: dict) -> None:
+        nonlocal event_seq
+        event_seq += 1
+        outbound = {
+            "type": "event",
+            "event": "agent",
+            "payload": {
+                "runId": run_id,
+                "sessionKey": session_key,
+                "seq": event_seq,
+                "ts": int(time.time() * 1000),
+                "stream": stream,
+                "data": data,
+            },
+        }
+        asyncio.ensure_future(send_event(outbound))
+
+    def _schedule_emit_agent_stream(stream: str, data: dict) -> None:
+        # Keep event ordering/seq mutation on the loop thread.
+        loop.call_soon_threadsafe(_emit_agent_stream, stream, data)
+
     def on_token(token: str):
         if cancel_ev.is_set():
             raise asyncio.CancelledError()
@@ -234,8 +255,6 @@ async def handle_chat_send(
         loop.call_soon_threadsafe(lambda: asyncio.ensure_future(send_event(payload)))
 
     def on_event(event_type: str, payload: dict):
-        nonlocal event_seq
-        event_seq += 1
         evt_payload = payload if isinstance(payload, dict) else {}
         if event_type == "agent":
             stream = evt_payload.get("stream")
@@ -244,20 +263,15 @@ async def handle_chat_send(
                 return
             if not isinstance(data, dict):
                 data = {}
-            outbound = {
-                "type": "event",
-                "event": "agent",
-                "payload": {
-                    "runId": run_id,
-                    "sessionKey": session_key,
-                    "seq": event_seq,
-                    "ts": int(time.time() * 1000),
-                    "stream": stream,
-                    "data": data,
-                },
-            }
-            loop.call_soon_threadsafe(lambda: asyncio.ensure_future(send_event(outbound)))
+            _schedule_emit_agent_stream(stream, data)
             return
+
+    def push_event(event_type: str, payload: dict) -> None:
+        stream = event_type.strip() if isinstance(event_type, str) else ""
+        if not stream:
+            return
+        data = payload if isinstance(payload, dict) else {}
+        _schedule_emit_agent_stream(stream, data)
 
     await send_res({"ok": True, "runId": run_id})
 
@@ -265,6 +279,7 @@ async def handle_chat_send(
     result: dict[str, Any] = {}
     state = "final"
     try:
+        context["push_event"] = push_event
         result = await agent.execute_react(
             user_input=user_input,
             context=context,
@@ -295,6 +310,7 @@ async def handle_chat_send(
         return
     finally:
         run_unregister(run_id)
+        context.pop("push_event", None)
 
     final_answer = (result or {}).get("answer") or accumulated[0] or ""
     final_thinking = (result or {}).get("thinking") or ""

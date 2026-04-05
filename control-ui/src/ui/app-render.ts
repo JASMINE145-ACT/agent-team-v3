@@ -966,6 +966,7 @@ export function renderApp(state: AppViewState) {
                   state.chatRunId = null;
                   state.chatQueue = [];
                   state.resetToolStream();
+                  state.resetToolRender();
                   state.resetChatScroll();
                   state.applySettings({
                     ...state.settings,
@@ -981,6 +982,8 @@ export function renderApp(state: AppViewState) {
                 loading: state.chatLoading,
                 sending: state.chatSending,
                 compactionStatus: state.compactionStatus,
+                toolRenderData: state.toolRenderData,
+                toolRenderSeq: state.toolRenderSeq,
                 assistantAvatarUrl: chatAvatarUrl,
                 messages: state.chatMessages,
                 toolMessages: state.chatToolMessages,

@@ -3,7 +3,7 @@ Unit tests: match_quotation with show_all_candidates=True must skip LLM selectio
 """
 import json
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 FAKE_CANDIDATES = [
@@ -45,6 +45,25 @@ class TestShowAllCandidates(unittest.TestCase):
         self.assertTrue(mock_llm.called, "llm_select_best MUST be called when show_all_candidates is not set")
         payload = json.loads(result["result"])
         self.assertTrue(payload.get("single"))
+
+    @patch("backend.tools.inventory.services.match_and_inventory.match_quotation_union")
+    @patch("backend.tools.inventory.services.llm_selector.llm_select_best")
+    def test_candidates_sorted_by_source_priority_before_llm(self, mock_llm, mock_union):
+        """Candidates passed to llm_select_best must be sorted by source priority."""
+        mock_union.return_value = [
+            {"code": "F1", "matched_name": "直通 DN50", "unit_price": 5.0, "source": "字段匹配"},
+            {"code": "C1", "matched_name": "直通 DN50", "unit_price": 5.0, "source": "共同"},
+            {"code": "H1", "matched_name": "直通 DN50", "unit_price": 5.0, "source": "历史报价"},
+        ]
+        mock_llm.return_value = {
+            "code": "C1", "matched_name": "直通 DN50", "unit_price": 5.0, "reasoning": "来源优先"
+        }
+
+        from backend.tools.inventory.services.inventory_agent_tools import _execute_match_quotation
+        _execute_match_quotation({"keywords": "直通50"})
+
+        passed_candidates = mock_llm.call_args[0][1]
+        self.assertEqual([c["source"] for c in passed_candidates], ["共同", "历史报价", "字段匹配"])
 
 
 if __name__ == "__main__":

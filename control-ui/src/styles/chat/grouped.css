@@ -298,3 +298,51 @@ img.chat-avatar {
     transform: translateY(0);
   }
 }
+
+/* PriceResultCard — rendered directly from tool_render SSE data */
+.chat-tool-render {
+  margin: 12px 16px 12px 4px;
+}
+
+.price-result-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  max-width: min(900px, calc(100% - 60px));
+  animation: fade-in 200ms ease-out;
+}
+
+.price-result-card__badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+/* PriceResultCard markdown tables — use theme table styles */
+.price-result-card table {
+  width: auto;
+  border-collapse: collapse;
+  font-size: 14px;
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+.price-result-card table th,
+.price-result-card table td {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.price-result-card table th {
+  background: var(--surface-overlay);
+  font-weight: 600;
+}
+
+.price-result-card strong {
+  font-weight: 600;
+}

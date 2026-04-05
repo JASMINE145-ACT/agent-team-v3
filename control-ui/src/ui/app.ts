@@ -56,8 +56,10 @@ import {
 } from "./controllers/procurement.ts";
 import {
   resetToolStream as resetToolStreamInternal,
+  resetToolRender as resetToolRenderInternal,
   type ToolStreamEntry,
   type CompactionStatus,
+  type ToolRenderPayload,
 } from "./app-tool-stream.ts";
 import type { AppViewState } from "./app-view-state.ts";
 import { normalizeAssistantIdentity } from "./assistant-identity.ts";
@@ -456,6 +458,8 @@ export class OpenClawApp extends LitElement {
   private logsScrollFrame: number | null = null;
   private toolStreamById = new Map<string, ToolStreamEntry>();
   private toolStreamOrder: string[] = [];
+  @state() toolRenderData: ToolRenderPayload | null = null;
+  @state() toolRenderSeq: number | null = null;
   refreshSessionsAfterChat = new Set<string>();
   basePath = "";
   private popStateHandler = () =>
@@ -528,6 +532,10 @@ export class OpenClawApp extends LitElement {
 
   resetToolStream() {
     resetToolStreamInternal(this as unknown as Parameters<typeof resetToolStreamInternal>[0]);
+  }
+
+  resetToolRender() {
+    resetToolRenderInternal(this as unknown as Parameters<typeof resetToolRenderInternal>[0]);
   }
 
   resetChatScroll() {

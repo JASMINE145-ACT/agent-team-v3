@@ -1,16 +1,16 @@
 """验证 OOS handler 注册行为。"""
 
 
-def test_register_oos_tools_registers_at_least_four_tools():
-    """register_oos_tools 应注册至少 4 个工具（list/stats/by_file/by_time + EXTRA_TOOLS 中的 oos 工具）。"""
+def test_register_oos_tools_skips_all_oos_tools():
+    """OOS 工具已暂时从 Chat prompt 中移除，register_oos_tools 不再注册任何工具。"""
     from unittest.mock import MagicMock
     from backend.tools.oos.handler import register_oos_tools
 
     ctx = MagicMock()
     register_oos_tools(ctx)
 
-    assert ctx.register_tool.call_count >= 4, (
-        f"期望至少 4 次 register_tool 调用，实际 {ctx.register_tool.call_count} 次"
+    assert ctx.register_tool.call_count == 0, (
+        f"期望 0 次 register_tool 调用（已暂时禁用），实际 {ctx.register_tool.call_count} 次"
     )
 
 

@@ -209,3 +209,74 @@
 
 - 验证真实 `glm-4.5-air` 调用时 Plan B 是否正确提取 JSON（观察日志「从 reasoning_content 提取到 JSON」）
 - 若 `reasoning_content` 也无 JSON（纯推理链），可考虑换用非思考版 GLM（如 `glm-4-flash`）
+
+---
+
+## Session 14: 2026-04-04 — 暂时从 Chat prompt 中移除 8 个工具
+
+**Date**: 2026-04-04
+**Task**: chat-tool-disable
+
+### Summary
+
+应用户要求，暂时将 8 个工具从 Chat 模型的 tool list 中移除（代码保留，仅不注册到 `ExtensionContext`），以减少 prompt 干扰、降低误触发概率。
+
+### Main Changes
+
+- **`backend/tools/oos/handler.py`**：注释掉 6 个 OOS 工具的注册调用（`get_oos_list`、`get_oos_stats`、`get_oos_by_file`、`get_oos_by_time`、`register_oos`、`register_oos_from_text`）；handler 函数和 adapter 导入保留。
+- **`backend/tools/quotation/handler.py`**：`register_quotation_tools()` 加入 `_SKIPPED_QUOTE_TOOLS = {"fill_quotation_sheet", "run_quotation_fill"}`，在两处注册循环中 `continue` 跳过。
+- **`tests/test_oos_handler.py`**：将 `test_register_oos_tools_registers_at_least_four_tools`（断言 `>= 4`）改为 `test_register_oos_tools_skips_all_oos_tools`（断言 `== 0`），反映工具已禁用。
+
+### What Was NOT Changed
+
+- 所有 handler 函数、schema 定义、business logic 均原样保留
+- `JAgentExtension.register()` 仍调用 `register_oos_tools()` / `register_quotation_tools()`，只是它们现在无操作
+- Work Mode 工具链未受影响
+
+### Testing
+
+- [TODO] 待有 Python+pytest 环境时运行 `pytest tests/test_oos_handler.py -v` 验证
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启后端使更改生效
+- 用户如需重新启用这 8 个工具，取消对应注释即可
+
+---
+
+## Session 15: 2026-04-04 — WeCom 长连接 Bot 工具注入路径排查
+
+**Date**: 2026-04-04
+**Task**: wecom-tool-scope
+
+### Summary
+
+排查发现：Chat prompt 移除 8 个工具的改动会同时影响 WeCom 长连接 bot，原因是 `start_wecom_bot.py` 的 `create_agent()` 使用 `JAgentExtension()` 注册全量工具，两套通道共享同一工具注册表。
+
+### Key Findings
+
+- **两套 WeCom 入口存在于同一代码库**：
+  - `routes_wecom.py` + `wecom_service.py`：HTTP 回调模式（`wecom_chat_bridge` 硬编码 `allowed_tools=["batch_quick_quote"]`）
+  - `backend/wecom_bot/client.py` + `start_wecom_bot.py`：WebSocket 长连接模式（`JAgentExtension()` 注册全量工具，**无 `allowed_tools` 限制**）
+
+- **用户使用场景**：`start_wecom_bot.py` 长连接模式，工具注入走 `JAgentExtension.register()` → `register_oos_tools()` + `register_quotation_tools()`
+
+- **刚才禁用 8 个工具的影响**：OOS 工具（6个）+ `fill_quotation_sheet` + `run_quotation_fill` 也从 WeCom 长连接 bot 的 tool list 中移除
+
+### 待确认
+
+- WeCom 长连接 bot 用户是否需要这 8 个已禁用工具？
+- 是否需要给 WeCom 单独维护一个受限工具白名单？
+
+### Status
+
+[#] **In Progress — awaiting user confirmation**
+
+### Next Steps
+
+- 确认 WeCom 场景是否需要恢复部分或全部已禁用工具
+- 讨论是否需要给 WeCom 长连接 bot 单独配置 `allowed_tools` 白名单（参考 `wecom_chat_bridge` 的做法）

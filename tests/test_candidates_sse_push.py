@@ -127,3 +127,40 @@ class TestCandidatesSSEPush:
 
         event_types = [et for et, _ in events]
         assert event_types.index("tool_candidates") < event_types.index("tool_selection_done")
+
+    def test_push_event_tool_render_called_in_single_path(self):
+        """single path should push tool_render for frontend direct rendering."""
+        events = []
+        push = lambda event_type, payload: events.append((event_type, payload))
+
+        from backend.tools.inventory.services.inventory_agent_tools import _execute_match_quotation
+        candidates_raw = [{"code": "8020020755", "matched_name": "直通PVC", "unit_price": 100.0, "source": "历史报价"}]
+
+        with patch("backend.tools.inventory.services.match_and_inventory.match_quotation_union",
+                   return_value=candidates_raw):
+            with patch("backend.tools.inventory.services.llm_selector.llm_select_best",
+                       return_value=_make_llm_result()):
+                _execute_match_quotation({"keywords": "直通50"}, push_event=push)
+
+        event_types = [et for et, _ in events]
+        assert "tool_render" in event_types
+
+    def test_push_event_tool_render_payload_schema(self):
+        """tool_render payload should satisfy frontend required fields."""
+        events = []
+        push = lambda event_type, payload: events.append((event_type, payload))
+
+        from backend.tools.inventory.services.inventory_agent_tools import _execute_match_quotation
+        candidates_raw = [{"code": "8020020755", "matched_name": "直通PVC", "unit_price": 100.0, "source": "历史报价"}]
+
+        with patch("backend.tools.inventory.services.match_and_inventory.match_quotation_union",
+                   return_value=candidates_raw):
+            with patch("backend.tools.inventory.services.llm_selector.llm_select_best",
+                       return_value=_make_llm_result()):
+                _execute_match_quotation({"keywords": "直通50"}, push_event=push)
+
+        payload = next(p for et, p in events if et == "tool_render")
+        assert isinstance(payload.get("formatted_response"), str)
+        assert isinstance(payload.get("chosen_index"), int)
+        assert isinstance(payload.get("match_source"), str)
+        assert isinstance(payload.get("chosen"), dict)

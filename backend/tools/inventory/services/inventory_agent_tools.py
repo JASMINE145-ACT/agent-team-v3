@@ -11,6 +11,9 @@ from backend.tools.inventory.config import config
 
 logger = logging.getLogger(__name__)
 
+# 候选来源优先级：共同 > 历史报价 > 字段匹配
+_SOURCE_PRIORITY = {"共同": 0, "历史报价": 1, "字段匹配": 2}
+
 # 延迟初始化，避免启动时即依赖 src.api.client / src.cache
 _table_agent = None
 _table_agent_lock = threading.Lock()
@@ -187,14 +190,22 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
             {"code": str(c.get("code", "")), "matched_name": str(c.get("matched_name", "")), "unit_price": float(c.get("unit_price", 0) or 0), "source": c.get("source", "未知")}
             for c in candidates
         ]
+        # 强制来源优先级稳定排序：共同 > 历史报价 > 字段匹配
+        norm = sorted(
+            norm,
+            key=lambda c: _SOURCE_PRIORITY.get((c.get("source") or "").strip(), 99),
+        )
         max_show = 15
         norm = norm[:max_show]
         # 即使仅 1 条候选也走 llm_select_best：避免并集只命中「异径三通」等时直接当成 single，
         # 使业务规则（如等径优于异径）可通过 index:0 / 低置信度 options 纠正。
         from backend.tools.inventory.services.llm_selector import llm_select_best
 
-        sources_present = list({c.get("source") for c in norm if c.get("source")})
-        match_source_str = "、".join(sources_present) if sources_present else "共同"
+        sources_present = [
+            src for src in ("共同", "历史报价", "字段匹配")
+            if any((c.get("source") or "").strip() == src for c in norm)
+        ]
+        match_source_str = "、".join(sources_present) if sources_present else "未知"
 
         # tool_candidates is always pushed when candidates exist.
         # tool_selection_done is only pushed in the single-choice path (confident LLM result).
@@ -281,6 +292,22 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
         _push_event("tool_selection_done", {
             "chosen_index": chosen_index,
             "reasoning": r.get("reasoning", ""),
+        })
+        # Direct UI render event (do not rely only on extension on_after_tool).
+        _push_event("tool_render", {
+            "formatted_response": payload.get("formatted_response", ""),
+            "chosen": {
+                "code": chosen.get("code", ""),
+                "matched_name": chosen.get("matched_name", ""),
+                "unit_price": chosen.get("unit_price", 0),
+                "source": next(
+                    (c.get("source") for c in norm if (c.get("code") or "") == (chosen.get("code") or "")),
+                    match_source_str,
+                ),
+            },
+            "chosen_index": chosen_index,
+            "match_source": match_source_str,
+            "selection_reasoning": r.get("reasoning", ""),
         })
         _attach_table_code_hint(payload)
         return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}

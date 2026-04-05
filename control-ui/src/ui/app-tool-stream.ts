@@ -4,6 +4,9 @@ const TOOL_STREAM_LIMIT = 50;
 const TOOL_STREAM_THROTTLE_MS = 80;
 const TOOL_OUTPUT_CHAR_LIMIT = 120_000;
 
+// 涓?backend/plugins/jagent/extension.py::RENDERED_MARKER 淇濇寔鍚屾
+export const RENDERED_MARKER = "[宸叉覆鏌撳埌鍓嶇]";
+
 export type AgentEventPayload = {
   runId: string;
   seq: number;
@@ -89,7 +92,7 @@ function formatToolOutput(value: unknown): string | null {
   if (!truncated.truncated) {
     return truncated.text;
   }
-  return `${truncated.text}\n\n… truncated (${truncated.total} chars, showing first ${truncated.text.length}).`;
+  return `${truncated.text}\n\n鈥?truncated (${truncated.total} chars, showing first ${truncated.text.length}).`;
 }
 
 function buildToolStreamMessage(entry: ToolStreamEntry): Record<string, unknown> {
@@ -161,6 +164,11 @@ export function resetToolStream(host: ToolStreamHost) {
   flushToolStreamSync(host);
 }
 
+export function resetToolRender(host: ToolRenderHost) {
+  host.toolRenderData = null;
+  host.toolRenderSeq = null;
+}
+
 export type CompactionStatus = {
   active: boolean;
   startedAt: number | null;
@@ -204,6 +212,49 @@ export function handleCompactionEvent(host: CompactionHost, payload: AgentEventP
   }
 }
 
+export type ToolRenderPayload = {
+  formatted_response: string;
+  chosen: Record<string, unknown>;
+  chosen_index: number;
+  match_source: string;
+  selection_reasoning: string;
+};
+
+export type ToolRenderHost = ToolStreamHost & {
+  toolRenderData?: ToolRenderPayload | null;
+  toolRenderSeq?: number | null;
+};
+
+export function handleToolRenderEvent(host: ToolRenderHost, payload: AgentEventPayload) {
+  const data = payload.data ?? {};
+
+  // Render as long as formatted markdown exists; other fields are best-effort.
+  if (typeof data.formatted_response !== "string" || data.formatted_response.trim().length === 0) {
+    console.warn("[tool_render] malformed payload:", data);
+    return;
+  }
+
+  const chosenIndexRaw = data.chosen_index;
+  let chosenIndex = 0;
+  if (typeof chosenIndexRaw === "number" && Number.isFinite(chosenIndexRaw)) {
+    chosenIndex = chosenIndexRaw;
+  } else if (typeof chosenIndexRaw === "string" && chosenIndexRaw.trim()) {
+    const n = Number(chosenIndexRaw);
+    chosenIndex = Number.isFinite(n) ? n : 0;
+  }
+
+  const matchSource = typeof data.match_source === "string" ? data.match_source : "";
+
+  host.toolRenderData = {
+    formatted_response: data.formatted_response,
+    chosen: (data.chosen ?? {}) as Record<string, unknown>,
+    chosen_index: chosenIndex,
+    match_source: matchSource,
+    selection_reasoning: typeof data.selection_reasoning === "string" ? data.selection_reasoning : "",
+  };
+  host.toolRenderSeq = payload.seq;
+}
+
 export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPayload) {
   if (!payload) {
     return;
@@ -212,6 +263,13 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
   // Handle compaction events
   if (payload.stream === "compaction") {
     handleCompactionEvent(host as CompactionHost, payload);
+    return;
+  }
+
+  // Handle tool_render SSE events
+  if (payload.stream === "tool_render") {
+    handleToolRenderEvent(host as ToolRenderHost, payload);
+    // TODO: render PriceResultCard with the stored toolRenderData
     return;
   }
 

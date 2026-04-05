@@ -6,9 +6,11 @@ import {
   renderReadingIndicatorGroup,
   renderStreamingGroup,
 } from "../chat/grouped-render.ts";
+import { extractTextCached } from "../chat/message-extract.ts";
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
 import { icons } from "../icons.ts";
 import { detectTextDirection } from "../text-direction.ts";
+import { RENDERED_MARKER, type ToolRenderPayload } from "../app-tool-stream.ts";
 import type { SessionsListResult } from "../types.ts";
 import type { ChatItem, MessageGroup } from "../types/chat-types.ts";
 import type { ChatAttachment, ChatQueueItem, ChatUploadedFile } from "../ui-types.ts";
@@ -31,6 +33,8 @@ export type ChatProps = {
   sending: boolean;
   canAbort?: boolean;
   compactionStatus?: CompactionIndicatorStatus | null;
+  toolRenderData?: ToolRenderPayload | null;
+  toolRenderSeq?: number | null;
   messages: unknown[];
   toolMessages: unknown[];
   stream: string | null;
@@ -617,6 +621,15 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   for (let i = historyStart; i < history.length; i++) {
     const msg = history[i];
     const normalized = normalizeMessage(msg);
+    const renderedMarkerText = extractTextCached(msg)?.trim() ?? "";
+    // Once tool_render card is present, suppress compact marker-only assistant bubbles.
+    if (
+      props.toolRenderData &&
+      normalized.role.toLowerCase() === "assistant" &&
+      renderedMarkerText.startsWith(RENDERED_MARKER)
+    ) {
+      continue;
+    }
     const raw = msg as Record<string, unknown>;
     const marker = raw.__openclaw as Record<string, unknown> | undefined;
     if (marker && marker.kind === "compaction") {
@@ -650,6 +663,22 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
         message: tools[i],
       });
     }
+  }
+
+  // Render the latest tool-rendered quotation card as an assistant markdown block.
+  const rendered = props.toolRenderData?.formatted_response?.trim() ?? "";
+  if (rendered) {
+    const seq = props.toolRenderSeq ?? Date.now();
+    items.push({
+      kind: "message",
+      key: `tool-render:${props.sessionKey}:${seq}`,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: rendered }],
+        timestamp: seq,
+        __openclaw: { kind: "tool_render", seq },
+      },
+    });
   }
 
   if (props.stream !== null) {

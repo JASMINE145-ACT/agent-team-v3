@@ -91,16 +91,20 @@ def _make_batch_quick_quote_handler() -> Callable:
 def register_quotation_tools(ctx: ExtensionContext) -> None:
     """向 ExtensionContext 注册所有报价单工具。供 JAgentExtension.register() 调用。"""
     from backend.tools.quotation.quote_tools import get_quote_tools_openai_format
+    # 以下工具暂时从 Chat 模型 prompt 中移除（代码保留，仅不注册）
+    _SKIPPED_QUOTE_TOOLS = {"fill_quotation_sheet", "run_quotation_fill"}
     for tool_def in get_quote_tools_openai_format():
         name = tool_def["function"]["name"]
+        if name in _SKIPPED_QUOTE_TOOLS:
+            continue
         need_file = name in _QUOTE_WITH_FILE
         ctx.register_tool(tool_def, _make_quote_handler(name, need_file))
 
     for t in EXTRA_TOOLS:
         n = t["function"]["name"]
-        if n == "run_quotation_fill":
-            ctx.register_tool(t, _make_quotation_fill_handler())
-        elif n == "ask_clarification":
+        if n in _SKIPPED_QUOTE_TOOLS:
+            continue  # fill_quotation_sheet 已由上方跳过；run_quotation_fill 在此跳过
+        if n == "ask_clarification":
             ctx.register_tool(t, _make_ask_clarification_handler())
         elif n == "append_business_knowledge":
             ctx.register_tool(t, _make_append_business_knowledge_handler())

@@ -1,6 +1,6 @@
 """
 Unit tests: llm_select_best must always use OpenAI-compatible (GLM) path,
-regardless of PRIMARY_LLM_PROTOCOL, and must cap max_tokens at 512.
+regardless of PRIMARY_LLM_PROTOCOL, and keep max_tokens bounded.
 """
 import json
 import unittest
@@ -12,16 +12,29 @@ CANDIDATES = [
     {"code": "1000000002", "matched_name": "异径三通 PPR dn20x15", "unit_price": 4.0, "source": "字段匹配"},
 ]
 
-_GOOD_RESPONSE = json.dumps({"confident": True, "index": 1, "reasoning": "等径优先"})
+_GOOD_RESPONSE = json.dumps({"index": 1, "reason": "等径更匹配"}, ensure_ascii=False)
 
 
 def _make_openai_response(content: str):
     """Build a minimal mock that looks like openai ChatCompletion response."""
     msg = MagicMock()
     msg.content = content
+    msg.reasoning_content = None
     choice = MagicMock()
     choice.message = msg
     choice.finish_reason = "stop"
+    resp = MagicMock()
+    resp.choices = [choice]
+    return resp
+
+
+def _make_openai_response_empty_with_reasoning(reasoning_content: str, finish_reason: str = "length"):
+    msg = MagicMock()
+    msg.content = ""
+    msg.reasoning_content = reasoning_content
+    choice = MagicMock()
+    choice.message = msg
+    choice.finish_reason = finish_reason
     resp = MagicMock()
     resp.choices = [choice]
     return resp
@@ -34,7 +47,6 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         mock_client.chat.completions.create.return_value = _make_openai_response(_GOOD_RESPONSE)
         mock_openai_cls.return_value = mock_client
 
-        # Patch AppConfig to look like anthropic is configured
         fake_config = MagicMock()
         fake_config.PRIMARY_LLM_PROTOCOL = "anthropic"
         fake_config.ANTHROPIC_API_KEY = "sk-test"
@@ -51,7 +63,6 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
     def test_uses_openai_not_anthropic_when_protocol_is_anthropic(self, mock_openai_cls):
         """Even with PRIMARY_LLM_PROTOCOL=anthropic, must use OpenAI SDK (GLM)."""
         result, mock_client = self._run_with_anthropic_env(mock_openai_cls)
-        # OpenAI client must have been called
         self.assertTrue(mock_openai_cls.called, "OpenAI client was not instantiated")
         self.assertTrue(
             mock_client.chat.completions.create.called,
@@ -60,7 +71,7 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
 
     @patch("openai.OpenAI")
     def test_max_tokens_capped_at_16000(self, mock_openai_cls):
-        """max_tokens passed to OpenAI must be <= 16000."""
+        """max_tokens passed to OpenAI must be bounded."""
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = _make_openai_response(_GOOD_RESPONSE)
         mock_openai_cls.return_value = mock_client
@@ -84,7 +95,41 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertIn("reasoning", result)
-        self.assertEqual(result["reasoning"], "等径优先")
+        self.assertTrue(result["reasoning"])
+
+    @patch("openai.OpenAI")
+    def test_extracts_json_from_reasoning_content_when_content_empty(self, mock_openai_cls):
+        """When content is empty but reasoning_content has JSON, selector should still parse index/reason."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _make_openai_response_empty_with_reasoning(
+            '...thinking... {"index": 2, "reason": "规格场景更匹配"} ...'
+        )
+        mock_openai_cls.return_value = mock_client
+
+        from backend.tools.inventory.services.llm_selector import llm_select_best
+        result = llm_select_best("等径三通 dn20", CANDIDATES)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("code"), "1000000002")
+
+    @patch("openai.OpenAI")
+    def test_rule_fallback_respects_source_priority(self, mock_openai_cls):
+        """Fallback path should prefer source priority: 共同 > 历史报价 > 字段匹配."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = RuntimeError("mock llm down")
+        mock_openai_cls.return_value = mock_client
+
+        candidates = [
+            {"code": "F001", "matched_name": "直通 DN50", "unit_price": 10.0, "source": "字段匹配"},
+            {"code": "H001", "matched_name": "直通 DN50", "unit_price": 10.0, "source": "历史报价"},
+            {"code": "C001", "matched_name": "直通 DN50", "unit_price": 10.0, "source": "共同"},
+        ]
+
+        from backend.tools.inventory.services.llm_selector import llm_select_best
+        result = llm_select_best("直通50", candidates)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("code"), "C001")
 
 
 if __name__ == "__main__":

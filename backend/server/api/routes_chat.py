@@ -221,6 +221,13 @@ async def query_stream(
         def _push(item: dict) -> None:
             loop.call_soon_threadsafe(queue.put_nowait, item)
 
+        def _push_event(event_type: str, payload: dict) -> None:
+            stream = event_type.strip() if isinstance(event_type, str) else ""
+            if not stream:
+                return
+            data = payload if isinstance(payload, dict) else {}
+            _push({"type": stream, **data})
+
         def on_token(token: str):
             _push({"type": "token", "content": token})
 
@@ -229,7 +236,7 @@ async def query_stream(
 
         async def _run():
             try:
-                context["push_event"] = _push
+                context["push_event"] = _push_event
                 await agent.execute_react(
                     query_text,
                     context=context,

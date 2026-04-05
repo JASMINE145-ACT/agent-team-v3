@@ -64,6 +64,25 @@ class _DummyAgent:
         return {"answer": "ok", "thinking": None, "trace": []}
 
 
+class _DummyPushEventAgent:
+    async def execute_react(self, user_input: str, context: dict, session_id: str, **_: object) -> dict:
+        push = context.get("push_event")
+        if callable(push):
+            push(
+                "tool_render",
+                {
+                    "formatted_response": "### 查询结果\n| 编码 | 名称 |\n|---|---|\n| 8001 | 三通50 |",
+                    "chosen": {"code": "8001", "matched_name": "三通50", "unit_price": 13.36},
+                    "chosen_index": 1,
+                    "match_source": "历史报价",
+                    "selection_reasoning": "名称与规格完全匹配",
+                },
+            )
+        # Let loop-scheduled send_event task run before handler exits.
+        await asyncio.sleep(0.01)
+        return {"answer": "ok", "thinking": None, "trace": []}
+
+
 def test_websocket_entrypoint_sets_preferred_lang_for_english_message():
     agent = _DummyAgent()
     ws = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(agent=agent)))
@@ -85,6 +104,36 @@ def test_websocket_entrypoint_sets_preferred_lang_for_english_message():
     ctx = agent.last_context or {}
     assert ctx.get("preferred_lang") == "en"
     assert ctx.get("detected_lang") == "en"
+
+
+def test_chat_send_forwards_push_event_as_agent_tool_render_stream():
+    ws = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(agent=_DummyPushEventAgent())))
+    params = {
+        "sessionKey": "tool-render-session",
+        "message": "查询 三通50 价格",
+        "context": {},
+    }
+    sent_events = []
+
+    async def _fake_send_res(payload: dict) -> None:
+        return None
+
+    async def _fake_send_event(payload: dict) -> None:
+        sent_events.append(payload)
+
+    asyncio.run(handle_chat_send(ws, "req-tool-render-1", params, _fake_send_res, _fake_send_event))
+
+    agent_events = [e for e in sent_events if e.get("event") == "agent"]
+    tool_render_events = [
+        e for e in agent_events if (e.get("payload") or {}).get("stream") == "tool_render"
+    ]
+    assert len(tool_render_events) >= 1
+    first_payload = tool_render_events[0].get("payload") or {}
+    data = first_payload.get("data") or {}
+    assert data.get("chosen_index") == 1
+    assert data.get("match_source") == "历史报价"
+    assert isinstance(data.get("formatted_response"), str)
+    assert "查询结果" in data.get("formatted_response")
 
 
 def test_wecom_entrypoint_sets_preferred_lang_for_english_message():
@@ -220,4 +269,3 @@ def test_chat_send_empty_session_key_with_normal_message_raises():
     params = {"sessionKey": "", "message": "hello"}
     with pytest.raises(ValueError, match="sessionKey required"):
         asyncio.run(handle_chat_send(ws, "req-err", params, _send_res, _send_event))
-
