@@ -280,3 +280,105 @@
 
 - 确认 WeCom 场景是否需要恢复部分或全部已禁用工具
 - 讨论是否需要给 WeCom 长连接 bot 单独配置 `allowed_tools` 白名单（参考 `wecom_chat_bridge` 的做法）
+
+---
+
+## Session 16: 2026-04-05 — Correction Learning（纠错学习写入知识库）
+
+**Date**: 2026-04-05
+
+### Summary
+
+prompt-only 方式实现纠错学习：当用户纠正选型时，LLM 追问原因 → 生成 IF/THEN 规则草稿展示给用户 → 确认后调用现有 `append_business_knowledge` 工具写入 `wanding_business_knowledge.md`。
+
+### Main Changes
+
+- **`backend/plugins/jagent/skills.py`**：
+  - `SKILL_KNOWLEDGE_DOC`：新增「纠错学习（Correction Learning）」段落，描述四步流程（检测纠正意图 → 追问原因 → 展示 IF/THEN 草稿 → 确认后写入）。
+  - `SKILL_KNOWLEDGE_RULES`：新增纠错路由规则（触发词：「不对」「选错了」「应该是/选 XXX」等）+ IF/THEN 内容格式要求 + 未经确认不得调用工具的硬约束。
+  - 两版同步，DOC 版为自然语言，RULES 版为 Decision Rules 风格。
+- **`tests/test_correction_learning_prompt.py`**（新建）：7 项单元测试，断言两版均含：纠正触发词、原因追问、确认要求、IF/THEN 格式、`IF 用户询价` 具体格式。
+
+### Testing
+
+- [OK] `pytest tests/test_correction_learning_prompt.py -v` — 7 passed
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 17: 2026-04-05 — 修复 Session.pending_human_choice AttributeError
+
+**Date**: 2026-04-05
+
+### Summary
+
+后端运行时崩溃：`'Session' object has no attribute 'pending_human_choice'`。`agent.py` 已引用该字段和 store 方法，但 `session.py` 未实现。
+
+### Root Cause
+
+`backend/core/agent.py` L290 读 `session.pending_human_choice`；L673/676 调 `self._store.set/clear_pending_human_choice()`，均未在 `session.py` 定义。
+
+### Main Changes
+
+- **`backend/agent/session.py`**：
+  - `Session` dataclass：新增 `pending_human_choice: Optional[Dict[str, Any]] = None`。
+  - `Session.empty()`：初始化 `pending_human_choice=None`。
+  - `SessionStore`：新增 `set_pending_human_choice(session_id, data)` 和 `clear_pending_human_choice(session_id)` 方法。
+
+### Testing
+
+- [OK] Python inline 验证：`Session.pending_human_choice` 可读写；两个 store 方法正常执行。
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 18: 2026-04-05 — WeCom 长连接卡片支持（multi reply_stream + 前端独立气泡）
+
+**Date**: 2026-04-05
+
+### Summary
+
+当 `match_quotation` 返回报价卡片时，WeCom 长连接将每张卡片单独通过 `reply_stream` 发送，而不是只发 LLM 文字；前端每张卡片渲染为独立气泡。`extension.py` 零改动。
+
+### Architecture
+
+`handler.py` 在调用 `execute_react` 前注入 `push_event` 收集器到 context；`extension.py` 已有 `if callable(context["push_event"]): push(...)` 逻辑，自动触发收集。`handle_wecom_message` 返回 `List[str]`（卡片列表或 fallback `[answer]`），`client.py` 循环 `reply_stream`。
+
+### Main Changes
+
+- **`backend/wecom_bot/handler.py`**：
+  - 新增 `List` import。
+  - `handle_wecom_message` 返回类型改为 `List[str]`。
+  - 在 context 赋值后注入 `collected_cards: List[str]` + `_push_event` 闭包 + `context["push_event"] = _push_event`。
+  - 函数末尾：有卡片时返回 `collected_cards`，无卡片时返回 `[answer]`；timeout 返回 `["处理超时，请稍后重试。"]`。
+
+- **`backend/wecom_bot/client.py`**：
+  - 新增 `List` import。
+  - `WeComBotClient._on_text_message`：`answer = await handle_wecom_message(...)` → `messages = await ...`；`for msg_text in messages: reply_stream(...)` 循环发送。
+  - 图片 OCR 路径同步更新（`ocr_messages` 变量名 + 循环）。
+  - `DummyWeComBotClient.on_message` 类型注解改为 `Callable[[StandardWeComMessage], Awaitable[List[str]]]`；`run_forever` 改为 `for reply in replies` 打印。
+
+- **`control-ui/src/ui/views/chat.ts`**：
+  - `groupMessages` 函数：检测消息 `__openclaw.kind === "tool_render"`，是则直接 push 为独立 group 并 `continue`，不与相邻 assistant 消息合并为同一气泡。
+
+- **`tests/test_wecom_card_handler.py`**（新建）：4 项测试：无卡片返回 `[answer]`；tool_render 事件返回卡片列表；空 `formatted_response` 被过滤；非 tool_render 事件被忽略。
+
+### Testing
+
+- [OK] `pytest tests/test_wecom_card_handler.py -v` — 4 passed
+- [OK] `npm run build` (control-ui) — success, no TypeScript errors
+
+### Status
+
+[OK] **Completed**
+
+### Notes
+
+- 前端的 `toolRenderItems` 累积逻辑（`app-tool-stream.ts`）和 `buildChatItems` marker 配对逻辑均无需改动，只有 `groupMessages` 一处变更。
+- 多张卡片场景：WeCom 用户收到 N 条独立消息；前端每张卡片独占一个气泡。
