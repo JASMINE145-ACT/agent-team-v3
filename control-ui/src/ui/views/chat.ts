@@ -584,6 +584,27 @@ function groupMessages(items: ChatItem[]): Array<ChatItem | MessageGroup> {
     const role = normalizeRoleForGrouping(normalized.role);
     const timestamp = normalized.timestamp || Date.now();
 
+    // tool_render cards are always standalone — never grouped with adjacent messages
+    const openclaw = (item.message as Record<string, unknown>).__openclaw as
+      | Record<string, unknown>
+      | undefined;
+    const isToolRender = openclaw?.kind === "tool_render";
+    if (isToolRender) {
+      if (currentGroup) {
+        result.push(currentGroup);
+        currentGroup = null;
+      }
+      result.push({
+        kind: "group",
+        key: `group:${role}:${item.key}`,
+        role,
+        messages: [{ message: item.message, key: item.key }],
+        timestamp,
+        isStreaming: false,
+      });
+      continue;
+    }
+
     if (!currentGroup || currentGroup.role !== role) {
       if (currentGroup) {
         result.push(currentGroup);
