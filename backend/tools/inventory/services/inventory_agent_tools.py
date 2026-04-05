@@ -24,10 +24,10 @@ _resolver_failed = False
 _resolver_lock = threading.Lock()
 
 
-def _build_formatted_response(payload: dict[str, Any]) -> str:
+def _build_formatted_response(payload: dict[str, Any], keywords: str = "") -> str:
     """
     为 single 结果预渲染 Markdown 输出，供主 LLM 原文复用，避免弱模型字段解析失败。
-    格式：候选全表 → 已选标注 → 查询结果标准表 → 匹配理由。
+    格式：查询关键词标题 → 候选全表 → 已选标注 → 查询结果标准表 → 匹配理由。
     """
     candidates = payload.get("candidates") or []
     chosen_index = payload.get("chosen_index", 0)
@@ -36,6 +36,11 @@ def _build_formatted_response(payload: dict[str, Any]) -> str:
     reasoning = payload.get("selection_reasoning", "")
 
     lines: list[str] = []
+
+    # ── 查询关键词标题 ─────────────────────────────────────────────────
+    if keywords:
+        lines.append(f"**查询关键词：{keywords}**")
+        lines.append("")
 
     # ── 候选全表 ──────────────────────────────────────────────────────
     n = len(candidates)
@@ -288,7 +293,7 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
             "match_source": match_source_str,
             "fallback": selection_meta.get("from_rule_fallback", False),
         }
-        payload["formatted_response"] = _build_formatted_response(payload)
+        payload["formatted_response"] = _build_formatted_response(payload, keywords=keywords)
         _push_event("tool_selection_done", {
             "chosen_index": chosen_index,
             "reasoning": r.get("reasoning", ""),
@@ -296,6 +301,7 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
         # Direct UI render event (do not rely only on extension on_after_tool).
         _push_event("tool_render", {
             "formatted_response": payload.get("formatted_response", ""),
+            "keywords": keywords,
             "chosen": {
                 "code": chosen.get("code", ""),
                 "matched_name": chosen.get("matched_name", ""),

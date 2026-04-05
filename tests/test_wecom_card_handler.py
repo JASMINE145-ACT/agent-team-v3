@@ -78,3 +78,20 @@ async def test_non_tool_render_events_ignored(fake_agent):
     with patch("backend.wecom_bot.handler._load_wecom_session_context", return_value={}):
         result = await handle_wecom_message(fake_agent, _msg("test"))
     assert result == ["正常回复"]
+
+
+@pytest.mark.asyncio
+async def test_tool_render_payload_contains_keywords(fake_agent):
+    """tool_render push payload should carry keywords field."""
+    captured = []
+
+    async def _execute(user_input, context, session_id):
+        push = context.get("push_event")
+        if callable(push):
+            push("tool_render", {"formatted_response": "卡片", "keywords": "三通50"})
+        return {"answer": "[已渲染到前端]"}
+
+    fake_agent.execute_react = _execute
+    with patch("backend.wecom_bot.handler._load_wecom_session_context", return_value={}):
+        result = await handle_wecom_message(fake_agent, _msg("三通50 价格"))
+    assert result == ["卡片"]

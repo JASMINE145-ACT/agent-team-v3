@@ -19,6 +19,7 @@ class Turn:
     answer: str
     ts: float
     thinking: Optional[str] = None
+    extra: Optional[Dict[str, Any]] = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "Turn":
@@ -28,6 +29,7 @@ class Turn:
             answer=d.get("answer", ""),
             ts=float(d.get("ts", 0.0)),
             thinking=d.get("thinking"),
+            extra=d.get("extra") or None,
         )
 
     def to_dict(self) -> dict:
@@ -188,6 +190,7 @@ class SessionStore:
         file_path: Optional[str] = None,
         input_tokens: Optional[int] = None,
         output_tokens: Optional[int] = None,
+        extra: Optional[Dict[str, Any]] = None,
     ):
         session = self.load(session_id)
         # 存盘保留完整 answer，不截断；build_injection 也注入完整回答，保证模型能看到上一轮完整表格/明细
@@ -198,6 +201,7 @@ class SessionStore:
                 answer=(answer or ""),
                 ts=time.time(),
                 thinking=(thinking or None),
+                extra=extra or None,
             )
         )
         if len(session.turns) > self.MAX_TURNS:

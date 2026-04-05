@@ -62,13 +62,25 @@ def handle_chat_history(params: dict) -> dict:
     session = store.load(session_key)
     messages = []
     turns = session.turns[-(limit // 2) :] if limit else session.turns
-    for t in turns:
+    for idx, t in enumerate(turns):
         ts_ms = int(t.ts * 1000)
         messages.append({
             "role": "user",
             "content": [{"type": "text", "text": t.query}],
             "timestamp": ts_ms,
         })
+        # Expand persisted tool_render cards as standalone virtual assistant messages
+        tool_renders = (getattr(t, "extra", None) or {}).get("tool_renders") or []
+        for seq, render in enumerate(tool_renders):
+            rendered = (render.get("formatted_response") or "").strip()
+            if not rendered:
+                continue
+            messages.append({
+                "role": "assistant",
+                "content": [{"type": "text", "text": rendered}],
+                "timestamp": ts_ms,
+                "__openclaw": {"kind": "tool_render", "runId": f"history-{idx}", "seq": seq},
+            })
         assistant_blocks: list[dict[str, Any]] = []
         thinking_text = (getattr(t, "thinking", None) or "").strip()
         if thinking_text:
@@ -271,6 +283,8 @@ async def handle_chat_send(
         if not stream:
             return
         data = payload if isinstance(payload, dict) else {}
+        if stream == "tool_render":
+            context.setdefault("_tool_renders", []).append(data)
         _schedule_emit_agent_stream(stream, data)
 
     await send_res({"ok": True, "runId": run_id})

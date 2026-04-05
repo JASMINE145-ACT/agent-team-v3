@@ -86,6 +86,7 @@ class JAgentExtension(AgentExtension):
                         }
                         push("tool_render", {
                             "formatted_response": data.get("formatted_response", ""),
+                            "keywords": (args.get("keywords") or "").strip(),
                             "chosen": safe_chosen,
                             "chosen_index": data.get("chosen_index"),
                             "match_source": data.get("match_source", ""),

@@ -31,7 +31,7 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **展示**：结果表上方必写「匹配来源：」+ match_source；表格**必须包含「产品编号(code)」列**；候选含 source 时表格加「来源」列；有 chosen 时标「已选：第 N 条」；select_wanding_match 须传入上步 match_source。
 - **产品编号不得伪造成「—」（重要）**：只要 observation 里 `chosen.code`、顶层 `table_product_code` 或某行候选的 `code` 为非空字符串，表格「产品编号(code)」**必须逐字照抄**（含 10 位数字）；**禁止**用「—」或留空。仅当 JSON 中该项确实无 code（例如部分历史仅有名称）时才可用「—」。即使结果含 `fallback: true`（规则兜底），`chosen.code` 依然有效，**必须如实填入**，不得因 fallback 而改为「—」。
 - **unmatched + llm_rejected 时**：工具返回含 `unmatched: true` 且 `llm_rejected: true`（表示 LLM 判定无真正匹配）时，**禁止**展示全部 candidates 列表让用户再挑；应告知用户「未找到合适匹配，可尝试调整产品名称/规格，或登记无货」。
-- **当 observation 以 `[已渲染到前端]` 开头时**：表示结果已通过 SSE 推送至前端渲染，**必须完全静默，不输出任何文本**。"""
+- **当 observation 以 `[已渲染到前端]` 开头时**：表示结果已通过 SSE 推送至前端渲染为卡片。单产品时完全静默不输出文本；多产品（≥2个）时，在所有工具调用完成后输出一行简短引导语（如「以下是直接50和三通50的报价：」），对上下文中已有结果的产品注明「X 见上方卡片」，不重复查询。"""
 
 # 跨技能唯一硬约束（DOC / RULES 共用，避免与报价单/Excel 段重复长述）
 GLOBAL_HARD_CONSTRAINTS = """\
@@ -95,6 +95,11 @@ INVENTORY & PRICE DECISION RULES
 - IF the current user query is incomplete or very short (e.g. only product name or spec like 「50三通」「DN40弯头」),
   AND the **previous turn** in this session was clearly about inventory or price for the same topic,
   THEN you MUST inherit the previous turn’s intent (inventory vs price) and continue the same routing chain (e.g. continue the Chinese inventory chain or price chain) instead of treating the query as an isolated intent.
+- IF the current user message contains ≥ 2 products AND some of them already have match_quotation results in the current context:
+  THEN for products WITH existing results: do NOT call match_quotation again; mention them in the intro line as 「X 见上方卡片」.
+  THEN for products WITHOUT existing results: call match_quotation normally and output their formatted_response VERBATIM.
+  The intro line MUST list ALL products (both already-queried and newly-queried).
+  Example: 「以下是直接50和三通50的报价（三通50见上方卡片）：」
 
 [Ambiguity & Recovery Rules]
 - IF needs_selection is true AND the user wants to pick a single candidate (e.g.「选一个」「你帮我选一个」「哪一款合适」),
@@ -151,10 +156,14 @@ INVENTORY & PRICE DECISION RULES
 
 [Output & Formatting Rules]
 # ── Verbatim output (highest priority) ──────────────────────────────
-- IF the tool result JSON contains a non-empty `formatted_response` field,
-  you MUST output that field's value VERBATIM as your entire reply for this result.
-  DO NOT reformat, summarize, or add any text before or after it.
-  DO NOT add 「查询结果说明」or any extra section.
+- IF the tool result JSON contains a non-empty `formatted_response` field:
+  - Single product query (only 1 product in the current user message):
+    Output the `formatted_response` VERBATIM as your entire reply. DO NOT add any text before or after it.
+  - Multi-product query (≥ 2 products in the current user message):
+    First output ONE brief intro line (≤ 20 characters, e.g. 「以下是直接50和三通50的报价：」),
+    then output each product's `formatted_response` VERBATIM in sequence.
+    DO NOT repeat or reformat any content inside `formatted_response`.
+  DO NOT add 「查询结果说明」or any extra section in either case.
 
 # ── [已渲染到前端] observation ───────────────────────────────────────
 - WHEN the observation returned to you starts with "[已渲染到前端]",

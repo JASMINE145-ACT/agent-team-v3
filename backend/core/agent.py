@@ -773,6 +773,7 @@ class CoreAgent:
         if session_id and self._store and last_answer:
             try:
                 thinking_for_store = "\n".join(thinking_parts).strip() or None
+                tool_renders = ctx.get("_tool_renders") or None
                 self._store.save_turn(
                     session_id=session_id,
                     query=user_input,
@@ -782,6 +783,7 @@ class CoreAgent:
                     file_path=ctx.get("file_path"),
                     input_tokens=last_usage.get("prompt_tokens") if last_usage else None,
                     output_tokens=last_usage.get("completion_tokens") if last_usage else None,
+                    extra={"tool_renders": tool_renders} if tool_renders else None,
                 )
             except Exception as e:
                 logger.warning("Session save_turn failed: %s", e)
