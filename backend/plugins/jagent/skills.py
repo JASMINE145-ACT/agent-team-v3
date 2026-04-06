@@ -423,19 +423,12 @@ KNOWLEDGE RECORDING DECISION RULES
 - content MUST follow: "- IF 用户询价「<query>」，THEN 优先选 <product name>（<code>）。\n  原因：<reason>。[用户纠正]"
 - Include product code only when known from conversation context; omit if unknown.
 
-[Hard Constraints — MUST FOLLOW]
-- The `content` you pass to append_business_knowledge MUST be a cleaned-up, self-contained knowledge statement (one or several sentences), not raw, noisy chat fragments.
-- DO NOT record casual remarks or off-topic small talk as business knowledge unless the user explicitly requests it.
-- DO NOT call append_business_knowledge for a correction without user confirmation.
-
-[What NOT to save]
+[Content & Constraint Rules]
+- `content` MUST be a cleaned-up, self-contained knowledge statement (one or several sentences), not raw chat fragments.
+- DO NOT record casual remarks or off-topic small talk as business knowledge.
+- DO NOT call append_business_knowledge for a correction without explicit user confirmation (step 3 of Correction Learning flow).
 - Don't save facts derivable from code or public specs alone (no long-term value as "knowledge").
 - Don't save ephemeral one-liners that only make sense in the current chat turn.
-
-[Examples]
-- Correct: 用户说「PVC160 不是标准规格，应该理解成 DN150(6\")，帮我记到知识库」 -> you rewrite to a clean sentence and call append_business_knowledge with that sentence.
-- Correct: 用户说「选错了，正三通 DN50 应选 AW给水系列，因为这是给水场景」 -> show IF/THEN draft, wait for user confirmation, then call append_business_knowledge.
-- Correct: 用户只说「选错了」没给原因 -> ask "请问为什么 XXX 更合适？" before doing anything.
 - Incorrect: 用户只是随口说「这客户好难搞」时就调用 append_business_knowledge 记录 ❌.
 - Incorrect: 用户说「选错了」，没经确认就直接调用 append_business_knowledge ❌.
 """
