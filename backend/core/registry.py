@@ -31,6 +31,39 @@ class ToolRegistry:
     def get_definitions(self) -> list[dict]:
         return [e.definition for e in self._tools.values()]
 
+    def get_p0_definitions(self) -> list[dict]:
+        """返回非 deferred 工具的完整 schema（P0 常驻组）。"""
+        return [
+            e.definition for e in self._tools.values()
+            if not e.definition["function"].get("x_tool_meta", {}).get("deferred")
+        ]
+
+    def get_deferred_stubs(self) -> list[dict]:
+        """返回 deferred 工具的精简 stub（只含名字+一行描述，parameters 为空）。"""
+        stubs = []
+        for e in self._tools.values():
+            d = e.definition
+            if d["function"].get("x_tool_meta", {}).get("deferred"):
+                stubs.append({
+                    "type": "function",
+                    "function": {
+                        "name": d["function"]["name"],
+                        "description": (
+                            f"【延迟加载】{d['function']['description'][:60]}… "
+                            "需要时调用 tool_search 展开。"
+                        ),
+                        "parameters": {"type": "object", "properties": {}, "required": []},
+                    },
+                })
+        return stubs
+
+    def get_all_deferred_definitions(self) -> list[dict]:
+        """返回所有 deferred 工具的完整 schema（供 tool_search 处理器使用）。"""
+        return [
+            e.definition for e in self._tools.values()
+            if e.definition["function"].get("x_tool_meta", {}).get("deferred")
+        ]
+
     async def execute(self, name: str, args: dict[str, Any], ctx: dict) -> str:
         start = time.perf_counter()
         success = True
