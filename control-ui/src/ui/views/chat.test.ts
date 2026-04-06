@@ -163,6 +163,204 @@ describe("chat view", () => {
     expect(text.indexOf("查询 三通50 价格")).toBeLessThan(text.indexOf("卡片B"));
   });
 
+  it("renders multiple batch cards at a single marker position", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          messages: [
+            { role: "user", content: [{ type: "text", text: "batch query" }], timestamp: 1000 },
+            {
+              role: "assistant",
+              content: [{ type: "text", text: `${RENDERED_MARKER} batch done` }],
+              timestamp: 1003,
+            },
+            { role: "user", content: [{ type: "text", text: "follow up" }], timestamp: 2000 },
+          ],
+          toolRenderItems: [
+            {
+              id: "run-batch:1",
+              runId: "run-batch",
+              seq: 1,
+              ts: 1001,
+              payload: {
+                formatted_response: "CARD-A",
+                chosen: {},
+                chosen_index: 1,
+                match_source: "shared",
+                selection_reasoning: "A",
+              },
+            },
+            {
+              id: "run-batch:2",
+              runId: "run-batch",
+              seq: 2,
+              ts: 1002,
+              payload: {
+                formatted_response: "CARD-B",
+                chosen: {},
+                chosen_index: 1,
+                match_source: "shared",
+                selection_reasoning: "B",
+              },
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("batch query");
+    expect(text).toContain("CARD-A");
+    expect(text).toContain("CARD-B");
+    expect(text).toContain("follow up");
+    expect(text).not.toContain(RENDERED_MARKER);
+    expect(text.indexOf("batch query")).toBeLessThan(text.indexOf("CARD-A"));
+    expect(text.indexOf("CARD-A")).toBeLessThan(text.indexOf("CARD-B"));
+    expect(text.indexOf("CARD-B")).toBeLessThan(text.indexOf("follow up"));
+  });
+
+  it("ignores stale cards older than visible history window", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          messages: [
+            { role: "user", content: [{ type: "text", text: "query latest" }], timestamp: 1000 },
+            {
+              role: "assistant",
+              content: [{ type: "text", text: `${RENDERED_MARKER} done` }],
+              timestamp: 1003,
+            },
+          ],
+          toolRenderItems: [
+            {
+              id: "run-old:1",
+              runId: "run-old",
+              seq: 1,
+              ts: 900,
+              payload: {
+                formatted_response: "CARD-OLD",
+                chosen: {},
+                chosen_index: 1,
+                match_source: "shared",
+                selection_reasoning: "old",
+              },
+            },
+            {
+              id: "run-new:2",
+              runId: "run-new",
+              seq: 2,
+              ts: 1001,
+              payload: {
+                formatted_response: "CARD-NEW",
+                chosen: {},
+                chosen_index: 1,
+                match_source: "shared",
+                selection_reasoning: "new",
+              },
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("CARD-NEW");
+    expect(text).not.toContain("CARD-OLD");
+  });
+
+  it("keeps live unmatched cards as bottom fallback", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          messages: [
+            { role: "user", content: [{ type: "text", text: "query one" }], timestamp: 1000 },
+            {
+              role: "assistant",
+              content: [{ type: "text", text: `${RENDERED_MARKER} done` }],
+              timestamp: 1003,
+            },
+          ],
+          toolRenderItems: [
+            {
+              id: "run-live:3",
+              runId: "run-live",
+              seq: 3,
+              ts: 1005,
+              payload: {
+                formatted_response: "CARD-LIVE",
+                chosen: {},
+                chosen_index: 1,
+                match_source: "shared",
+                selection_reasoning: "live",
+              },
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("CARD-LIVE");
+    expect(text).toContain("query one");
+  });
+
+  it("deduplicates same card content between marker and fallback in same turn", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          messages: [
+            { role: "user", content: [{ type: "text", text: "query two products" }], timestamp: 1000 },
+            {
+              role: "assistant",
+              content: [{ type: "text", text: `${RENDERED_MARKER} done` }],
+              timestamp: 1003,
+            },
+          ],
+          toolRenderItems: [
+            {
+              id: "run1:1",
+              runId: "run1",
+              seq: 1,
+              ts: 1001,
+              payload: {
+                formatted_response: "CARD-DUP",
+                chosen: {},
+                chosen_index: 1,
+                match_source: "shared",
+                selection_reasoning: "dup-a",
+              },
+            },
+            {
+              id: "run1:2",
+              runId: "run1",
+              seq: 2,
+              ts: 1005,
+              payload: {
+                formatted_response: "CARD-DUP",
+                chosen: {},
+                chosen_index: 1,
+                match_source: "shared",
+                selection_reasoning: "dup-b",
+              },
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const text = container.textContent ?? "";
+    const count = text.split("CARD-DUP").length - 1;
+    expect(count).toBe(1);
+  });
+
   it("renders compacting indicator as a badge", () => {
     const container = document.createElement("div");
     render(

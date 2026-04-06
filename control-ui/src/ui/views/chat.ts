@@ -630,6 +630,7 @@ function groupMessages(items: ChatItem[]): Array<ChatItem | MessageGroup> {
 
 function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   const items: ChatItem[] = [];
+  const renderedCardTexts = new Set<string>();
   const history = Array.isArray(props.messages) ? props.messages : [];
   const tools = Array.isArray(props.toolMessages) ? props.toolMessages : [];
   const renderCards = Array.isArray(props.toolRenderItems) ? props.toolRenderItems : [];
@@ -668,9 +669,18 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
         __openclaw: { kind: "tool_render", runId: card.runId, seq: card.seq },
       },
     });
+    renderedCardTexts.add(rendered);
   };
 
   const historyStart = Math.max(0, history.length - CHAT_HISTORY_RENDER_LIMIT);
+  const firstVisibleTimestamp =
+    history.length > historyStart
+      ? (normalizeMessage(history[historyStart]).timestamp ?? 0)
+      : 0;
+  const lastVisibleTimestamp =
+    history.length > 0
+      ? (normalizeMessage(history[history.length - 1]).timestamp ?? 0)
+      : 0;
   const markerIndexList: number[] = [];
   for (let i = historyStart; i < history.length; i++) {
     const msg = history[i];
@@ -680,20 +690,52 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       markerIndexList.push(i);
     }
   }
-  const markerCardByIndex = new Map<number, ToolRenderItem>();
+  const markerCardsByIndex = new Map<number, ToolRenderItem[]>();
   if (markerIndexList.length > 0 && pendingCards.length > 0) {
-    // Pair newest card with newest marker so a fresh query never replaces old rows at the top.
-    const freeMarkers = [...markerIndexList];
-    const freeCards = [...pendingCards];
-    while (freeMarkers.length > 0 && freeCards.length > 0) {
-      const markerIndex = freeMarkers.pop();
-      const card = freeCards.pop();
-      if (markerIndex == null || card == null) {
-        break;
+    // Map cards to the nearest following rendered-marker message by timestamp.
+    // This supports batch mode (multiple cards for one marker) while keeping
+    // "live" cards (arrived before history refresh) as bottom fallback.
+    const markerTimeline = markerIndexList.map((index) => {
+      const msg = history[index];
+      const normalized = normalizeMessage(msg);
+      return { index, timestamp: normalized.timestamp ?? 0 };
+    });
+    const remainingCards: ToolRenderItem[] = [];
+    for (const card of pendingCards) {
+      const cardTs = typeof card.ts === "number" ? card.ts : 0;
+      // Drop cards outside visible history window to avoid stale remounting.
+      if (cardTs < firstVisibleTimestamp) {
+        continue;
       }
-      markerCardByIndex.set(markerIndex, card);
+      let bestMarker: { index: number; delta: number } | null = null;
+      for (const marker of markerTimeline) {
+        const delta = marker.timestamp - cardTs;
+        if (delta < 0) {
+          continue;
+        }
+        if (bestMarker == null || delta < bestMarker.delta) {
+          bestMarker = { index: marker.index, delta };
+        }
+      }
+      if (!bestMarker) {
+        // Keep as bottom fallback only when card is newer than current history tail,
+        // i.e. live-arrived before history refresh. Otherwise treat as stale.
+        if (cardTs > lastVisibleTimestamp) {
+          remainingCards.push(card);
+        }
+        continue;
+      }
+      const bucket = markerCardsByIndex.get(bestMarker.index);
+      if (bucket) {
+        bucket.push(card);
+      } else {
+        markerCardsByIndex.set(bestMarker.index, [card]);
+      }
     }
-    pendingCards = freeCards;
+    for (const cards of markerCardsByIndex.values()) {
+      cards.sort((a, b) => a.ts - b.ts);
+    }
+    pendingCards = remainingCards;
   }
 
   if (historyStart > 0) {
@@ -735,9 +777,12 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       normalized.role.toLowerCase() === "assistant" &&
       isRenderedMarker(renderedMarkerText)
     ) {
-      const card = markerCardByIndex.get(i);
-      if (card) {
-        pushCardFromItem(card, normalized.timestamp ?? Date.now(), i);
+      const cards = markerCardsByIndex.get(i);
+      if (cards && cards.length > 0) {
+        for (let cardIndex = 0; cardIndex < cards.length; cardIndex++) {
+          const card = cards[cardIndex];
+          pushCardFromItem(card, normalized.timestamp ?? Date.now(), i * 1000 + cardIndex);
+        }
       } else {
         items.push({
           kind: "message",
@@ -746,6 +791,14 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
         });
       }
       continue;
+    }
+
+    const openclaw = (msg as Record<string, unknown>).__openclaw as Record<string, unknown> | undefined;
+    if (openclaw?.kind === "tool_render") {
+      const rendered = extractTextCached(msg)?.trim() ?? "";
+      if (rendered) {
+        renderedCardTexts.add(rendered);
+      }
     }
 
     items.push({
@@ -765,8 +818,25 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   }
 
   // Live fallback: cards received before history refresh (no marker in history yet).
+  // When history is already loaded for this turn (firstVisibleTimestamp > 0), drop any
+  // live card whose timestamp predates the earliest history message — those cards are
+  // already represented as virtual tool_render entries inside chatMessages and showing
+  // them again would produce duplicate cards at the bottom of the chat.
+  const fallbackSeenTexts = new Set<string>();
   for (let i = 0; i < pendingCards.length; i++) {
     const card = pendingCards[i];
+    const cardTs = typeof card.ts === "number" ? card.ts : 0;
+    if (firstVisibleTimestamp > 0 && cardTs < firstVisibleTimestamp) {
+      continue;
+    }
+    const rendered = card.payload.formatted_response?.trim() ?? "";
+    if (!rendered) {
+      continue;
+    }
+    if (renderedCardTexts.has(rendered) || fallbackSeenTexts.has(rendered)) {
+      continue;
+    }
+    fallbackSeenTexts.add(rendered);
     pushCardFromItem(card, card.ts || Date.now(), history.length + i);
   }
 

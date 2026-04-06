@@ -91,15 +91,34 @@ class JAgentExtension(AgentExtension):
                             for k in _KNOWN_CHOSEN_FIELDS
                             if k in raw_chosen
                         }
-                        push("tool_render", {
-                            "formatted_response": data.get("formatted_response", ""),
-                            "keywords": (args.get("keywords") or "").strip(),
-                            "chosen": safe_chosen,
-                            "chosen_index": data.get("chosen_index"),
-                            "match_source": data.get("match_source", ""),
-                            "selection_reasoning": data.get("selection_reasoning", ""),
-                        })
-                        logger.info("[on_after_tool] SSE push called successfully")
+                        keywords = (args.get("keywords") or "").strip()
+                        chosen_code = (raw_chosen.get("code") or "").strip()
+                        render_key = f"{keywords}|{chosen_code}" if chosen_code else ""
+                        pushed_keys = (context or {}).get("_pushed_render_keys")
+                        if not isinstance(pushed_keys, set):
+                            # compat: migrate legacy _pushed_codes -> _pushed_render_keys
+                            legacy_codes = (context or {}).get("_pushed_codes")
+                            pushed_keys = set()
+                            if isinstance(legacy_codes, set):
+                                for c in legacy_codes:
+                                    c_str = str(c or "").strip()
+                                    if c_str:
+                                        pushed_keys.add(f"|{c_str}")
+                            (context or {})["_pushed_render_keys"] = pushed_keys
+                        if render_key and render_key in pushed_keys:
+                            logger.info("[on_after_tool] skip duplicate tool_render key=%s", render_key)
+                        else:
+                            if render_key:
+                                pushed_keys.add(render_key)
+                            push("tool_render", {
+                                "formatted_response": data.get("formatted_response", ""),
+                                "keywords": keywords,
+                                "chosen": safe_chosen,
+                                "chosen_index": data.get("chosen_index"),
+                                "match_source": data.get("match_source", ""),
+                                "selection_reasoning": data.get("selection_reasoning", ""),
+                            })
+                            logger.info("[on_after_tool] SSE push called successfully")
                     chosen = data.get("chosen") or {}
                     candidates = data.get("candidates") or []
                     codes_preview = "、".join(c.get("code", "") for c in candidates[:5])
@@ -142,7 +161,11 @@ class JAgentExtension(AgentExtension):
     def register(self, ctx: ExtensionContext) -> None:
         from backend.tools.oos.handler import register_oos_tools
         from backend.tools.inventory.handler import register_inventory_tools
-        from backend.tools.quotation.handler import register_quotation_tools
+        from backend.tools.quotation.handler import register_quotation_tools, make_tool_search_handler
         register_oos_tools(ctx)
         register_inventory_tools(ctx)
         register_quotation_tools(ctx)
+
+        # 注册 tool_search（P0，不 defer；在所有工具注册完成后注册，捕获完整 registry）
+        from backend.agent.tools import TOOL_SEARCH_DEF
+        ctx.register_tool(TOOL_SEARCH_DEF, make_tool_search_handler(ctx.registry))

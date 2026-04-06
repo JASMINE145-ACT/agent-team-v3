@@ -17,7 +17,7 @@ def _make_inventory_handler(name: str) -> Callable:
         push_event = context.get("push_event") if isinstance(context, dict) else None
         try:
             out = await asyncio.wait_for(
-                asyncio.to_thread(execute_inventory_tool, name, args, push_event),
+                asyncio.to_thread(execute_inventory_tool, name, args, push_event, context),
                 timeout=timeout_sec,
             )
             return unwrap_tool_result(out)

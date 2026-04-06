@@ -2,13 +2,34 @@
 import asyncio
 import json
 import logging
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from backend.core.extension import ExtensionContext
 from backend.core.tool_utils import tool_error, unwrap_tool_result, validate_file_path
 from backend.agent.tools import EXTRA_TOOLS
 
+if TYPE_CHECKING:
+    from backend.core.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
+
+
+def make_tool_search_handler(registry: "ToolRegistry") -> Callable:
+    """返回 tool_search 处理器闭包，捕获 registry 引用。注册后作为 P0 工具供 LLM 调用。"""
+    async def handler(args: dict, context: dict) -> str:
+        query = (args.get("query") or "").lower()
+        results = [
+            d for d in registry.get_all_deferred_definitions()
+            if query in d["function"]["name"].lower()
+            or query in d["function"].get("description", "").lower()
+        ]
+        if not results:
+            return json.dumps(
+                {"error": f"未找到匹配 '{query}' 的延迟工具，请尝试其他关键词"},
+                ensure_ascii=False,
+            )
+        return json.dumps({"tools": results}, ensure_ascii=False)
+    return handler
 
 _QUOTE_WITH_FILE = {"fill_quotation_sheet", "parse_excel_smart", "edit_excel"}
 _VALID_CUSTOMER_LEVELS = {"A", "B", "C", "D"}
@@ -91,8 +112,8 @@ def _make_batch_quick_quote_handler() -> Callable:
 def register_quotation_tools(ctx: ExtensionContext) -> None:
     """向 ExtensionContext 注册所有报价单工具。供 JAgentExtension.register() 调用。"""
     from backend.tools.quotation.quote_tools import get_quote_tools_openai_format
-    # 以下工具暂时从 Chat 模型 prompt 中移除（代码保留，仅不注册）
-    _SKIPPED_QUOTE_TOOLS = {"fill_quotation_sheet", "run_quotation_fill"}
+    # fill_quotation_sheet 仍跳过；run_quotation_fill 现在作为 deferred 工具注册
+    _SKIPPED_QUOTE_TOOLS = {"fill_quotation_sheet"}
     for tool_def in get_quote_tools_openai_format():
         name = tool_def["function"]["name"]
         if name in _SKIPPED_QUOTE_TOOLS:
@@ -103,10 +124,12 @@ def register_quotation_tools(ctx: ExtensionContext) -> None:
     for t in EXTRA_TOOLS:
         n = t["function"]["name"]
         if n in _SKIPPED_QUOTE_TOOLS:
-            continue  # fill_quotation_sheet 已由上方跳过；run_quotation_fill 在此跳过
+            continue
         if n == "ask_clarification":
             ctx.register_tool(t, _make_ask_clarification_handler())
         elif n == "append_business_knowledge":
             ctx.register_tool(t, _make_append_business_knowledge_handler())
         elif n == "batch_quick_quote":
             ctx.register_tool(t, _make_batch_quick_quote_handler())
+        elif n == "run_quotation_fill":
+            ctx.register_tool(t, _make_quotation_fill_handler())

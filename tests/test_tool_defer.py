@@ -130,6 +130,48 @@ def test_oos_tools_are_all_deferred():
 
 # ── Task 4 tests ──────────────────────────────────────────────────────────────
 
+# ── Task 6 tests ──────────────────────────────────────────────────────────────
+
+def test_tool_search_finds_deferred_by_name(registry_with_mixed_tools):
+    from backend.tools.quotation.handler import make_tool_search_handler
+    handler = make_tool_search_handler(registry_with_mixed_tools)
+    result = asyncio.run(handler({"query": "run_quotation_fill"}, {}))
+    data = json.loads(result)
+    assert "tools" in data
+    names = [t["function"]["name"] for t in data["tools"]]
+    assert "run_quotation_fill" in names
+
+
+def test_tool_search_finds_by_keyword(registry_with_mixed_tools):
+    from backend.tools.quotation.handler import make_tool_search_handler
+    handler = make_tool_search_handler(registry_with_mixed_tools)
+    result = asyncio.run(handler({"query": "modify"}, {}))
+    data = json.loads(result)
+    assert "tools" in data
+    names = [t["function"]["name"] for t in data["tools"]]
+    assert "modify_inventory" in names
+
+
+def test_tool_search_returns_error_for_no_match(registry_with_mixed_tools):
+    from backend.tools.quotation.handler import make_tool_search_handler
+    handler = make_tool_search_handler(registry_with_mixed_tools)
+    result = asyncio.run(handler({"query": "nonexistent_xyz_abc"}, {}))
+    data = json.loads(result)
+    assert "error" in data
+
+
+def test_tool_search_does_not_return_p0_tools(registry_with_mixed_tools):
+    """tool_search 只返回 deferred 工具，不返回 P0 工具。"""
+    from backend.tools.quotation.handler import make_tool_search_handler
+    handler = make_tool_search_handler(registry_with_mixed_tools)
+    # "search" matches "search_inventory" (P0) - should NOT appear
+    result = asyncio.run(handler({"query": "search_inventory"}, {}))
+    data = json.loads(result)
+    if "tools" in data:
+        names = [t["function"]["name"] for t in data["tools"]]
+        assert "search_inventory" not in names
+
+
 # ── Task 5 tests ──────────────────────────────────────────────────────────────
 
 def test_quote_tools_are_all_deferred():

@@ -15,17 +15,16 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **get_inventory_by_code_batch(codes)**：当用户要求对**多个**编号（如整张表、或 5 个以上编号）查库存时，**必须**使用本工具，一次传入多个物料编号 codes；禁止对每个产品单独多次调用 get_inventory_by_code。单次最多 50 条，更多请分批调用；结果在 data.items 中与输入 1:1 对齐（含 input_index、code、item_status、item）。
 - **modify_inventory(code, action, quantity, memo?)**：**锁定可售**（action=lock，占位）或**增补/归零**（action=supplement）。需物料编号（code）；建议先 get_inventory_by_code 确认。supplement 时 quantity>0 为增补，quantity=0 为将用户仓/可售归零。仅当用户明确说「锁定/预留」「增补/入库/加库存」或「改回 0/归零」时使用。需 INVENTORY_MODIFY_ENABLED=1 才真实写 ACCURATE。
 - **match_quotation(keywords, customer_level?)**：**询价/查 code 时优先用本工具**。同时查报价历史与万鼎字段匹配，结果取并集，每条候选带 **source**（历史报价/字段匹配/共同）。返回格式含 candidates、match_source，单条时含 chosen。这样「直接50mm」等既能命中历史也能命中万鼎时，会显示 共同 或 历史报价。可选参数 `show_all_candidates=true`：跳过 LLM 选型，直接返回所有候选列表（用户说「全部list/所有候选/我想自己选」时使用）。
-- **match_by_quotation_history(keywords)**：仅历史匹配（单独用较少，一般用 match_quotation）。
-- **match_wanding_price(keywords, customer_level?)**：仅字段匹配（万鼎）。用户明确说「**用万鼎查**」「**不要历史**」「**直接万鼎**」时**只调用本工具**，不调 match_quotation。
+- **match_quotation_batch(keywords_list, customer_level?)**：多产品价格查询专用。一次传入多个关键词，逐项返回匹配结果与渲染卡片；同一批次产品禁止再逐个调用 match_quotation，避免重复卡片与重复选型。
 - **select_wanding_match(keywords, candidates)**：LLM 选型。needs_selection 且用户要「选一个」时调用；传入 match_source（来自上一步 observation）。
 - **get_profit_by_price(code?, product_name?, price)**：报价员已知道「万鼎商品编号或完整产品名 + 实际成交价/报单价」时，用本工具在万鼎价格库中锁定对应行与最接近的价格档位，返回该档位的利润率以及所有档位的价格/利润率列表，便于比较。
 - **get_profit_by_price_batch(items)**：当用户要求对**多个**产品（如整张表、或 5 个以上编号）查利润率/档位时，**必须**使用本工具，一次传入多组 { code, price }；禁止对每个产品单独多次调用 get_profit_by_price。单次最多 50 条，更多请分批调用。
 - **何时用**：用户已明确「库存/可售」或「价格/报价/万鼎/档位」时选用；只说「查XX」未指明 → 用 ask_clarification 澄清。
-- **查库存的调用顺序（重要）**：① 用户用**中文**说产品名且要查库存（如「50三通的库存」「DN40弯头还有多少」）→ **禁止**直接用 search_inventory（仅适配英文）。应先 **match_quotation(keywords)** 得到 code/候选，再用 **get_inventory_by_code(code)** 查库存；单条候选时直接用其 code，多候选时先选型或取首条。**match_wanding_price** 仅当用户明确要求「只用万鼎/仅字段匹配/不要历史」时使用。② 用户用**英文**产品名查库存 → 可用 search_inventory(keywords)。③ 用户已给出 10 位物料编号 → 直接用 get_inventory_by_code(code)。
+- **查库存的调用顺序（重要）**：① 用户用**中文**说产品名且要查库存（如「50三通的库存」「DN40弯头还有多少」）→ **禁止**直接用 search_inventory（仅适配英文）。应先 **match_quotation(keywords)** 得到 code/候选，再用 **get_inventory_by_code(code)** 查库存；单条候选时直接用其 code，多候选时先选型或取首条。② 用户用**英文**产品名查库存 → 可用 search_inventory(keywords)。③ 用户已给出 10 位物料编号 → 直接用 get_inventory_by_code(code)。
 - **keywords 关键词保护（重要）**：中文管件/产品名称词——「直接（接头）」「直通」「弯头」「三通」「变径」「大小头」「堵头」「管帽」「活接」「由令」「套管」「法兰」「管卡」「管夹」等——**即使语法上看似副词或助词，也必须原样保留在 keywords 中，禁止去除**。例：「直接dn50」→ keywords=「直接dn50」（❌ 不得简化为「dn50」）；「三通 dn25 价格」→ keywords=「三通 dn25」；「弯头dn40库存」→ keywords=「弯头 dn40」。
-- **询价/查 code/查物料编号**：**必须优先调用 match_quotation**（一次得到历史+万鼎并集及匹配来源）；仅当用户明确「用万鼎查/不要历史」时改用 match_wanding_price。得 code 后可用 get_inventory_by_code 查库存。
+- **询价/查 code/查物料编号**：**统一调用 match_quotation**（一次得到历史+万鼎并集及匹配来源），不再切换历史/字段单独工具。得 code 后可用 get_inventory_by_code 查库存。
 - **多产品价格查询**：用户在一条消息里问 ≥2 个产品的价格（如「直接50 三通50 价格」）时，**必须使用 match_quotation_batch(keywords_list=["直接50", "三通50"])** 一次性批量查询，不得把多个产品名拼成一个 keywords 传入 match_quotation，也不得多次单独调用 match_quotation；批量工具为每个产品独立展示报价卡片。**match_quotation_batch 返回后严禁再次调用 match_quotation 查询其中任何产品，否则会出现重复卡片。**
-- **「全部价格」「各档价格」**：对同一 keywords 按需分别调用 match_wanding_price(customer_level=…)，汇总成表格「客户级别 | 客户价」。**档位与自然语言对应**：用户说「**二级代理**」「二级代理价格」→ customer_level=A；「**一级代理**」→ B；「**聚万大客户**」→ C；「**青山大客户**」「青山大客户价格」→ D（降低利润率用 D_low）；「**大唐大客户**」→ E。**出厂/采购价**：用户要「出厂价含税」「出厂价不含税」「采购不含税」时传 customer_level=FACTORY_INC_TAX / FACTORY_EXC_TAX / PURCHASE_EXC_TAX。档位代码：A/B/C/D/D_LOW/E 及 FACTORY_INC_TAX/FACTORY_EXC_TAX/PURCHASE_EXC_TAX。**只调一次会只得到默认 B 档。**
+- **「全部价格」「各档价格」**：统一通过 **match_quotation(keywords, customer_level?)** 查询。**档位与自然语言对应**：用户说「**二级代理**」「二级代理价格」→ customer_level=A；「**一级代理**」→ B；「**聚万大客户**」→ C；「**青山大客户**」「青山大客户价格」→ D（降低利润率用 D_low）；「**大唐大客户**」→ E。**出厂/采购价**：用户要「出厂价含税」「出厂价不含税」「采购不含税」时传 customer_level=FACTORY_INC_TAX / FACTORY_EXC_TAX / PURCHASE_EXC_TAX。档位代码：A/B/C/D/D_LOW/E 及 FACTORY_INC_TAX/FACTORY_EXC_TAX/PURCHASE_EXC_TAX。按用户要求的档位查询并汇总成表格「客户级别 | 客户价」。
 - **回复用户时档位一律用全名**：出厂价_含税、出厂价_不含税、采购不含税；（二级代理）A级别 利润率/报单价格；（一级代理）B级别 利润率/报单价格；（聚万大客户）C级别 利润率/报单价格；（青山大客户）D级别 利润率/报单价格/降低利润率；（大唐大客户）E级别（包运费） 利润率/报单价格。表格列名或文中提到价格档位时写上述全名，不要只写 A类/B类。
 - **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。
 - **低置信度 options（match_quotation 内置选型）**：若 observation 含 `needs_selection: true` 且 `low_confidence_options: true` 与精简 `options`（通常 2～3 条，各有 reasoning），表示 LLM 无法单选、仅列出最可能项 —— **优先用 `options` 做表格回复（含 code、单价、理由、来源）**，**不要**改回把 `candidates` 全表当作主结果；用户明确要求「看全部候选」时再展示完整 candidates。
@@ -50,7 +49,7 @@ GLOBAL_HARD_CONSTRAINTS_RULES = GLOBAL_HARD_CONSTRAINTS  # 别名，兼容旧引
 GLOBAL_SKILL_PRIORITY_ORDER = """\
 GLOBAL SKILL PRIORITY ORDER (all skills)
 When multiple rules could apply, resolve conflicts in this order:
-1. Explicit user constraints (e.g. 「用万鼎查」「不要历史」exact 10-digit code)
+1. Explicit user constraints (e.g. exact 10-digit code, show all candidates)
 2. Exact identifiers (10-digit material code)
 3. Language-specific routing (Chinese vs English inventory chain)
 4. Batch tools over single loops (prefer *_batch when multiple items)
@@ -62,20 +61,17 @@ SKILL_INVENTORY_PRICE_RULES = """\
 INVENTORY & PRICE DECISION RULES
 
 [Routing & Priority Rules]
-- IF the user explicitly wants **库存/可售** OR **价格/报价/万鼎/档位**, THEN you MUST route to the inventory/price tools in this section.
-- IF the user clearly says 「用万鼎查」「不要历史」「只用万鼎」,
-  THEN you MUST ALWAYS override other routing rules and use match_wanding_price(keywords, customer_level?) ONLY, and you MUST NOT call match_quotation in that scenario.
-  DO NOT mix match_quotation and match_wanding_price in the same step; treat match_quotation as the combined 历史报价+万鼎 view by default.
-- IF the user asks for **价格/报价/万鼎/档位** AND has NOT said 「用万鼎查」「不要历史」「只用万鼎」,
-  THEN you MUST call match_quotation(keywords, customer_level?) as the default price tool — DO NOT call match_wanding_price for a standard price query; match_quotation covers both history and wanding in one call.
+- IF the user explicitly wants **库存/可售** OR **价格/报价/万鼎** (non-profit quote lookup), THEN you MUST route to the inventory/price tools in this section.
+- IF the user asks for **价格/报价/万鼎** for a single product (and is NOT asking for profit-rate calculation),
+  THEN you MUST call match_quotation(keywords, customer_level?) as the only price query tool.
   - Example (Correct): 「直接50 价格」→ match_quotation(keywords="直接50") ✅
-  - Example (Incorrect): 「直接50 价格」→ match_wanding_price(keywords="直接50") ❌（用户未说「只用万鼎」，默认走 match_quotation）
+  - Example (Incorrect): 「直接50 价格」→ any non-batch/non-quotation price tool ❌（价格查询统一走 match_quotation）
 - IF the user asks for prices of **≥ 2 different products** in ONE message (e.g. 「直接50 三通50 价格」「查弯头25和三通50的价格」),
-  THEN you MUST call **match_quotation_batch(keywords_list=[...])** with all product names as separate list items — DO NOT combine into one string, and DO NOT call match_quotation per product separately.
+  THEN you MUST call **match_quotation_batch(keywords_list=[...])** with all product names as separate list items — DO NOT combine into one string.
   - Example (Correct): 「直接50 三通50 价格」→ match_quotation_batch(keywords_list=["直接50", "三通50"]) ✅
   - Example (Incorrect): 「直接50 三通50 价格」→ match_quotation(keywords="直接50 三通50") ❌（合并 keywords 导致选型混乱）
   - Example (Incorrect): 「直接50 三通50 价格」→ match_quotation("直接50") then match_quotation("三通50") ❌（应用批量工具）
-  - **CRITICAL**: After match_quotation_batch returns, you MUST NOT call match_quotation for ANY of the listed products — they have already been fully queried. Calling match_quotation again will cause duplicate cards for the user.
+  - **CRITICAL**: Once `match_quotation_batch` is used for a request scope, you MUST NOT call `match_quotation` for any item in that same scope (before or after batch), otherwise duplicated cards/selection drift may occur.
 - IF the user has already provided an exact **10-digit material code**, THEN you MUST call get_inventory_by_code(code) directly for inventory, without going through match_quotation.
 - IF the request is a **Chinese inventory request** (user mentions 「库存」「可售」「有多少」「还有吗」「有没有货」, e.g.「50三通的库存」「DN40弯头还有多少」) AND no exact 10-digit product code is already known,
   THEN you MUST follow this mandatory chain:
@@ -90,48 +86,25 @@ INVENTORY & PRICE DECISION RULES
   - Example (Incorrect): 「50三通库存」 → search_inventory(keywords="50三通") ❌（违反中文库存链路与 Hard Constraints：中文库存不得直接 search_inventory）。
   - Example (Incorrect): 「三通50 价格」 → match_quotation(...) → get_inventory_by_code(...) ❌（用户没说库存，价格查询不触发 step 3）。
 - IF the request is an **English product name inventory request**, THEN you MAY call search_inventory(keywords) directly for inventory lookup.
-- IF the user asks for **多个产品的库存** (e.g. whole sheet, or clearly 5+ codes) AND you have multiple codes, THEN you MUST use get_inventory_by_code_batch(codes) instead of looping get_inventory_by_code.
-- IF the user asks for **利润率/各档位价格** for a single product with known code or full product name plus a price,
+- IF the user asks for **多个产品的库存** (same message has >=2 items, or whole sheet/bulk import) AND you have multiple codes, THEN you MUST use get_inventory_by_code_batch(codes) instead of looping get_inventory_by_code.
+- IF the user asks for **利润率/利润测算/按成交价算档位** for a single product with known code or full product name plus a price,
   THEN you MUST call get_profit_by_price(code?, product_name?, price).
-- IF the user asks for **多个产品的利润率/价格档位** (e.g. whole sheet, 5+ items),
+- IF the user asks for **多个产品的利润率/价格档位** (same message has >=2 items, or whole sheet/bulk import),
   THEN you MUST call get_profit_by_price_batch(items) INSTEAD OF multiple single get_profit_by_price calls.
-- IF the user intent is only "查XX / 查询XX / 查一下25管卡" and has NOT clarified inventory vs price,
-  THEN you MUST call ask_clarification to decide whether to follow inventory routing or price routing before choosing tools here.
 - IF the user says 「全部list」「所有候选」「我想自己选」「列出所有」「给我看看所有的」,
   THEN call match_quotation(keywords, show_all_candidates=true) to return all candidates without auto-selection.
   DO NOT re-call match_quotation without this flag.
-  DO NOT use match_by_quotation_history as a workaround (history-only, misses wanding matches).
   - Example (Correct): 「三通50 我想自己选」→ match_quotation(keywords="三通50", show_all_candidates=true) ✅
   - Example (Incorrect): 「三通50 我想自己选」→ match_quotation(keywords="三通50") [re-call without flag] ❌
-  - Example (Incorrect): 「三通50 我想自己选」→ match_by_quotation_history(keywords="三通50") ❌
 
 [Context Continuity Rules]
-- IF the current user query is incomplete or very short (e.g. only product name or spec like 「50三通」「DN40弯头」),
-  AND the **previous turn** in this session was clearly about inventory or price for the same topic,
-  THEN you MUST inherit the previous turn’s intent (inventory vs price) and continue the same routing chain (e.g. continue the Chinese inventory chain or price chain) instead of treating the query as an isolated intent.
-- IF the current user message contains ≥ 2 products AND some of them already have match_quotation results in the current context:
-  THEN for products WITH existing results: do NOT call match_quotation again; mention them in the intro line as 「X 见上方卡片」.
-  THEN for products WITHOUT existing results: call match_quotation normally and output their formatted_response VERBATIM.
-  The intro line MUST list ALL products (both already-queried and newly-queried).
-  Example: 「以下是直接50和三通50的报价（三通50见上方卡片）：」
-
-[Ambiguity & Recovery Rules]
-- IF needs_selection is true AND the user wants to pick a single candidate (e.g.「选一个」「你帮我选一个」「哪一款合适」),
-  THEN you MUST call select_wanding_match(keywords, candidates) and you MUST NOT guess a candidate without selection.
-- IF the user asks for "全部价格/所有匹配/列出所有候选",
-  THEN you MUST NOT call select_wanding_match; instead, you MUST present the full candidates table from the last observation.
-- IF match_quotation/match_wanding_price returns no suitable candidates OR overall match quality is too low,
-  THEN you MUST explain that no good match was found and MAY ask the user for a clearer product name/spec or code, instead of fabricating codes or products.
-- IF the intent remains unclear between inventory vs price even after one clarification,
-  THEN you MUST ask_clarification again with a more concrete question, rather than assuming.
-- IF the tool returns `{unmatched: true, llm_rejected: true}` (LLM explicitly rejected all candidates, index: 0),
-  THEN you MUST tell the user "未找到合适匹配" and suggest trying a different product name/spec or registering as out-of-stock — you MUST NOT show the full candidates list for manual picking.
-- IF `match_quotation` returns `needs_selection: true` AND `low_confidence_options: true` with a short `options` list (from built-in LLM selection, not confident),
-  THEN you MUST present **only** that `options` table (code, unit_price, reasoning per row, source) as the primary reply — you MUST NOT replace it with the full `candidates` table unless the user explicitly asks to see all candidates.
+- IF the current query is short/incomplete (e.g. 「50三通」「DN40弯头」) AND the previous turn already明确同主题为库存或报价,
+  THEN you MUST inherit previous intent and continue the same routing chain, instead of treating this as a brand-new intent.
+- IF a multi-product query includes items that already have `match_quotation` results in current context,
+  THEN you MUST reuse those existing results and MUST NOT re-call `match_quotation` for those items.
+- For remaining missing items, call `match_quotation_batch(keywords_list=[...])` once, then output one intro line listing all items and mark reused ones as 「X 见上方卡片」.
 
 [Batch Handling Rules]
-- IF the user provides **多个编号或多个产品** and explicitly asks to check inventory or price for all of them,
-  THEN you MUST prefer the corresponding *_batch tool (get_inventory_by_code_batch / get_profit_by_price_batch) instead of looping single calls.
 - IF the user attaches an Excel and asks to check inventory/价格/利润率 for the whole sheet or a large subset,
   THEN you SHOULD use the batch tools with codes or {code, price} items parsed from the sheet, within the 50-items-per-call limit.
 - IF a batch exceeds the configured max items per call (50),
@@ -147,7 +120,7 @@ INVENTORY & PRICE DECISION RULES
 
 [Price Level Rules]
 - IF the user asks for 「全部价格」「各档价格」 for the same keywords,
-  THEN you SHOULD call match_wanding_price(keywords, customer_level=...) multiple times as needed and merge results into a table 「客户级别 | 客户价」.
+  THEN you SHOULD call match_quotation(keywords, customer_level=...) multiple times as needed and merge results into a table 「客户级别 | 客户价」.
 - YOU MUST map natural-language customer levels to internal codes as follows:
   - 「二级代理」→ customer_level=A
   - 「一级代理」→ B
@@ -158,67 +131,20 @@ INVENTORY & PRICE DECISION RULES
   - 「出厂价含税」→ FACTORY_INC_TAX
   - 「出厂价不含税」→ FACTORY_EXC_TAX
   - 「采购不含税」→ PURCHASE_EXC_TAX
-- WHEN you call match_wanding_price only once, you will ONLY get the default B-level price; call multiple times with different levels when the user asks for all levels.
+- WHEN the user asks for all levels, call match_quotation with different customer_level values and merge the results.
 
 [Output & Formatting Rules]
-# ── Verbatim output (highest priority) ──────────────────────────────
-- IF the tool result JSON contains a non-empty `formatted_response` field:
-  - Single product query (only 1 product in the current user message):
-    Output the `formatted_response` VERBATIM as your entire reply. DO NOT add any text before or after it.
-  - Multi-product query (≥ 2 products in the current user message):
-    First output ONE brief intro line (≤ 20 characters, e.g. 「以下是直接50和三通50的报价：」),
-    then output each product's `formatted_response` VERBATIM in sequence.
-    DO NOT repeat or reformat any content inside `formatted_response`.
-  DO NOT add 「查询结果说明」or any extra section in either case.
+# ── Card-first output (single source of truth) ───────────────────────
+- `match_quotation` / `match_quotation_batch` results are card-first; LLM MUST NOT rebuild candidate/price tables when cards are already rendered.
+- IF tool JSON contains non-empty `formatted_response` and has not been rendered yet:
+  - Single-product query: output `formatted_response` VERBATIM only.
+  - Multi-product query: output one short intro line, then each `formatted_response` VERBATIM.
 
 # ── [已渲染到前端] observation ───────────────────────────────────────
-- WHEN the observation returned to you starts with "[已渲染到前端]",
-  DO NOT output any text for this result — the formatted result has been
-  pushed directly to the frontend via SSE. Stay silent for this tool call.
-
-# ── Mandatory Markdown structure ────────────────────────────────────
-- EVERY price/inventory result MUST use this exact Markdown table structure:
-
-  **查询结果**
-
-  匹配来源：{match_source}
-
-  | 产品编号(code) | 产品名称 | 来源 | 单价（B级代理） |
-  |---|---|---|---|
-  | {code} | {name} | {source} | {price} |
-
-  匹配理由：{selection_reasoning}
-
-# ── Negative constraints ─────────────────────────────────────────────
-- DO NOT use plain-text field-per-line format
-  (e.g. "产品编号: xxx\n单价: yyy" is WRONG; Markdown table is ALWAYS required).
-- DO NOT omit 「匹配理由：」 when selection_reasoning / reasoning is non-empty;
-  it MUST appear immediately after the last table row — never above, never inside a cell.
-- DO NOT write 「—」 or leave 产品编号(code) blank when the JSON has a non-empty code.
-- DO NOT add 「匹配理由：」 when the field is empty or absent.
-
-# ── Candidates display (ALWAYS show before selected result) ──────────
-- WHEN match_quotation returns `candidates[]` with N items (N ≥ 1),
-  you MUST output a candidates table FIRST, then the selected product below.
-
-  Required format (replace N and rows with actual data):
-
-  **候选产品**（共 N 条）
-
-  | # | 产品编号(code) | 产品名称 | 来源 | 单价（B级代理） |
-  |---|---|---|---|---|
-  | 1 | {code} | {name} | {source} | {price} |
-  | 2 | {code} | {name} | {source} | {price} |
-
-  **已选：第 {chosen_index} 条**
-
-  [then the standard 查询结果 table immediately below]
-
-- DO NOT skip the candidates table and jump directly to 查询结果.
-- DO NOT write 「共有 N 个候选，如需查看全部请告知。」instead of showing the table.
-
-# ── Inventory-zero format ────────────────────────────────────────────
-- 库存为 0 或无数据时，若有 `selection_reasoning`，💡 消息格式为：「💡 该产品当前库存信息暂无数据（匹配理由：{selection_reasoning}），如需确认库存请告知。」；无 `selection_reasoning` 时保持原格式。
+- WHEN the observation returned to you starts with "[已渲染到前端]":
+  - For single-product query: output nothing.
+  - For multi-product query (>=2): output at most ONE short intro line, and mark products already rendered as 「X 见上方卡片」; DO NOT duplicate card content.
+- IF neither card-render marker nor `formatted_response` is available, output one short fallback sentence and ask user whether to retry/clarify keywords; DO NOT fabricate codes/prices.
 
 # ── Price level full names ───────────────────────────────────────────
 - In the final reply, you MUST always use the full Chinese names for price levels:
@@ -228,16 +154,6 @@ INVENTORY & PRICE DECISION RULES
   - （聚万大客户）C级别 利润率/报单价格；
   - （青山大客户）D级别 利润率/报单价格/降低利润率；
   - （大唐大客户）E级别（包运费） 利润率/报单价格。
-
-# ── Code field integrity ─────────────────────────────────────────────
-- WHEN showing a table of candidates or prices, you MUST:
-  - Include a 「产品编号(code)」 column;
-  - Include a 「来源」 column when the candidate has a source (历史报价/字段匹配/共同);
-  - Write 「匹配来源：{match_source}」 above the table;
-  - Mark 「已选：第 N 条」 when there is a chosen candidate.
-- IF the tool JSON has a non-empty `chosen.code` OR top-level `table_product_code` OR a non-empty candidate `code`,
-  THEN you MUST copy that exact code string into the table column 「产品编号(code)」; you MUST NOT use 「—」 or leave it blank for that row (only use 「—」 when the JSON field is actually missing or empty).
-- IF the result contains `fallback: true` (rule-based fallback due to LLM error), `chosen.code` is still valid and MUST be copied into the table; do NOT use 「—」 just because `fallback` is true.
 
 """
 
@@ -435,7 +351,7 @@ KNOWLEDGE RECORDING DECISION RULES
 
 # 极简回退格式：`USE_CLAUDE_LOOP_PROMPT=False` 时注入。去掉强制四段式，聚焦工具调用与结果展示，减少 150–300 tokens/call。
 # Tool 调用与全局规则（LEGACY 与 Loop 轨共用，DRY）——语义与改版前一致，仅合并避免重复。
-_TOOL_CALL_GLOBAL_RULES_BLOCK = "**Tool Call Global Rules（全局约束）**:\n- ONE step = ONE tool call（每一轮推理至多调用一个工具）\n- `name` 必须精确匹配工具名（区分大小写）\n- `arguments` 必须是 JSON 对象，包含所有必需字段\n- Don't fabricate arguments（never invent）: 参数值须来自用户输入或已有 observation，不得臆造。\n- Don't abuse tools（needless calls）: 若本可用自然语言直接作答，则不要为调用而调用工具。\n\n**Tool Decision Rules（何时必须/禁止调用工具）**:\n- You MUST call a tool when:\n  - The user请求的是**外部数据**或系统状态（如库存、价格/利润率、Excel 内容或结构、无货/缺货列表与统计等），且\n  - 所需信息在当前对话上下文与最近 observation 中尚未完整可用。\n- You MUST NOT call a tool when:\n  - 答案可以直接基于现有对话上下文与最近工具结果推理得出（如对刚刚展示过的表格做解释、总结或简单计算），或\n  - 用户的问题仅是解释、推理、总结、对比现有结果，而不是请求新的外部数据。\n\n**批量与多行规则**:\n- **涉及多个同类项**（如多行、多编号）时，优先使用批量类工具（*_batch），减少单轮步数\n\n**多轮指代**:\n- 用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）\n- 用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_quotation 或 match_wanding_price，勿用用户本句的简称或错字\n\n**格式灵活性**:\n- 首轮无 observation 时 Verify 部分可简写或略写（见上文 Verify 长度上限）\n- 允许模型在上述框架内灵活组织思考内容，不要求逐条完整罗列示例中的所有小点"
+_TOOL_CALL_GLOBAL_RULES_BLOCK = "**Tool Call Global Rules（全局约束）**:\n- ONE step = ONE tool call（每一轮推理至多调用一个工具）\n- `name` 必须精确匹配工具名（区分大小写）\n- `arguments` 必须是 JSON 对象，包含所有必需字段\n- Don't fabricate arguments（never invent）: 参数值须来自用户输入或已有 observation，不得臆造。\n- Don't abuse tools（needless calls）: 若本可用自然语言直接作答，则不要为调用而调用工具。\n\n**Tool Decision Rules（何时必须/禁止调用工具）**:\n- You MUST call a tool when:\n  - The user请求的是**外部数据**或系统状态（如库存、价格/利润率、Excel 内容或结构、无货/缺货列表与统计等），且\n  - 所需信息在当前对话上下文与最近 observation 中尚未完整可用。\n- You MUST NOT call a tool when:\n  - 答案可以直接基于现有对话上下文与最近工具结果推理得出（如对刚刚展示过的表格做解释、总结或简单计算），或\n  - 用户的问题仅是解释、推理、总结、对比现有结果，而不是请求新的外部数据。\n\n**批量与多行规则**:\n- **涉及多个同类项**（如多行、多编号）时，优先使用批量类工具（*_batch），减少单轮步数\n\n**多轮指代**:\n- 用户说「选哪个」「帮我选一个」「你选」→ **必须**调用 **select_wanding_match**（keywords 用上一轮询价关键词，candidates 从上一轮 observation 或回复表格解析）\n- 用户说「那个产品」「查这个的库存」→ 用上一轮表格里的**完整产品名或编号**调用 search_inventory / get_inventory_by_code / match_quotation，勿用用户本句的简称或错字\n\n**格式灵活性**:\n- 首轮无 observation 时 Verify 部分可简写或略写（见上文 Verify 长度上限）\n- 允许模型在上述框架内灵活组织思考内容，不要求逐条完整罗列示例中的所有小点"
 
 # Loop 四段式思考外壳（仅 USE_CLAUDE_LOOP_PROMPT=True 时注入）；末段与 _TOOL_CALL_GLOBAL_RULES_BLOCK 拼接。
 _OUTPUT_FORMAT_LOOP_BODY = '## 输出格式（Claude Agent Loop 规范）\n\n每轮推理按以下四段式结构输出 <think> 块，并在需要调用工具时按约定输出 JSON `tool_call`:\n\n<think>\n\n### 1. Plan\n- **Don\'t** 在本节写与本轮工具无关的长背景；只保留可执行决策所需最少信息。\n你 MUST 以半结构化方式输出本轮计划，使用如下字段：\n- User Goal: （用一句话概括当前轮要达成的业务目标）\n- Intent Type: （inventory | price | excel | clarify | knowledge 等，按主要意图二选一/三选一）\n- Relevant Skills: （列出将要用到的技能簇，如 Inventory / Excel Chat / Clarify / Knowledge）\n- Planned Tool Chain: （按顺序写出计划使用的工具链路，例如 `match_quotation → get_inventory_by_code` 或 `parse_excel_smart`）\n\n示例：\n- User Goal: 查 50 三通 库存\n- Intent Type: inventory\n- Relevant Skills: Inventory\n- Planned Tool Chain: match_quotation → get_inventory_by_code\n\n### 2. Gather Context\n梳理当前已知信息，例如：\n- 用户意图与关键约束（如「用万鼎查」「不要历史」「只看 Excel」）\n- 会话上下文与最近几轮对话中的关键信息\n- 已有的工具返回结果（observation）中可复用的部分\n- 仍然缺失的信息\n\n**Gather 长度上限**：本小节用 bullet 列出，**总条数 ≤6**；每条 **≤1 句**。不要堆砌与本轮决策无关的历史。\n\n### 3. Act\n决定本轮的具体行动：\n- 直接用自然语言回答，或\n- 向用户发出澄清问题，或\n- **调用一个工具**\n\n如果本轮决定调用工具，你 MUST:\n- 先用自然语言简要说明要调用哪个工具以及原因\n- 紧接着输出一个用 `<tool_call>...</tool_call>` 包裹的 JSON，对应唯一一次工具调用，格式为：\n\n<tool_call>\n{\n  "name": "<tool_name>",\n  "arguments": {\n    ... 工具入参，必须是 JSON 对象 ...\n  }\n}\n</tool_call>\n\n约束：\n- `name` 字段必须与后端注册的工具名完全一致\n- `arguments` 必须是 JSON 对象，字段与工具 schema 一一对应\n- **ONE step = ONE tool call**：每轮最多输出一个 `<tool_call>...</tool_call>` 块\n- 不要在 JSON 内加入注释或自然语言解释，相关说明写在 JSON 外面\n- 若本轮不调用工具，则完全省略 `<tool_call>` 部分\n\n### 4. Verify Results\n如果上一轮有工具返回结果(observation)，你需要检查：\n- 是否已经获得完成当前目标所需的关键信息\n- 是否还需要继续调用工具（进入下一轮 Plan/Gather/Act/Verify）\n- 还是可以直接向用户给出最终回答\n\n**Verify 长度上限**：有 observation 时，上述检查 **≤6 条 bullet**；首轮无 observation 时可仅 **1 句** 或省略要点。\n\n在 Verify 阶段，你还 MUST 按以下失败恢复规则处理工具异常或数据缺失场景：\n\n**Failure Handling Rules（失败恢复 — 合并否定约束）**:\n- Don\'t（fabrication + premature conclusion）: 不得将**未出现在本轮或最近轮 tool observation、且未由用户原话明确给出**的内容当作事实；不得在无有效 observation、或工具返回空/低质量结果时，输出**最终业务结论**（如具体库存数、单价、物料编号、Excel 数据行）。会话摘要与纯推理只能作线索，**不能替代** observation 中的数值与文本。\n- When tools fail or data is missing, you MUST either: (1) ask the user for clarification（更清晰的产品名/规格/code 或确认意图），OR (2) try an alternative tool path when Decision Rules 中有明确备选路径（例如 match_quotation 无结果时说明无匹配并提示万鼎/更精准关键词）。\n- IF a tool call fails due to invalid or missing arguments（必填缺失、类型错误），THEN you SHOULD 先在 Verify/Plan 中修正参数或向用户说明问题，再重试，不要基于错误 observation 继续推理。\n\n</think>'
@@ -450,7 +366,7 @@ _RESPONSE_STYLE_CONSTRAINTS = """\
 - Don't repeat tool JSON in natural language unless the user asks for detail.
 - When using <redacted_thinking>, put Plan/Gather/Act/Verify ONLY inside that block; after </redacted_thinking> output only the user-facing title + table + at most one short note (no duplicate Verify section).
 - Don't prefix the user-visible reply with `Reasoning:` / `Plan:` / free-form chain-of-thought; if you must reason in prose, keep it inside <think> only.
-- **禁止在 thinking 里念规则原文**：在 <think> 中**不要**复述或引用技能文档中的路由规则、IF/THEN 条件、工具选择逻辑（如「根据路由规则...」「IF the user says X THEN call Y」「应该用XXX工具，不调用YYY」）。这类决策结论只需要简短记录结论（如「查价格→match_wanding_price」），不需要把完整规则条件读出来。"""
+- **禁止在 thinking 里念规则原文**：在 <think> 中**不要**复述或引用技能文档中的路由规则、IF/THEN 条件、工具选择逻辑（如「根据路由规则...」「IF the user says X THEN call Y」「应该用XXX工具，不调用YYY」）。这类决策结论只需要简短记录结论（如「查价格→match_quotation」），不需要把完整规则条件读出来。"""
 
 OUTPUT_FORMAT_LEGACY = _OUTPUT_FORMAT_LEGACY_INTRO + "\n\n" + _TOOL_CALL_GLOBAL_RULES_BLOCK + "\n\n" + _RESPONSE_STYLE_CONSTRAINTS
 

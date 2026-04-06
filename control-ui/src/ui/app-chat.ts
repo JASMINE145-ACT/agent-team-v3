@@ -1,7 +1,7 @@
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { scheduleChatScroll } from "./app-scroll.ts";
 import { setLastActiveSessionKey } from "./app-settings.ts";
-import { resetToolStream } from "./app-tool-stream.ts";
+import { resetToolRender, resetToolStream } from "./app-tool-stream.ts";
 import type { OpenClawApp } from "./app.ts";
 import { abortChatRun, loadChatHistory, sendChatMessage } from "./controllers/chat.ts";
 import { loadSessions } from "./controllers/sessions.ts";
@@ -105,6 +105,9 @@ async function sendChatMessageNow(
   },
 ) {
   resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
+  // New user turn starts: clear transient tool_render cache from previous runs
+  // to avoid replaying old cards in the next conversation turn.
+  resetToolRender(host as unknown as Parameters<typeof resetToolRender>[0]);
   const runId = await sendChatMessage(
     host as unknown as OpenClawApp,
     message,

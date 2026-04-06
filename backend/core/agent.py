@@ -545,11 +545,29 @@ class CoreAgent:
                     trace.append({"step": step + 1, "type": "tool_arg_error", "name": name, "raw": raw_arguments[:200]})
                     continue
                 args = args if isinstance(args, dict) else {}
+                normalized_args = dict(args)
+                if name == "match_quotation":
+                    normalized_args["keywords"] = str(normalized_args.get("keywords") or "").strip()
+                    normalized_args["customer_level"] = (
+                        str(normalized_args.get("customer_level") or "B").strip().upper() or "B"
+                    )
+                    normalized_args["show_all_candidates"] = bool(normalized_args.get("show_all_candidates", False))
+                elif name == "match_quotation_batch":
+                    raw_list = normalized_args.get("keywords_list") or []
+                    if isinstance(raw_list, list):
+                        normalized_args["keywords_list"] = [
+                            str(x).strip() for x in raw_list if str(x).strip()
+                        ]
+                    else:
+                        normalized_args["keywords_list"] = []
+                    normalized_args["customer_level"] = (
+                        str(normalized_args.get("customer_level") or "B").strip().upper() or "B"
+                    )
 
                 try:
-                    args_key = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+                    args_key = json.dumps(normalized_args, ensure_ascii=False, sort_keys=True, default=str)
                 except Exception:
-                    args_key = str(args)
+                    args_key = str(normalized_args)
                 cache_key = f"{name}|{args_key}"
                 cached_obs = tool_obs_cache.get(cache_key)
                 if (
@@ -654,15 +672,6 @@ class CoreAgent:
                         except Exception:
                             logger.warning("ext.on_after_tool 失败，已跳过 name=%s", name, exc_info=True)
 
-                    # 工程兜底：match_quotation 已通过 SSE 渲染到前端时，禁止再走下一跳 LLM 生成正文。
-                    # 这样可稳定保证「一个 query 对应一个卡片」而不是 query/card 分离堆积。
-                    if (
-                        name == "match_quotation"
-                        and isinstance(obs, str)
-                        and obs.startswith(_RENDERED_MARKER_PREFIX)
-                    ):
-                        force_final_answer = obs
-
                     tool_obs_cache[cache_key] = obs
 
                     # Rework 机制：当 match_quotation 返回 needs_human_choice 时，存入 session
@@ -736,6 +745,13 @@ class CoreAgent:
                             )
                         except Exception:
                             logger.debug("on_event callback failed", exc_info=True)
+
+                # 报价类：无论新执行还是 tool_obs_cache 命中，只要 observation 以渲染标记开头就强制收尾。
+                # 缓存命中分支此前未设置 force_final_answer，会导致多走一步 LLM、重复输出整表。
+                if name in ("match_quotation", "match_quotation_batch") and isinstance(obs, str):
+                    lead = obs.lstrip("\ufeff \t\r\n")
+                    if lead.startswith(_RENDERED_MARKER_PREFIX):
+                        force_final_answer = obs
 
                 trace.append({"step": step + 1, "type": "observation", "content": obs})
                 messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": obs})

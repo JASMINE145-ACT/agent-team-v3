@@ -228,6 +228,10 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     let didLoadHistoryForNewSession = false;
     if (state === "final" || state === "error" || state === "aborted") {
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
+      // Clear live tool_render SSE buffer when a run ends. Otherwise history already
+      // contains virtual tool_render messages from chat.history, and stale
+      // toolRenderItems fall through to buildChatItems bottom fallback → duplicate cards.
+      resetToolRender(host as unknown as Parameters<typeof resetToolRender>[0]);
       void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
       const runId = payload?.runId;
       if (runId && host.refreshSessionsAfterChat.has(runId)) {
