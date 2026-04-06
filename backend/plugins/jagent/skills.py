@@ -95,15 +95,15 @@ INVENTORY & PRICE DECISION RULES
   THEN you MUST call get_profit_by_price(code?, product_name?, price).
 - IF the user asks for **多个产品的利润率/价格档位** (e.g. whole sheet, 5+ items),
   THEN you MUST call get_profit_by_price_batch(items) INSTEAD OF multiple single get_profit_by_price calls.
-- IF the user intent is only “查XX / 查询XX / 查一下25管卡” and has NOT clarified inventory vs price,
+- IF the user intent is only "查XX / 查询XX / 查一下25管卡" and has NOT clarified inventory vs price,
   THEN you MUST call ask_clarification to decide whether to follow inventory routing or price routing before choosing tools here.
 - IF the user says 「全部list」「所有候选」「我想自己选」「列出所有」「给我看看所有的」,
   THEN call match_quotation(keywords, show_all_candidates=true) to return all candidates without auto-selection.
   DO NOT re-call match_quotation without this flag.
   DO NOT use match_by_quotation_history as a workaround (history-only, misses wanding matches).
-  - Example (Correct): 「三通50 我想自己选」→ match_quotation(keywords=”三通50”, show_all_candidates=true) ✅
-  - Example (Incorrect): 「三通50 我想自己选」→ match_quotation(keywords=”三通50”) [re-call without flag] ❌
-  - Example (Incorrect): 「三通50 我想自己选」→ match_by_quotation_history(keywords=”三通50”) ❌
+  - Example (Correct): 「三通50 我想自己选」→ match_quotation(keywords="三通50", show_all_candidates=true) ✅
+  - Example (Incorrect): 「三通50 我想自己选」→ match_quotation(keywords="三通50") [re-call without flag] ❌
+  - Example (Incorrect): 「三通50 我想自己选」→ match_by_quotation_history(keywords="三通50") ❌
 
 [Context Continuity Rules]
 - IF the current user query is incomplete or very short (e.g. only product name or spec like 「50三通」「DN40弯头」),
@@ -118,7 +118,7 @@ INVENTORY & PRICE DECISION RULES
 [Ambiguity & Recovery Rules]
 - IF needs_selection is true AND the user wants to pick a single candidate (e.g.「选一个」「你帮我选一个」「哪一款合适」),
   THEN you MUST call select_wanding_match(keywords, candidates) and you MUST NOT guess a candidate without selection.
-- IF the user asks for “全部价格/所有匹配/列出所有候选”,
+- IF the user asks for "全部价格/所有匹配/列出所有候选",
   THEN you MUST NOT call select_wanding_match; instead, you MUST present the full candidates table from the last observation.
 - IF match_quotation/match_wanding_price returns no suitable candidates OR overall match quality is too low,
   THEN you MUST explain that no good match was found and MAY ask the user for a clearer product name/spec or code, instead of fabricating codes or products.
@@ -302,26 +302,15 @@ QUOTE DECISION RULES (WORK)
   THEN you MUST call edit_excel(file_path, edits, ...).
 - Within a single Work run and a single `file_path`, you MUST call parse_excel_smart at most once per ReAct loop step; reuse its result for subsequent reasoning instead of re-parsing.
 
-[Hard Constraints — MUST FOLLOW]
-- When the user asks to 提取/查看 Excel 数据:
-  - You MUST ensure the reply table matches the tool's Markdown table row-by-row; do NOT drop rows, duplicate rows, or fabricate rows.
-  - You MUST NOT write \"数据被截断\" or similar placeholders into table cells.
-  - IF the tool reports truncation, you MAY add a note outside the table (e.g. “部分内容因长度被截断”) but MUST NOT modify individual cell contents to say \"数据被截断\".
-- In the Verify phase, you MUST NOT claim “文件只有表头/没有数据行/似乎为空” when `parse_excel_smart` has returned N rows (including header + data); you MUST trust the tool output structure.
-- Inline examples（Excel Hard Constraints）:
-  - Example (Correct): 「看一下这张报价单的内容」 + file_path → parse_excel_smart(file_path) 并展示完整表格，或仅展示前 K 行并在表外注明「仅展示前 K 行，共 N 行」。
-  - Example (Incorrect): 在表格单元格里填写「数据被截断」，或在 Verify 阶段声称「文件只有表头」而工具其实返回了多行数据 ❌。
-
-[Batch Handling & Output Rules]
-- WHEN `parse_excel_smart` returns \"共 N 行\":
-  - You MUST treat the first row as column indices, the second row as headers, and subsequent rows as data.
-  - If you only display part of the data due to length, you MUST clearly state \"仅展示前 K 行，共 N 行\".
-- For fill_quotation_sheet, you SHOULD preserve the template's row ordering and structure, and ensure that code/quote_name/价格/数量等字段与 fill_items 中的数据一一对应。
-
-[Examples]
-- 关键示例已就近写在对应规则下方（如 Excel 数据展示不丢行、不写「数据被截断」、Verify 阶段不得误判「只有表头」等）；本节留作补充：
-- Example (Correct): 「把这几行匹配结果填回报价单」 + fill_items -> fill_quotation_sheet(file_path, fill_items, ...).
-- Example (Incorrect): 将 `Qty` 列当成库存数量回答库存问题 ❌.
+[Output Rules]
+- Reply table MUST match the tool's Markdown table row-by-row: do NOT drop rows, duplicate rows, or fabricate rows.
+- MUST NOT write \"数据被截断\" into table cells; if truncation occurs, add a note OUTSIDE the table only.
+- In Verify phase, MUST NOT claim "文件只有表头/没有数据行" when parse_excel_smart returned N rows; trust the tool output.
+  - Example (Correct): 「看一下这张报价单的内容」 + file_path → parse_excel_smart(file_path)，展示完整或前 K 行，表外注明「仅展示前 K 行，共 N 行」。
+  - Example (Incorrect): 在表格单元格里填写「数据被截断」，或 Verify 时声称「文件只有表头」而工具已返回多行 ❌。
+- WHEN parse_excel_smart returns \"共 N 行\": treat row 1 as column indices, row 2 as headers, subsequent rows as data.
+- If only partial data is shown, MUST clearly state \"仅展示前 K 行，共 N 行\".
+- For fill_quotation_sheet, preserve template row ordering; ensure code/quote_name/价格/数量 match fill_items 1:1.
 """
 
 SKILL_FILL_DOC = """\
@@ -336,22 +325,15 @@ FILL DECISION RULES (WORK PIPELINE)
 - IF the user explicitly asks for 「询价填充」「完整报价」「整单流水线处理」 AND context has a valid file_path,
   THEN you MUST call run_quotation_fill(file_path, customer_level?) to run the full pipeline (提取→匹配→库存→回填).
 - IF the user is in Chat (not Work pipeline) and only wants to **查看或简单操作 Excel**,
-  THEN you MUST NOT call run_quotation_fill; instead, you SHOULD use parse_excel_smart via the Work/Chat-appropriate tools.
-
-[Hard Constraints — MUST FOLLOW]
-- NEVER auto-trigger run_quotation_fill in pure Chat context when the user did not ask for a full pipeline; it is reserved for Work flows with explicit intent.
-- WHEN run_quotation_fill produces very large results, you MUST respect any truncation/summary mechanisms implemented in `on_after_tool` and avoid re-expanding full data in the prompt.
+  THEN you MUST NOT call run_quotation_fill; NEVER auto-trigger it without explicit user request for full pipeline.
 
 [Output Rules]
-- In summaries of pipeline results, you SHOULD clearly separate and label stages:
+- WHEN run_quotation_fill produces very large results, MUST respect truncation/summary mechanisms in `on_after_tool`; do NOT re-expand full data in the prompt.
+- In summaries of pipeline results, clearly separate and label stages:
   - 提取阶段（解析出多少行/商品）,
   - 匹配阶段（多少行成功匹配/需要人工选择）,
   - 库存校验阶段（可用/缺口/无货）,
   - 回填阶段（输出文件路径或回填成功说明）。
-
-[Examples]
-- Correct: 「这张报价单帮我做完整询价填充」 + file_path -> run_quotation_fill(file_path, customer_level?).
-- Incorrect: 用户只说「看一下这张表的内容」时直接调用 run_quotation_fill ❌.
 """
 
 # Chat 仅保留普适 Excel，不包含报价单流水线；整单相关引导至 Work
