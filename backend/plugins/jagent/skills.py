@@ -61,17 +61,11 @@ When multiple rules could apply, resolve conflicts in this order:
 SKILL_INVENTORY_PRICE_RULES = """\
 INVENTORY & PRICE DECISION RULES
 
-[Global Priority Order]
-- When multiple rules could apply at the same time, you MUST resolve conflicts using this priority order:
-  1. **Explicit user constraints** (e.g. 「用万鼎查」「不要历史」「只用万鼎」)
-  2. **Exact identifiers** (e.g. exact 10-digit product code)
-  3. **Language-specific routing** (Chinese vs English inventory queries)
-  4. **General defaults and fallbacks**
-
 [Routing & Priority Rules]
 - IF the user explicitly wants **库存/可售** OR **价格/报价/万鼎/档位**, THEN you MUST route to the inventory/price tools in this section.
 - IF the user clearly says 「用万鼎查」「不要历史」「只用万鼎」,
   THEN you MUST ALWAYS override other routing rules and use match_wanding_price(keywords, customer_level?) ONLY, and you MUST NOT call match_quotation in that scenario.
+  DO NOT mix match_quotation and match_wanding_price in the same step; treat match_quotation as the combined 历史报价+万鼎 view by default.
 - IF the user asks for **价格/报价/万鼎/档位** AND has NOT said 「用万鼎查」「不要历史」「只用万鼎」,
   THEN you MUST call match_quotation(keywords, customer_level?) as the default price tool — DO NOT call match_wanding_price for a standard price query; match_quotation covers both history and wanding in one call.
   - Example (Correct): 「直接50 价格」→ match_quotation(keywords="直接50") ✅
@@ -89,6 +83,7 @@ INVENTORY & PRICE DECISION RULES
   2) obtain the chosen code from its candidates,
   3) call get_inventory_by_code(code) to check inventory.
   **CRITICAL**: This 3-step chain is triggered ONLY when the user's intent is **库存/可售**. For price-only queries (user says 「价格/报价/万鼎/档位」 without mentioning 「库存/可售」), you MUST STOP after step 1 — DO NOT proceed to step 3 (get_inventory_by_code).
+  DO NOT use search_inventory for Chinese generic product terms (管件名+规格) — this chain MUST go through match_quotation → get_inventory_by_code.
 - Inline examples (Chinese inventory chain):
   - Example (Correct): 「50三通库存」 → match_quotation(keywords="50三通") → get_inventory_by_code(code from chosen candidate).
   - Example (Correct): 「三通50 价格」 → match_quotation(keywords="三通50") → STOP. Do NOT call get_inventory_by_code ✅
@@ -141,14 +136,6 @@ INVENTORY & PRICE DECISION RULES
   THEN you SHOULD use the batch tools with codes or {code, price} items parsed from the sheet, within the 50-items-per-call limit.
 - IF a batch exceeds the configured max items per call (50),
   THEN you MUST split it into multiple batch tool calls and KEEP the mapping 1:1 via input_index in the final reply.
-
-[Hard Constraints — MUST FOLLOW]
-- DO NOT call search_inventory for **Chinese generic product terms** (管件名 + 规格，如「50三通」「弯头dn40」) when the Chinese inventory chain applies; Chinese inventory in this case MUST go through match_quotation → get_inventory_by_code unless an exact code is already given.
-- DO NOT skip match_quotation for Chinese inventory requests without an exact 10-digit code.
-- DO NOT mix match_quotation and match_wanding_price in the same step unless the user has explicitly requested a separate 万鼎-only comparison; by default, you MUST treat match_quotation as the combined 历史报价 + 万鼎 view.
-- DO NOT call get_inventory_by_code after match_quotation when the user's intent is **price-only** (「价格/报价/万鼎/档位」); get_inventory_by_code is ONLY required in the Chinese inventory chain (when user explicitly mentions 「库存/可售」). Receiving a code from match_quotation does NOT automatically mean you should check inventory.
-- DO NOT call get_inventory_by_code_batch OR get_profit_by_price_batch for more than 50 items in one call; split into batches instead.
-- DO NOT fabricate product codes, price levels, or inventory quantities if tools return no match or low-quality matches.
 
 [Keyword Protection Rules]
 - IF the keywords contain any **Chinese pipe fitting/product terms** such as 「直接（接头）」「直通」「弯头」「三通」「变径」「大小头」「堵头」「管帽」「活接」「由令」「套管」「法兰」「管卡」「管夹」,
@@ -252,11 +239,6 @@ INVENTORY & PRICE DECISION RULES
   THEN you MUST copy that exact code string into the table column 「产品编号(code)」; you MUST NOT use 「—」 or leave it blank for that row (only use 「—」 when the JSON field is actually missing or empty).
 - IF the result contains `fallback: true` (rule-based fallback due to LLM error), `chosen.code` is still valid and MUST be copied into the table; do NOT use 「—」 just because `fallback` is true.
 
-[Examples]
-- Examples above are colocated with the corresponding rules（中文库存链路、关键词保护等）；本节仅作补充场景回顾：
-- Example (Correct): "code=8010072480 库存" -> exact 10-digit code -> get_inventory_by_code("8010072480") directly.
-- Example (Correct): "PVC elbow inventory" -> English product name inventory -> search_inventory(keywords="PVC elbow").
-- Example (Correct): "列出这 10 个编号的库存" + a list of 10 codes -> get_inventory_by_code_batch(codes) in a single call.
 """
 
 SKILL_OOS_DOC = """\
