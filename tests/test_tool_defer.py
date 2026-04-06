@@ -130,6 +130,20 @@ def test_oos_tools_are_all_deferred():
 
 # ── Task 4 tests ──────────────────────────────────────────────────────────────
 
+# ── Task 5 tests ──────────────────────────────────────────────────────────────
+
+def test_quote_tools_are_all_deferred():
+    from backend.tools.quotation.quote_tools import get_quote_tools_openai_format
+    tools = get_quote_tools_openai_format()
+    assert len(tools) > 0
+    for t in tools:
+        name = t["function"]["name"]
+        meta = t["function"].get("x_tool_meta", {})
+        assert meta.get("deferred") is True, f"Quote 工具 {name} 缺少 deferred: True"
+
+
+# ── Task 4 tests ──────────────────────────────────────────────────────────────
+
 def test_inventory_p1_tools_are_deferred():
     from backend.tools.inventory.services.inventory_agent_tools import get_inventory_tools_openai_format
     tools = get_inventory_tools_openai_format()
