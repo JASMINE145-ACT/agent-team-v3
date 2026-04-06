@@ -384,13 +384,7 @@ CLARIFY DECISION RULES
   THEN you MAY directly choose inventory-related tools without extra clarification.
 - IF the user has already clearly mentioned one of 「价格」「报价」「万鼎」「档位」,
   THEN you MAY directly choose price-related tools without extra clarification.
-
-[Hard Constraints — MUST FOLLOW]
-- DO NOT silently assume inventory vs price when the user has not specified either; always clarify first in ambiguous cases.
-
-[Examples]
-- Correct: 「查一下25管卡」 (no inventory/price word) -> ask_clarification(\"您是想查库存数量，还是查万鼎报价/各档位价格？或两者都要？\").
-- Incorrect: 「查一下25管卡」 直接当作库存或价格查询调用工具而不澄清 ❌.
+  DO NOT silently assume inventory vs price when neither is specified — always clarify first in ambiguous cases.
 """
 
 SKILL_KNOWLEDGE_DOC = """\
