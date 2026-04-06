@@ -24,7 +24,7 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **查库存的调用顺序（重要）**：① 用户用**中文**说产品名且要查库存（如「50三通的库存」「DN40弯头还有多少」）→ **禁止**直接用 search_inventory（仅适配英文）。应先 **match_quotation(keywords)** 得到 code/候选，再用 **get_inventory_by_code(code)** 查库存；单条候选时直接用其 code，多候选时先选型或取首条。**match_wanding_price** 仅当用户明确要求「只用万鼎/仅字段匹配/不要历史」时使用。② 用户用**英文**产品名查库存 → 可用 search_inventory(keywords)。③ 用户已给出 10 位物料编号 → 直接用 get_inventory_by_code(code)。
 - **keywords 关键词保护（重要）**：中文管件/产品名称词——「直接（接头）」「直通」「弯头」「三通」「变径」「大小头」「堵头」「管帽」「活接」「由令」「套管」「法兰」「管卡」「管夹」等——**即使语法上看似副词或助词，也必须原样保留在 keywords 中，禁止去除**。例：「直接dn50」→ keywords=「直接dn50」（❌ 不得简化为「dn50」）；「三通 dn25 价格」→ keywords=「三通 dn25」；「弯头dn40库存」→ keywords=「弯头 dn40」。
 - **询价/查 code/查物料编号**：**必须优先调用 match_quotation**（一次得到历史+万鼎并集及匹配来源）；仅当用户明确「用万鼎查/不要历史」时改用 match_wanding_price。得 code 后可用 get_inventory_by_code 查库存。
-- **多产品价格查询**：用户在一条消息里问 ≥2 个产品的价格（如「直接50 三通50 价格」）时，**必须对每个产品单独调用 match_quotation**，不得把多个产品名拼成一个 keywords 传入；拼合 keywords 会导致 LLM 选型混乱。
+- **多产品价格查询**：用户在一条消息里问 ≥2 个产品的价格（如「直接50 三通50 价格」）时，**必须使用 match_quotation_batch(keywords_list=["直接50", "三通50"])** 一次性批量查询，不得把多个产品名拼成一个 keywords 传入 match_quotation，也不得多次单独调用 match_quotation；批量工具为每个产品独立展示报价卡片。**match_quotation_batch 返回后严禁再次调用 match_quotation 查询其中任何产品，否则会出现重复卡片。**
 - **「全部价格」「各档价格」**：对同一 keywords 按需分别调用 match_wanding_price(customer_level=…)，汇总成表格「客户级别 | 客户价」。**档位与自然语言对应**：用户说「**二级代理**」「二级代理价格」→ customer_level=A；「**一级代理**」→ B；「**聚万大客户**」→ C；「**青山大客户**」「青山大客户价格」→ D（降低利润率用 D_low）；「**大唐大客户**」→ E。**出厂/采购价**：用户要「出厂价含税」「出厂价不含税」「采购不含税」时传 customer_level=FACTORY_INC_TAX / FACTORY_EXC_TAX / PURCHASE_EXC_TAX。档位代码：A/B/C/D/D_LOW/E 及 FACTORY_INC_TAX/FACTORY_EXC_TAX/PURCHASE_EXC_TAX。**只调一次会只得到默认 B 档。**
 - **回复用户时档位一律用全名**：出厂价_含税、出厂价_不含税、采购不含税；（二级代理）A级别 利润率/报单价格；（一级代理）B级别 利润率/报单价格；（聚万大客户）C级别 利润率/报单价格；（青山大客户）D级别 利润率/报单价格/降低利润率；（大唐大客户）E级别（包运费） 利润率/报单价格。表格列名或文中提到价格档位时写上述全名，不要只写 A类/B类。
 - **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。
@@ -65,9 +65,11 @@ INVENTORY & PRICE DECISION RULES
   - Example (Correct): 「直接50 价格」→ match_quotation(keywords="直接50") ✅
   - Example (Incorrect): 「直接50 价格」→ match_wanding_price(keywords="直接50") ❌（用户未说「只用万鼎」，默认走 match_quotation）
 - IF the user asks for prices of **≥ 2 different products** in ONE message (e.g. 「直接50 三通50 价格」「查弯头25和三通50的价格」),
-  THEN you MUST call match_quotation **ONCE PER PRODUCT** with each product's keywords separately — DO NOT combine all product names into a single keywords string.
-  - Example (Correct): 「直接50 三通50 价格」→ match_quotation(keywords="直接50") then match_quotation(keywords="三通50") ✅
-  - Example (Incorrect): 「直接50 三通50 价格」→ match_quotation(keywords="直接50 三通50") ❌（合并 keywords 导致 LLM 选型混乱）
+  THEN you MUST call **match_quotation_batch(keywords_list=[...])** with all product names as separate list items — DO NOT combine into one string, and DO NOT call match_quotation per product separately.
+  - Example (Correct): 「直接50 三通50 价格」→ match_quotation_batch(keywords_list=["直接50", "三通50"]) ✅
+  - Example (Incorrect): 「直接50 三通50 价格」→ match_quotation(keywords="直接50 三通50") ❌（合并 keywords 导致选型混乱）
+  - Example (Incorrect): 「直接50 三通50 价格」→ match_quotation("直接50") then match_quotation("三通50") ❌（应用批量工具）
+  - **CRITICAL**: After match_quotation_batch returns, you MUST NOT call match_quotation for ANY of the listed products — they have already been fully queried. Calling match_quotation again will cause duplicate cards for the user.
 - IF the user has already provided an exact **10-digit material code**, THEN you MUST call get_inventory_by_code(code) directly for inventory, without going through match_quotation.
 - IF the request is a **Chinese inventory request** (user mentions 「库存」「可售」「有多少」「还有吗」「有没有货」, e.g.「50三通的库存」「DN40弯头还有多少」) AND no exact 10-digit product code is already known,
   THEN you MUST follow this mandatory chain:

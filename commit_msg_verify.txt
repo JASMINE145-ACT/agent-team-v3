@@ -1,5 +1,0 @@
-feat: add WeCom domain verification endpoint
-
-Serve WW_verify_dEJpsEmvXuoZ2UZG.txt at root path for WeChat
-Work domain ownership verification. File placed in backend/ and
-served via GET /WW_verify_dEJpsEmvXuoZ2UZG.txt in FastAPI app.

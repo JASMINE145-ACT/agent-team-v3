@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 # 候选来源优先级：共同 > 历史报价 > 字段匹配
 _SOURCE_PRIORITY = {"共同": 0, "历史报价": 1, "字段匹配": 2}
 
+# 推送给前端的 chosen 字段白名单（与 extension.py 保持同步）
+_KNOWN_CHOSEN_FIELDS: set[str] = {"code", "matched_name", "unit_price", "source"}
+
 # 延迟初始化，避免启动时即依赖 src.api.client / src.cache
 _table_agent = None
 _table_agent_lock = threading.Lock()
@@ -839,6 +842,90 @@ def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str,
     }
 
 
+def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None) -> dict[str, Any]:
+    """
+    批量询价匹配（只读）：对 keywords_list 中每个产品独立调用 match_quotation，
+    每个产品结果各自推送 tool_render SSE，最终返回紧凑汇总供 LLM 用。
+    - 入参：keywords_list（产品关键词列表，每项为一个独立产品）、可选 customer_level。
+    - 返回：{ success, result(紧凑汇总), items[{ keywords, status, payload }] }。
+    """
+    _push = push_event if callable(push_event) else None
+
+    keywords_list = arguments.get("keywords_list") or []
+    if not isinstance(keywords_list, list) or not keywords_list:
+        return {"success": True, "result": "请提供 keywords_list（至少一个产品关键词）。"}
+    customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
+
+    items_out: list[dict[str, Any]] = []
+    summary_lines: list[str] = []
+
+    for idx, kw_raw in enumerate(keywords_list):
+        kw = (str(kw_raw or "")).strip()
+        if not kw:
+            items_out.append({"keywords": kw, "status": "skipped"})
+            continue
+
+        single_args = {"keywords": kw, "customer_level": customer_level}
+        result = _execute_match_quotation(single_args, push_event=None)
+        obs_str = result.get("result") or ""
+        status = "error" if not result.get("success") else "ok"
+        item_entry: dict[str, Any] = {"keywords": kw, "status": status}
+
+        try:
+            payload = json.loads(obs_str)
+        except Exception:
+            payload = {}
+
+        if payload.get("single"):
+            raw_chosen = payload.get("chosen") or {}
+            safe_chosen = {k: raw_chosen.get(k) for k in _KNOWN_CHOSEN_FIELDS if k in raw_chosen}
+            if _push:
+                _push("tool_render", {
+                    "formatted_response": payload.get("formatted_response", ""),
+                    "keywords": kw,
+                    "chosen": safe_chosen,
+                    "chosen_index": payload.get("chosen_index"),
+                    "match_source": payload.get("match_source", ""),
+                    "selection_reasoning": payload.get("selection_reasoning", ""),
+                })
+            chosen = payload.get("chosen") or {}
+            item_entry["status"] = "matched"
+            item_entry["chosen"] = safe_chosen
+            item_entry["chosen_index"] = payload.get("chosen_index")
+            summary_lines.append(
+                f"「{kw}」→ code={chosen.get('code', '')}「{chosen.get('matched_name', '')}」"
+                f" B级价={chosen.get('unit_price', '')}元"
+            )
+        elif payload.get("unmatched"):
+            item_entry["status"] = "unmatched"
+            summary_lines.append(f"「{kw}」→ 未匹配")
+        elif payload.get("needs_selection"):
+            item_entry["status"] = "needs_selection"
+            summary_lines.append(f"「{kw}」→ 需人工选择（{len(payload.get('candidates') or [])}条候选）")
+        elif not result.get("success"):
+            summary_lines.append(f"「{kw}」→ 查询失败")
+        else:
+            summary_lines.append(f"「{kw}」→ {obs_str[:80]}")
+
+        item_entry["payload"] = payload
+        items_out.append(item_entry)
+
+    n = len(keywords_list)
+    matched_count = sum(1 for it in items_out if it.get("status") == "matched")
+    compact = (
+        f"[已渲染到前端] 批量询价 {n} 个产品，已匹配 {matched_count} 个（所有产品已完整查询，"
+        f"**禁止**再次调用 match_quotation 查询列表中任何产品）：\n"
+        + "\n".join(summary_lines)
+        + "\n如用户追问可直接回答，无需再次查询。"
+    )
+    return {
+        "success": True,
+        "result": compact,
+        "items": items_out,
+    }
+
+
+
 def _execute_select_wanding_match(arguments: dict[str, Any]) -> dict[str, Any]:
     """
     执行 select_wanding_match（只读）：从 match_wanding_price/match_quotation 的候选中用 LLM 选 1 个。
@@ -1034,8 +1121,28 @@ def get_inventory_tools_openai_format() -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "match_quotation_batch",
+                "description": "批量询价匹配：用户在**一条消息**里询问 2 个或以上不同产品的价格时使用，每个产品独立匹配并各自展示报价卡片。单产品查询仍用 match_quotation。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "keywords_list": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "产品关键词列表，每项为一个独立产品（如 [\"直接50\", \"三通50\"]）",
+                        },
+                        "customer_level": {"type": "string", "description": "价格档位，同 match_quotation。默认 B"},
+                    },
+                    "required": ["keywords_list"],
+                },
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "match_quotation",
-                "description": "询价匹配：同时查报价历史与万鼎字段匹配，结果取并集，每条带 source（历史报价/字段匹配/共同）。",
+                "description": "询价匹配：同时查报价历史与万鼎字段匹配，结果取并集，每条带 source（历史报价/字段匹配/共同）。单产品用此工具；2个及以上不同产品用 match_quotation_batch。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1135,6 +1242,8 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any], push_even
     # 询价相关工具不依赖 table/sql_agent，可单独执行
     if name == "match_quotation":
         return _execute_match_quotation(arguments, push_event=push_event)
+    if name == "match_quotation_batch":
+        return _execute_match_quotation_batch(arguments, push_event=push_event)
     if name == "match_by_quotation_history":
         return _execute_match_by_quotation_history(arguments)
     if name == "match_wanding_price":

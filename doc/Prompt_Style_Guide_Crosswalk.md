@@ -80,7 +80,7 @@
 | **例子** | 库存/Excel/澄清 RULES 正反面齐全；DOC 有关键词 ❌ 例，整体达标。 |
 | **DOC vs RULES 语义** | 大段规则在两侧均有覆盖，但 **表述长度与语气不同**；长期维护易出现漂移，适合「单一真源 + 摘要」策略（见下阶段 roadmap）。 |
 | **双轨 Loop vs LEGACY** | Loop 强调四段与 Act 前「自然语言说明再 tool_call」；LEGACY 强调「可直接 tool_call」。行为差异会影响 **首包展示、completion 长度、是否截断**；需在 General/运营文档写清 **何时 True/False**。 |
-| **测试耦合** | [test_claude_loop.py](../test_claude_loop.py) 断言 `Gather Context`、`Take Action`、`Verify Results` 等 **字符串存在**；[tests/test_integration_agent_react.py](../tests/test_integration_agent_react.py) 断言 system 含 `Plan` 或 `Gather` 或 `技能`。改版 OUTPUT_FORMAT 时必须同步改测试或改为语义化断言（例如「含 tool_call 约定」）。 |
+| **测试耦合** | [tests/test_integration_agent_react.py](../tests/test_integration_agent_react.py) 断言 system 含 `Plan` 或 `Gather` 或 `技能` 等。改版 OUTPUT_FORMAT 时必须同步改测试或改为语义化断言（例如「含 tool_call 约定」）。 |
 
 ---
 

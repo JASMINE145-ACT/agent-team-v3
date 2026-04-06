@@ -1,4 +1,0 @@
-feat: add /ip endpoint to expose server egress IP
-
-Useful for confirming the Render fixed IP to add to WeCom
-corp-level IP whitelist.

@@ -1367,7 +1367,7 @@ summarizer = make_summarizer(
 [11] 量化边界                 →  Gather/Verify 外，最终回复是否需字数/条数上限（业务自定）
 [12] think 标签与解析器        →  agent_helpers._extract_tag(tag="think") 与 skills 中 OUTPUT_FORMAT 示例是否一致
 [13] DOC vs RULES 语义漂移      →  同一条路由规则在 DOC / RULES 两侧是否仍等价
-[14] 测试字符串耦合           →  test_claude_loop.py / test_integration_agent_react.py 是否需随 OUTPUT_FORMAT 改版
+[14] 测试字符串耦合           →  tests/test_integration_agent_react.py 是否需随 OUTPUT_FORMAT 改版
 ```
 
 ---

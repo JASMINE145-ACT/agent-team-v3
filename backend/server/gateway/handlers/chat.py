@@ -331,6 +331,7 @@ async def handle_chat_send(
     finally:
         run_unregister(run_id)
         context.pop("push_event", None)
+        context.pop("_tool_renders", None)
 
     final_answer = (result or {}).get("answer") or accumulated[0] or ""
     final_thinking = (result or {}).get("thinking") or ""

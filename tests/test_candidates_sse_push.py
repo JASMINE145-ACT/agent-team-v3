@@ -128,11 +128,10 @@ class TestCandidatesSSEPush:
         event_types = [et for et, _ in events]
         assert event_types.index("tool_candidates") < event_types.index("tool_selection_done")
 
-    def test_push_event_tool_render_called_in_single_path(self):
-        """single path should push tool_render for frontend direct rendering."""
-        events = []
-        push = lambda event_type, payload: events.append((event_type, payload))
-
+    def test_push_event_tool_render_called_via_extension(self):
+        """tool_render is pushed by extension.on_after_tool, not internally by _execute_match_quotation.
+        _execute_match_quotation populates formatted_response in the result so extension can use it."""
+        import json
         from backend.tools.inventory.services.inventory_agent_tools import _execute_match_quotation
         candidates_raw = [{"code": "8020020755", "matched_name": "直通PVC", "unit_price": 100.0, "source": "历史报价"}]
 
@@ -140,16 +139,21 @@ class TestCandidatesSSEPush:
                    return_value=candidates_raw):
             with patch("backend.tools.inventory.services.llm_selector.llm_select_best",
                        return_value=_make_llm_result()):
-                _execute_match_quotation({"keywords": "直通50"}, push_event=push)
+                result = _execute_match_quotation({"keywords": "直通50"})
 
-        event_types = [et for et, _ in events]
-        assert "tool_render" in event_types
+        # formatted_response must be present in the result for extension to use
+        payload = json.loads(result["result"])
+        assert payload.get("single") is True
+        assert isinstance(payload.get("formatted_response"), str)
+        assert len(payload["formatted_response"]) > 0
 
-    def test_push_event_tool_render_payload_schema(self):
-        """tool_render payload should satisfy frontend required fields."""
+    def test_push_event_tool_render_payload_schema_via_extension(self):
+        """extension.on_after_tool pushes tool_render when single=True; validate it pushes correct fields."""
+        import json
         events = []
         push = lambda event_type, payload: events.append((event_type, payload))
 
+        from backend.plugins.jagent.extension import JAgentExtension
         from backend.tools.inventory.services.inventory_agent_tools import _execute_match_quotation
         candidates_raw = [{"code": "8020020755", "matched_name": "直通PVC", "unit_price": 100.0, "source": "历史报价"}]
 
@@ -157,7 +161,11 @@ class TestCandidatesSSEPush:
                    return_value=candidates_raw):
             with patch("backend.tools.inventory.services.llm_selector.llm_select_best",
                        return_value=_make_llm_result()):
-                _execute_match_quotation({"keywords": "直通50"}, push_event=push)
+                result = _execute_match_quotation({"keywords": "直通50"})
+
+        obs = result["result"]  # JSON string
+        ext = JAgentExtension()
+        ext.on_after_tool("match_quotation", {"keywords": "直通50"}, obs, context={"push_event": push})
 
         payload = next(p for et, p in events if et == "tool_render")
         assert isinstance(payload.get("formatted_response"), str)

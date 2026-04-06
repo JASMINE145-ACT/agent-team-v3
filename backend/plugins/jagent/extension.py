@@ -57,7 +57,14 @@ class JAgentExtension(AgentExtension):
         return policy + (user_input or "")
 
     def on_after_tool(self, name: str, args: dict, obs: str, context: dict | None = None) -> str:
-        """拦截 match_quotation 结果：推送 tool_render SSE → 返回紧凑摘要给 LLM。"""
+        """拦截 match_quotation / match_quotation_batch 结果：推送 tool_render SSE → 返回紧凑摘要给 LLM。"""
+        # ── match_quotation_batch: SSE 已在内部逐产品推送，obs 本身即紧凑摘要，直接返回 ──
+        if name == "match_quotation_batch":
+            # tool_render SSE events were already pushed per-product inside _execute_match_quotation_batch.
+            # obs is already the compact summary string (unwrapped by unwrap_tool_result).
+            logger.info("[on_after_tool] match_quotation_batch compact (len=%d)", len(obs))
+            return obs
+
         # ── match_quotation: 推送 SSE + 返回紧凑摘要 ──────────────────────────
         if name == "match_quotation":
             logger.info("[on_after_tool] match_quotation called, obs[:200]=%s", obs[:200])

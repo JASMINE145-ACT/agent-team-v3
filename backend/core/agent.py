@@ -770,10 +770,10 @@ class CoreAgent:
 
         last_answer = _normalize_user_answer(last_answer)
 
-        if session_id and self._store and last_answer:
+        tool_renders = ctx.get("_tool_renders") or None
+        if session_id and self._store and (last_answer or tool_renders):
             try:
                 thinking_for_store = "\n".join(thinking_parts).strip() or None
-                tool_renders = ctx.get("_tool_renders") or None
                 self._store.save_turn(
                     session_id=session_id,
                     query=user_input,
@@ -787,6 +787,7 @@ class CoreAgent:
                 )
             except Exception as e:
                 logger.warning("Session save_turn failed: %s", e)
+
 
         result = {
             "answer": last_answer or "",
