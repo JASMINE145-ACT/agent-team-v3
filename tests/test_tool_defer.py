@@ -114,3 +114,15 @@ def test_tool_search_def_exists():
     assert TOOL_SEARCH_DEF["function"]["name"] == "tool_search"
     meta = TOOL_SEARCH_DEF["function"].get("x_tool_meta", {})
     assert not meta.get("deferred")
+
+
+# ── Task 3 tests ──────────────────────────────────────────────────────────────
+
+def test_oos_tools_are_all_deferred():
+    from backend.tools.oos.oos_tools import get_oos_tools_openai_format
+    tools = get_oos_tools_openai_format()
+    assert len(tools) > 0, "OOS 工具列表不应为空"
+    for t in tools:
+        name = t["function"]["name"]
+        meta = t["function"].get("x_tool_meta", {})
+        assert meta.get("deferred") is True, f"OOS 工具 {name} 缺少 deferred: True"

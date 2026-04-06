@@ -24,7 +24,7 @@ def get_oos_tools_openai_format() -> List[Dict]:
                     },
                     "required": [],
                 },
-                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low", "deferred": True},
             },
         },
         {
@@ -33,7 +33,7 @@ def get_oos_tools_openai_format() -> List[Dict]:
                 "name": "get_oos_stats",
                 "description": "【无货】获取无货统计：总记录数、无货产品数、被报无货≥2次产品数、已发邮件产品数、今日新增。",
                 "parameters": {"type": "object", "properties": {}},
-                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low", "deferred": True},
             },
         },
         {
@@ -51,7 +51,7 @@ def get_oos_tools_openai_format() -> List[Dict]:
                     },
                     "required": [],
                 },
-                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low", "deferred": True},
             },
         },
         {
@@ -69,7 +69,7 @@ def get_oos_tools_openai_format() -> List[Dict]:
                     },
                     "required": [],
                 },
-                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low", "deferred": True},
             },
         },
         {
@@ -91,7 +91,7 @@ def get_oos_tools_openai_format() -> List[Dict]:
                     },
                     "required": ["file_path"],
                 },
-                "x_tool_meta": {"access_mode": "write", "risk_level": "high"},
+                "x_tool_meta": {"access_mode": "write", "risk_level": "high", "deferred": True},
             },
         },
         {
@@ -121,7 +121,7 @@ def get_oos_tools_openai_format() -> List[Dict]:
                     },
                     "required": ["product_name"],
                 },
-                "x_tool_meta": {"access_mode": "write", "risk_level": "high"},
+                "x_tool_meta": {"access_mode": "write", "risk_level": "high", "deferred": True},
             },
         },
     ]
