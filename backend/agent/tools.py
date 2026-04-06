@@ -42,7 +42,7 @@ EXTRA_TOOLS = [
                 },
                 "required": ["file_path"],
             },
-            "x_tool_meta": {"access_mode": "write", "risk_level": "high"},
+            "x_tool_meta": {"access_mode": "write", "risk_level": "high", "deferred": True},
         },
     },
     {
@@ -73,7 +73,7 @@ EXTRA_TOOLS = [
                 },
                 "required": ["content"],
             },
-            "x_tool_meta": {"access_mode": "write", "risk_level": "medium"},
+            "x_tool_meta": {"access_mode": "write", "risk_level": "medium", "deferred": True},
         },
     },
     {
@@ -96,10 +96,34 @@ EXTRA_TOOLS = [
                 },
                 "required": ["inquiry_text"]
             },
-            "x_tool_meta": {"access_mode": "read", "risk_level": "low"}
+            "x_tool_meta": {"access_mode": "read", "risk_level": "low", "deferred": True}
         }
     },
 ]
+
+
+TOOL_SEARCH_DEF: dict = {
+    "type": "function",
+    "function": {
+        "name": "tool_search",
+        "description": (
+            "查找并展开延迟加载工具的完整参数说明。"
+            "当你需要调用某个【延迟加载】工具时，先用本工具获取它的完整 schema，再调用该工具。"
+            "query 可以是工具名称或功能描述，如 'run_quotation_fill' 或 '报价单填充' 或 '无货'。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "工具名称或功能描述，如 'run_quotation_fill'、'报价单填充'、'知识库'、'无货'",
+                }
+            },
+            "required": ["query"],
+        },
+        "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
+    },
+}
 
 
 def _build_all_tools() -> List[dict]:

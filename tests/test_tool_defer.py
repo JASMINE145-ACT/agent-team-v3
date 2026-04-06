@@ -82,3 +82,35 @@ def test_get_definitions_unchanged(registry_with_mixed_tools):
     all_defs = registry_with_mixed_tools.get_definitions()
     names = [d["function"]["name"] for d in all_defs]
     assert len(names) == 5
+
+
+# ── Task 2 tests ──────────────────────────────────────────────────────────────
+
+def test_extra_tools_p1_are_marked_deferred():
+    """batch_quick_quote / run_quotation_fill / append_business_knowledge 应有 deferred: True。"""
+    from backend.agent.tools import EXTRA_TOOLS
+    p1_names = {"batch_quick_quote", "run_quotation_fill", "append_business_knowledge"}
+    for t in EXTRA_TOOLS:
+        name = t["function"]["name"]
+        if name in p1_names:
+            meta = t["function"].get("x_tool_meta", {})
+            assert meta.get("deferred") is True, f"{name} 缺少 deferred: True"
+
+
+def test_ask_clarification_is_not_deferred():
+    """ask_clarification 是 P0，不应有 deferred 标记。"""
+    from backend.agent.tools import EXTRA_TOOLS
+    for t in EXTRA_TOOLS:
+        if t["function"]["name"] == "ask_clarification":
+            meta = t["function"].get("x_tool_meta", {})
+            assert not meta.get("deferred"), "ask_clarification 不应被 defer"
+            return
+    pytest.fail("ask_clarification not found in EXTRA_TOOLS")
+
+
+def test_tool_search_def_exists():
+    """TOOL_SEARCH_DEF 应存在且不含 deferred 标记。"""
+    from backend.agent.tools import TOOL_SEARCH_DEF
+    assert TOOL_SEARCH_DEF["function"]["name"] == "tool_search"
+    meta = TOOL_SEARCH_DEF["function"].get("x_tool_meta", {})
+    assert not meta.get("deferred")
