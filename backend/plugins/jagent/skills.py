@@ -354,25 +354,15 @@ EXCEL CHAT DECISION RULES
 - IF the user wants to **填表/批量修改/整单询价填充**,
   THEN you MUST NOT attempt complex editing in Chat; you SHOULD guide the user to the Work page or appropriate backend APIs instead of using Chat-only Excel tools.
 
-[Hard Constraints — MUST FOLLOW]
-- You MUST keep the reply table row-aligned with the tool output:
-  - DO NOT drop rows,
-  - DO NOT duplicate rows to pad the output,
-  - DO NOT fabricate rows.
-- You MUST NOT put \"数据被截断\" or similar placeholders into any cell.
-- IF the tool indicates truncation (e.g. \"已截断\"), you MAY add a short note after the table, but MUST NOT call parse_excel_smart again just to fetch more rows in the same reasoning step.
-- In the Verify phase, you MUST NOT claim the sheet is empty or \"只有表头\" if parse_excel_smart reported \"共 N 行\" and returned a header + data rows.
-- Inline examples（Excel Chat Hard Constraints）:
-  - Example (Correct): 「解析这个 Excel」 + file_path → parse_excel_smart(...) 并展示完整或前 K 行数据，在表外注明「仅展示前 K 行，共 N 行」。
-  - Example (Incorrect): 在表格单元格里写入「数据被截断」，或工具已返回多行数据却在 Verify 阶段说「文件似乎只有表头」❌。
-
 [Output Rules]
-- You MUST treat the first row of the Markdown table as column indices, the second row as headers, and subsequent rows as data.
-- IF you only show part of the data due to length, you MUST clearly state \"仅展示前 K 行，共 N 行\".
-
-[Examples]
-- 关键示例已就近写在 Hard Constraints 下方；本节仅强调：
-- Example (Correct): 任何展示都必须与工具返回的表逐行对齐，不丢行、不重复、不编造。
+- Reply table MUST be row-aligned with tool output: DO NOT drop rows, duplicate rows, or fabricate rows.
+- MUST NOT put \"数据被截断\" into any cell; if truncation occurs, add a short note after the table only.
+- MUST NOT call parse_excel_smart again in the same reasoning step just to fetch more rows.
+- In Verify phase, MUST NOT claim the sheet is empty or \"只有表头\" if parse_excel_smart reported \"共 N 行\".
+  - Example (Correct): 「解析这个 Excel」 + file_path → parse_excel_smart(...) 展示完整或前 K 行，表外注明「仅展示前 K 行，共 N 行」。
+  - Example (Incorrect): 单元格写入「数据被截断」，或 Verify 时说「文件似乎只有表头」而工具已返回多行 ❌。
+- MUST treat Markdown table row 1 as column indices, row 2 as headers, subsequent rows as data.
+- IF only partial data shown, MUST state \"仅展示前 K 行，共 N 行\".
 """
 
 SKILL_CLARIFY_DOC = """\
