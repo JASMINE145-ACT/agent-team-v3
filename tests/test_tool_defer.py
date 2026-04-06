@@ -126,3 +126,23 @@ def test_oos_tools_are_all_deferred():
         name = t["function"]["name"]
         meta = t["function"].get("x_tool_meta", {})
         assert meta.get("deferred") is True, f"OOS 工具 {name} 缺少 deferred: True"
+
+
+# ── Task 4 tests ──────────────────────────────────────────────────────────────
+
+def test_inventory_p1_tools_are_deferred():
+    from backend.tools.inventory.services.inventory_agent_tools import get_inventory_tools_openai_format
+    tools = get_inventory_tools_openai_format()
+    p1_names = {"modify_inventory", "select_wanding_match"}
+    p0_names = {
+        "search_inventory", "get_inventory_by_code", "get_inventory_by_code_batch",
+        "match_quotation", "match_quotation_batch",
+        "get_profit_by_price", "get_profit_by_price_batch",
+    }
+    for t in tools:
+        name = t["function"]["name"]
+        meta = t["function"].get("x_tool_meta", {})
+        if name in p1_names:
+            assert meta.get("deferred") is True, f"{name} 应有 deferred: True"
+        elif name in p0_names:
+            assert not meta.get("deferred"), f"{name} 不应被 defer"

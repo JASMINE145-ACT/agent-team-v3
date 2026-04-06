@@ -842,7 +842,7 @@ def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str,
     }
 
 
-def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None) -> dict[str, Any]:
+def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     批量询价匹配（只读）：对 keywords_list 中每个产品独立调用 match_quotation，
     每个产品结果各自推送 tool_render SSE，最终返回紧凑汇总供 LLM 用。
@@ -879,15 +879,35 @@ def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None) -
         if payload.get("single"):
             raw_chosen = payload.get("chosen") or {}
             safe_chosen = {k: raw_chosen.get(k) for k in _KNOWN_CHOSEN_FIELDS if k in raw_chosen}
+            chosen_code = (raw_chosen.get("code") or "").strip()
+            render_key = f"{kw}|{chosen_code}" if chosen_code else ""
             if _push:
-                _push("tool_render", {
-                    "formatted_response": payload.get("formatted_response", ""),
-                    "keywords": kw,
-                    "chosen": safe_chosen,
-                    "chosen_index": payload.get("chosen_index"),
-                    "match_source": payload.get("match_source", ""),
-                    "selection_reasoning": payload.get("selection_reasoning", ""),
-                })
+                should_push = True
+                if isinstance(ctx, dict):
+                    pushed_keys = ctx.get("_pushed_render_keys")
+                    if not isinstance(pushed_keys, set):
+                        # compat: migrate legacy _pushed_codes -> _pushed_render_keys
+                        legacy_codes = ctx.get("_pushed_codes")
+                        pushed_keys = set()
+                        if isinstance(legacy_codes, set):
+                            for c in legacy_codes:
+                                c_str = str(c or "").strip()
+                                if c_str:
+                                    pushed_keys.add(f"|{c_str}")
+                        ctx["_pushed_render_keys"] = pushed_keys
+                    if render_key and render_key in pushed_keys:
+                        should_push = False
+                    elif render_key:
+                        pushed_keys.add(render_key)
+                if should_push:
+                    _push("tool_render", {
+                        "formatted_response": payload.get("formatted_response", ""),
+                        "keywords": kw,
+                        "chosen": safe_chosen,
+                        "chosen_index": payload.get("chosen_index"),
+                        "match_source": payload.get("match_source", ""),
+                        "selection_reasoning": payload.get("selection_reasoning", ""),
+                    })
             chosen = payload.get("chosen") or {}
             item_entry["status"] = "matched"
             item_entry["chosen"] = safe_chosen
@@ -1213,7 +1233,7 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     },
                     "required": ["keywords", "candidates"],
                 },
-                "x_tool_meta": {"access_mode": "read", "risk_level": "low"},
+                "x_tool_meta": {"access_mode": "read", "risk_level": "low", "deferred": True},
             },
         },
         {
@@ -1231,19 +1251,19 @@ def get_inventory_tools_openai_format() -> list[dict]:
                     },
                     "required": ["code", "action", "quantity"],
                 },
-                "x_tool_meta": {"access_mode": "write", "risk_level": "high"},
+                "x_tool_meta": {"access_mode": "write", "risk_level": "high", "deferred": True},
             },
         },
     ]
 
 
-def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any], push_event=None) -> dict[str, Any]:
+def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any], push_event=None, context: dict[str, Any] | None = None) -> dict[str, Any]:
     """实际执行逻辑（含 get_table_agent / get_resolver），供带超时调用。"""
     # 询价相关工具不依赖 table/sql_agent，可单独执行
     if name == "match_quotation":
         return _execute_match_quotation(arguments, push_event=push_event)
     if name == "match_quotation_batch":
-        return _execute_match_quotation_batch(arguments, push_event=push_event)
+        return _execute_match_quotation_batch(arguments, push_event=push_event, ctx=context)
     if name == "match_by_quotation_history":
         return _execute_match_by_quotation_history(arguments)
     if name == "match_wanding_price":
@@ -1328,10 +1348,10 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any], push_even
     return {"success": False, "error": f"未知工具: {name}", "result": ""}
 
 
-def execute_inventory_tool(name: str, arguments: dict[str, Any], push_event=None) -> dict[str, Any]:
+def execute_inventory_tool(name: str, arguments: dict[str, Any], push_event=None, context: dict[str, Any] | None = None) -> dict[str, Any]:
     """同步执行库存工具。超时由调用方（execute_tool via asyncio.wait_for）控制。"""
     try:
-        return _execute_inventory_tool_impl(name, arguments, push_event=push_event)
+        return _execute_inventory_tool_impl(name, arguments, push_event=push_event, context=context)
     except Exception as e:
         if "src" in str(e):
             return {
