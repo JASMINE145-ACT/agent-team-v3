@@ -255,12 +255,6 @@ SKILL_OOS_DOC = """\
 SKILL_OOS_RULES = """\
 OOS DECISION RULES
 
-[Global Priority Order]
-- When multiple rules could apply, resolve in this order:
-  1. Explicit user requests for **登记/记录无货**.
-  2. Explicit user requests for **列表/统计/按文件/按时间** 的查询。
-  3. Defaults (most recent file context, sensible limits).
-
 [Routing & Priority Rules]
 - IF the user asks for 「无货列表」「无货有哪些」「他们被报无货几次」, THEN you MUST call get_oos_list(limit?) (read-only).
 - IF the user asks for 「无货统计」「无货概况」, THEN you MUST call get_oos_stats().
@@ -268,25 +262,18 @@ OOS DECISION RULES
 - IF the user asks 「按时间看无货」「无货按日/按天」「最近几天无货趋势」, THEN you MUST call get_oos_by_time(last_n_days?).
 - IF the user clearly says 「无货登记」「把这些记到无货里」 AND there is a valid file_path in context,
   THEN you MUST call register_oos(file_path, prompt?) (file-based registration).
+  NEVER trigger register_oos when user intent is ambiguous or purely asking for a list/statistics.
 - IF the user clearly says 某产品无货 (e.g.「外螺纹堵头 50 无货」「登记 XX 无货」) AND there is NO file_path in context,
-  THEN you MUST call register_oos_from_text(product_name, specification?, quantity?, unit?) and you MUST NOT require the user to upload an Excel file first.
-
-[Hard Constraints — MUST FOLLOW]
-- NEVER perform any write operation (register_oos / register_oos_from_text) when the user intent is ambiguous or purely asking for a list/statistics.
-- DO NOT require an Excel upload when the user clearly provides textual \"XX 无货\" information; in that case you MUST use register_oos_from_text.
-- You MUST respect reasonable upper bounds on `limit` and `last_n_days` (follow tool defaults/config; do not request unbounded data for a single chat reply).
+  THEN you MUST call register_oos_from_text(product_name, specification?, quantity?, unit?).
+  DO NOT require an Excel upload when the user provides textual 「XX 无货」 — use register_oos_from_text directly.
 
 [Batch Handling & Output Rules]
+- You MUST respect reasonable upper bounds on `limit` and `last_n_days` (follow tool defaults/config; do not request unbounded data for a single chat reply).
 - When returning lists or stats, you MUST:
   - Include key fields such as 产品名称/规格/被报无货次数/邮件状态/文件名/日期等（根据具体接口输出）。
   - Clearly indicate any truncation due to `limit` or result-size caps (e.g. \"仅展示前 N 条，共 M 条\").
 - For time-based stats (get_oos_by_time), you SHOULD display data as a per-day table or timeline with日期+新增无货数。
 
-[Examples]
-- Correct: 「无货列表」 -> get_oos_list().
-- Correct: 「外螺纹堵头 50 无货」 (no file) -> register_oos_from_text(...).
-- Correct: 「按文件看最近的无货情况」 -> get_oos_by_file().
-- Incorrect: 文本说「XX 无货」 but you first ask the user to upload an Excel file before using any registration tool ❌.
 """
 
 # 报价单专用 + 整单询价填充（Work 流程用；Chat 不注入，见 CHAT_SKILL_PROMPT）
