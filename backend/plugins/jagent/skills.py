@@ -41,9 +41,21 @@ GLOBAL HARD CONSTRAINTS (CROSS-SKILL)
 - NEVER treat any Excel `Qty` / `数量` field as inventory; inventory MUST always come only from inventory tools
   (`get_inventory_by_code` / `get_inventory_by_code_batch` / `search_inventory` and related inventory services),
   NOT from any Excel quantity or quotation sheet column.
+- NEVER fabricate product codes, price levels, or inventory quantities when tools return no match or
+  low-quality results; always report the actual tool outcome to the user.
 """
 
 GLOBAL_HARD_CONSTRAINTS_RULES = GLOBAL_HARD_CONSTRAINTS  # 别名，兼容旧引用
+
+GLOBAL_SKILL_PRIORITY_ORDER = """\
+GLOBAL SKILL PRIORITY ORDER (all skills)
+When multiple rules could apply, resolve conflicts in this order:
+1. Explicit user constraints (e.g. 「用万鼎查」「不要历史」exact 10-digit code)
+2. Exact identifiers (10-digit material code)
+3. Language-specific routing (Chinese vs English inventory chain)
+4. Batch tools over single loops (prefer *_batch when multiple items)
+5. Defaults and fallbacks
+"""
 
 
 SKILL_INVENTORY_PRICE_RULES = """\
