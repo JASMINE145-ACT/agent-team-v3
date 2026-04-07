@@ -29,6 +29,7 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。
 - **低置信度 options（match_quotation 内置选型）**：若 observation 含 `needs_selection: true` 且 `low_confidence_options: true` 与精简 `options`（通常 2～3 条，各有 reasoning），表示 LLM 无法单选、仅列出最可能项 —— **优先用 `options` 做表格回复（含 code、单价、理由、来源）**，**不要**改回把 `candidates` 全表当作主结果；用户明确要求「看全部候选」时再展示完整 candidates。
 - **展示**：结果表上方必写「匹配来源：」+ match_source；表格**必须包含「产品编号(code)」列**；候选含 source 时表格加「来源」列；有 chosen 时标「已选：第 N 条」；select_wanding_match 须传入上步 match_source。
+- **库存文案约束（重要）**：库存查询场景下，允许解释「真实库存/库存（qty_warehouse）」含义与变化；`可售（qty_available）` 只做表格字段数值展示。**禁止**在表格外再单独描述可售（如「可售 992 件」），也**禁止**输出「可售有货/可售无货/可售充足/可售不足」等自然语言判断。
 - **产品编号不得伪造成「—」（重要）**：只要 observation 里 `chosen.code`、顶层 `table_product_code` 或某行候选的 `code` 为非空字符串，表格「产品编号(code)」**必须逐字照抄**（含 10 位数字）；**禁止**用「—」或留空。仅当 JSON 中该项确实无 code（例如部分历史仅有名称）时才可用「—」。即使结果含 `fallback: true`（规则兜底），`chosen.code` 依然有效，**必须如实填入**，不得因 fallback 而改为「—」。
 - **unmatched + llm_rejected 时**：工具返回含 `unmatched: true` 且 `llm_rejected: true`（表示 LLM 判定无真正匹配）时，**禁止**展示全部 candidates 列表让用户再挑；应告知用户「未找到合适匹配，可尝试调整产品名称/规格，或登记无货」。
 - **当 observation 以 `[已渲染到前端]` 开头时**：表示结果已通过 SSE 推送至前端渲染为卡片。单产品时完全静默不输出文本；多产品（≥2个）时，在所有工具调用完成后输出一行简短引导语（如「以下是直接50和三通50的报价：」），对上下文中已有结果的产品注明「X 见上方卡片」，不重复查询。"""
@@ -145,6 +146,13 @@ INVENTORY & PRICE DECISION RULES
   - For single-product query: output nothing.
   - For multi-product query (>=2): output at most ONE short intro line, and mark products already rendered as 「X 见上方卡片」; DO NOT duplicate card content.
 - IF neither card-render marker nor `formatted_response` is available, output one short fallback sentence and ask user whether to retry/clarify keywords; DO NOT fabricate codes/prices.
+
+# ── Inventory wording constraint ───────────────────────────────────────
+- IF you are replying with inventory fields (especially `库存/qty_warehouse` and `可售/qty_available`),
+  THEN you MAY explain the meaning/status of **真实库存（库存）**,
+  BUT you MUST treat **可售** as table-only numeric display and MUST NOT mention it again in narrative sentences.
+  You MUST NOT generate qualitative judgments from 可售
+  (e.g. 「可售有货」「可售无货」「可售充足」「可售不足」), and MUST NOT add lines like 「可售 xxx 件」 outside the table.
 
 # ── Price level full names ───────────────────────────────────────────
 - In the final reply, you MUST always use the full Chinese names for price levels:
@@ -366,7 +374,9 @@ _RESPONSE_STYLE_CONSTRAINTS = """\
 - Don't repeat tool JSON in natural language unless the user asks for detail.
 - When using <redacted_thinking>, put Plan/Gather/Act/Verify ONLY inside that block; after </redacted_thinking> output only the user-facing title + table + at most one short note (no duplicate Verify section).
 - Don't prefix the user-visible reply with `Reasoning:` / `Plan:` / free-form chain-of-thought; if you must reason in prose, keep it inside <think> only.
-- **禁止在 thinking 里念规则原文**：在 <think> 中**不要**复述或引用技能文档中的路由规则、IF/THEN 条件、工具选择逻辑（如「根据路由规则...」「IF the user says X THEN call Y」「应该用XXX工具，不调用YYY」）。这类决策结论只需要简短记录结论（如「查价格→match_quotation」），不需要把完整规则条件读出来。"""
+- **禁止在 thinking 里念规则原文**：在 <think> 中**不要**复述或引用技能文档中的路由规则、IF/THEN 条件、工具选择逻辑（如「根据路由规则...」「IF the user says X THEN call Y」「应该用XXX工具，不调用YYY」）。这类决策结论只需要简短记录结论（如「查价格→match_quotation」），不需要把完整规则条件读出来。
+- Inventory wording strictness: when inventory table already contains `可售/qty_available`, do NOT add any extra narrative sentence about 可售; only `库存/qty_warehouse` may be explained in prose.
+"""
 
 OUTPUT_FORMAT_LEGACY = _OUTPUT_FORMAT_LEGACY_INTRO + "\n\n" + _TOOL_CALL_GLOBAL_RULES_BLOCK + "\n\n" + _RESPONSE_STYLE_CONSTRAINTS
 

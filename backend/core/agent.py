@@ -296,6 +296,11 @@ class CoreAgent:
             tools = self._registry.get_p0_definitions() + self._registry.get_deferred_stubs()
         else:
             tools = self._registry.get_definitions()
+        logger.info("[ToolDefer] ENABLE=%s  P0=%d stubs=%d total_sent=%d",
+                    Config.ENABLE_TOOL_DEFER,
+                    len(self._registry.get_p0_definitions()),
+                    len(self._registry.get_deferred_stubs()),
+                    len(tools))
         allowed_tools: Optional[set[str]] = None
         if "allowed_tools" in ctx:
             allowed_tools_raw = ctx.get("allowed_tools")
