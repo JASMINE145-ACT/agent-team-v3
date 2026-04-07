@@ -210,6 +210,58 @@ def test_agent_uses_p0_plus_stubs_when_defer_enabled(registry_with_mixed_tools):
         cfg.Config.ENABLE_TOOL_DEFER = original
 
 
+# ── Task 8 acceptance tests ───────────────────────────────────────────────────
+
+def test_deferred_stubs_are_shorter_than_full_schema():
+    """每个 stub 的字节数应显著少于原始 schema（验证 token 节省）。"""
+    from backend.tools.oos.oos_tools import get_oos_tools_openai_format
+    tools = get_oos_tools_openai_format()
+    for t in tools:
+        name = t["function"]["name"]
+        full_size = len(json.dumps(t, ensure_ascii=False))
+        stub = {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": f"【延迟加载】{t['function']['description'][:60]}… 需要时调用 tool_search 展开。",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        }
+        stub_size = len(json.dumps(stub, ensure_ascii=False))
+        assert stub_size < full_size, f"{name}: stub({stub_size}B) 应比 full({full_size}B) 小"
+
+
+def test_p0_and_stub_counts_sum_to_total(registry_with_mixed_tools):
+    """P0 + stubs 总数 == get_definitions() 总数（不丢工具）。"""
+    total = len(registry_with_mixed_tools.get_definitions())
+    p0 = len(registry_with_mixed_tools.get_p0_definitions())
+    stubs = len(registry_with_mixed_tools.get_deferred_stubs())
+    assert p0 + stubs == total
+
+
+def test_canonical_p0_p1_split():
+    """用代表性工具集验证 9 个 P0 + 5 个 P1 = 14 总计。"""
+    reg = ToolRegistry()
+    p0_names = [
+        "search_inventory", "match_quotation", "get_inventory_by_code",
+        "get_inventory_by_code_batch", "match_quotation_batch",
+        "get_profit_by_price", "get_profit_by_price_batch",
+        "ask_clarification", "tool_search",
+    ]
+    p1_names = [
+        "modify_inventory", "select_wanding_match", "batch_quick_quote",
+        "run_quotation_fill", "append_business_knowledge",
+    ]
+    for name in p0_names:
+        reg.register(_make_def(name, deferred=False), _noop)
+    for name in p1_names:
+        reg.register(_make_def(name, deferred=True), _noop)
+
+    assert len(reg.get_p0_definitions()) == 9
+    assert len(reg.get_deferred_stubs()) == 5
+    assert len(reg.get_definitions()) == 14
+
+
 # ── Task 5 tests ──────────────────────────────────────────────────────────────
 
 def test_quote_tools_are_all_deferred():
