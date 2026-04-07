@@ -292,7 +292,10 @@ class CoreAgent:
                 if rework_injection:
                     user_content += f"\n\n{rework_injection}"
 
-        tools = self._registry.get_definitions()
+        if Config.ENABLE_TOOL_DEFER:
+            tools = self._registry.get_p0_definitions() + self._registry.get_deferred_stubs()
+        else:
+            tools = self._registry.get_definitions()
         allowed_tools: Optional[set[str]] = None
         if "allowed_tools" in ctx:
             allowed_tools_raw = ctx.get("allowed_tools")

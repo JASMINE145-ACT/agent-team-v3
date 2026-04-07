@@ -172,6 +172,44 @@ def test_tool_search_does_not_return_p0_tools(registry_with_mixed_tools):
         assert "search_inventory" not in names
 
 
+# ── Task 7 tests ──────────────────────────────────────────────────────────────
+
+def test_agent_uses_full_definitions_when_defer_disabled(registry_with_mixed_tools):
+    """ENABLE_TOOL_DEFER=False 时，工具列表 = get_definitions()（全部 5 个）。"""
+    import backend.config as cfg
+    original = getattr(cfg.Config, "ENABLE_TOOL_DEFER", False)
+    try:
+        cfg.Config.ENABLE_TOOL_DEFER = False
+        if cfg.Config.ENABLE_TOOL_DEFER:
+            tools = registry_with_mixed_tools.get_p0_definitions() + registry_with_mixed_tools.get_deferred_stubs()
+        else:
+            tools = registry_with_mixed_tools.get_definitions()
+        assert len(tools) == 5
+    finally:
+        cfg.Config.ENABLE_TOOL_DEFER = original
+
+
+def test_agent_uses_p0_plus_stubs_when_defer_enabled(registry_with_mixed_tools):
+    """ENABLE_TOOL_DEFER=True 时，工具列表 = P0(2) + stubs(3)，总数仍 5。"""
+    import backend.config as cfg
+    original = getattr(cfg.Config, "ENABLE_TOOL_DEFER", False)
+    try:
+        cfg.Config.ENABLE_TOOL_DEFER = True
+        if cfg.Config.ENABLE_TOOL_DEFER:
+            tools = registry_with_mixed_tools.get_p0_definitions() + registry_with_mixed_tools.get_deferred_stubs()
+        else:
+            tools = registry_with_mixed_tools.get_definitions()
+        assert len(tools) == 5  # 2 P0 + 3 stubs = 5 total
+        names = [d["function"]["name"] for d in tools]
+        assert "search_inventory" in names
+        assert "modify_inventory" in names  # stub 仍在列表中
+        # stubs 的 parameters.properties 为空
+        stubs = [d for d in tools if d["function"]["name"] == "modify_inventory"]
+        assert stubs[0]["function"]["parameters"]["properties"] == {}
+    finally:
+        cfg.Config.ENABLE_TOOL_DEFER = original
+
+
 # ── Task 5 tests ──────────────────────────────────────────────────────────────
 
 def test_quote_tools_are_all_deferred():

@@ -133,6 +133,8 @@ class Config:
     USE_CLAUDE_LOOP_PROMPT = (os.getenv("USE_CLAUDE_LOOP_PROMPT", "true") or "").strip().lower() in ("1", "true", "yes")
     # 决策规则技能：true 使用 RULES 版（更强约束），false 使用 DOC 版；默认 true（与 .env.example 对齐）
     USE_DECISION_RULE_SKILLS = (os.getenv("USE_DECISION_RULE_SKILLS", "true") or "").strip().lower() in ("1", "true", "yes")
+    # 工具延迟加载：true 时 P1 工具只传 stub，LLM 按需调 tool_search 展开；默认 false（安全灰度）
+    ENABLE_TOOL_DEFER: bool = (os.getenv("ENABLE_TOOL_DEFER", "false") or "").strip().lower() in ("1", "true", "yes")
 
     # Run Log：长流程运行日志基目录（相对 base_dir 的 data/run-logs，或通过环境变量覆盖）
     RUN_LOG_BASE_DIR = Path(os.getenv("RUN_LOG_BASE_DIR", str(base_dir / "data" / "run-logs")))
