@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -185,6 +186,32 @@ def _source_rank(source: str) -> int:
     return _SOURCE_PRIORITY.get((source or "").strip(), 99)
 
 
+def _build_selector_prompt(
+    keywords: str,
+    llm_candidates: list[dict[str, Any]],
+    knowledge_hint: str,
+) -> str:
+    """Build the prompt string sent to the LLM selector."""
+    lines: list[str] = []
+    for i, c in enumerate(llm_candidates, 1):
+        code = (c.get("code") or "").strip()
+        name = (c.get("matched_name") or "")[:120]
+        price = c.get("unit_price", 0)
+        source = (c.get("source") or "")[:30]
+        lines.append(
+            f"{i}. [{code}] {name} | price={price} | src={source} | src_rank={_source_rank(source)}"
+        )
+    candidates_text = "\n".join(lines)
+    return (
+        f"keywords: {keywords}\n"
+        f"N={len(llm_candidates)}\n"
+        f"candidates:\n{candidates_text}\n\n"
+        f"business_knowledge(mandatory):\n{knowledge_hint}\n\n"
+        f"task: choose exactly one index in 1..{len(llm_candidates)}, or 0 if none matches.\n"
+        'output JSON only: {"index": number, "reason": "short text"}'
+    )
+
+
 def _sort_candidates_by_source(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     # Stable sort by source priority while preserving original order within same source.
     return sorted(
@@ -260,6 +287,10 @@ def llm_select_best(
         else _SELECTOR_DEFAULT_KNOWLEDGE_CHAR_LIMIT
     )
     knowledge_limit = max(200, min(knowledge_limit, 4000))
+    # Whether to inject full knowledge (no compaction). Reads INVENTORY_LLM_SELECTOR_FULL_KNOWLEDGE, default True.
+    _full_knowledge: bool = (
+        os.environ.get("INVENTORY_LLM_SELECTOR_FULL_KNOWLEDGE", "1").strip().lower() in ("1", "true", "yes")
+    )
 
     sorted_candidates = _sort_candidates_by_source(candidates)
     llm_candidates = sorted_candidates[:candidate_limit]
@@ -277,16 +308,10 @@ def llm_select_best(
 
     # Mandatory: include business knowledge in selector prompt.
     knowledge = _load_business_knowledge()
-    knowledge_hint = _build_knowledge_hint(keywords, knowledge, knowledge_limit)
+    # Full injection by default (INVENTORY_LLM_SELECTOR_FULL_KNOWLEDGE=1); compaction only when disabled.
+    knowledge_hint = knowledge if _full_knowledge else _build_knowledge_hint(keywords, knowledge, knowledge_limit)
 
-    prompt = (
-        f"keywords: {keywords}\n"
-        f"N={len(llm_candidates)}\n"
-        f"candidates:\n{candidates_text}\n\n"
-        f"business_knowledge(mandatory):\n{knowledge_hint}\n\n"
-        f"task: choose exactly one index in 1..{len(llm_candidates)}, or 0 if none matches.\n"
-        'output JSON only: {"index": number, "reason": "short text"}'
-    )
+    prompt = _build_selector_prompt(keywords, llm_candidates, knowledge_hint)
 
     try:
         content = ""
@@ -322,19 +347,11 @@ def llm_select_best(
         )
         content, finish_reason, reasoning_len = _extract_content_from_openai_response(resp)
 
-        # length 截断时重试一次：提高 max_tokens，避免误触发规则回退
+        # length 截断时重试一次：提高 max_tokens，并压缩知识（避免 length 再次触发）
         if not content and finish_reason == "length":
             retry_mt = min(_SELECTOR_MAX_TOKENS_CAP, max(mt * 2, 320))
-            retry_knowledge_limit = min(knowledge_limit, 1000)
-            retry_knowledge_hint = _build_knowledge_hint(keywords, knowledge, retry_knowledge_limit)
-            retry_prompt = (
-                f"keywords: {keywords}\n"
-                f"N={len(llm_candidates)}\n"
-                f"candidates:\n{candidates_text}\n\n"
-                f"business_knowledge(mandatory):\n{retry_knowledge_hint}\n\n"
-                f"task: choose exactly one index in 1..{len(llm_candidates)}, or 0 if none matches.\n"
-                'output JSON only: {"index": number, "reason": "short text"}'
-            )
+            retry_knowledge_hint = _build_knowledge_hint(keywords, knowledge, min(knowledge_limit, 1000))
+            retry_prompt = _build_selector_prompt(keywords, llm_candidates, retry_knowledge_hint)
             logger.warning(
                 "selector hit length; retry once with higher max_tokens=%d", retry_mt
             )

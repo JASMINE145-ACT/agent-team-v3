@@ -35,6 +35,11 @@ app.include_router(router)
 app.include_router(ws_router)
 app.include_router(wecom_router)
 
+if Config.DEBUG:
+    from backend.server.api.routes_debug import router as debug_router
+    app.include_router(debug_router)
+    logger.info("Debug routes enabled at /api/debug/*")
+
 
 @app.get("/health")
 async def health_get():
