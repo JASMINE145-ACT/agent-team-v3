@@ -323,18 +323,31 @@ SKILL_KNOWLEDGE_DOC = """\
 SKILL_KNOWLEDGE_RULES = """\
 KNOWLEDGE RECORDING DECISION RULES
 
-[Routing]
-- 用户说「记住/记录到知识库/记在 knowledge 里/润色后记录/把这个记下来」(任意说法) →
-  调用 tool_search(query="knowledge") 获取参数后，调用 append_business_knowledge(content)。
-- 禁止写入：闲聊、可从公开规格推得的常识、仅当前会话有效的临时信息。
+[Routing & Priority Rules]
+- IF the user asks you to 「记住」「记录到知识库」「记在 knowledge 里」「润色后记录」「把这个记下来」 (any phrasing),
+  THEN you MUST call append_business_knowledge(content) with a polished, complete single piece of knowledge.
 
-[Correction Learning — 必须严格遵守]
-用户纠正选型（「不对」「选错了」「应该是 XXX」「我要的是 X 不是 Y」）时：
-1. 若未给原因 → 先问：「请问为什么选 XXX 更合适？这样我可以把规则记下来。」
-2. 拿到原因后 → 展示草稿让用户确认：
-   「准备写入知识库：\n- IF 用户询价「<询价>」，THEN 优先选 <产品>（<编号如已知>）。\n  原因：<原因>。[用户纠正]\n确认写入吗？」
-3. 用户明确确认（「对」「确认」「写入」「可以」）后才调用 append_business_knowledge。
-4. 禁止未确认就写入。
+- IF the user expresses that the selected product was wrong
+  (「不对」「选错了」「应该是/选 XXX」「我要的是 X 不是 Y」 or any correction of a prior match_quotation result),
+  THEN follow the Correction Learning flow:
+  1. If no reason given → ask: "请问为什么选 XXX 更合适？这样我可以把规则记下来。"
+  2. Once reason is known → compose a draft rule and show it to the user:
+     "准备写入知识库：\n- IF 用户询价「<query>」，THEN 优先选 <product>（<code if known>）。\n  原因：<reason>。[用户纠正]\n确认写入吗？"
+  3. ONLY call append_business_knowledge(content=<rule>) AFTER the user explicitly confirms (「对」「确认」「写入」「可以」).
+  4. DO NOT call append_business_knowledge without confirmation.
+
+[Content Format — MUST USE for corrections]
+- content MUST follow: "- IF 用户询价「<query>」，THEN 优先选 <product name>（<code>）。\n  原因：<reason>。[用户纠正]"
+- Include product code only when known from conversation context; omit if unknown.
+
+[Content & Constraint Rules]
+- `content` MUST be a cleaned-up, self-contained knowledge statement (one or several sentences), not raw chat fragments.
+- DO NOT record casual remarks or off-topic small talk as business knowledge.
+- DO NOT call append_business_knowledge for a correction without explicit user confirmation (step 3 of Correction Learning flow).
+- Don't save facts derivable from code or public specs alone (no long-term value as "knowledge").
+- Don't save ephemeral one-liners that only make sense in the current chat turn.
+- Incorrect: 用户只是随口说「这客户好难搞」时就调用 append_business_knowledge 记录 ❌.
+- Incorrect: 用户说「选错了」，没经确认就直接调用 append_business_knowledge ❌.
 """
 
 # 极简回退格式：`USE_CLAUDE_LOOP_PROMPT=False` 时注入。去掉强制四段式，聚焦工具调用与结果展示，减少 150–300 tokens/call。
