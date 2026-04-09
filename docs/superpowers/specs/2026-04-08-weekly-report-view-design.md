@@ -25,22 +25,22 @@
 - **字段投影**（待实测后填入真实字段名）：
 
   ```python
-  "fields": "number,transDate,customerName,description,status,agingDay,grandTotal"
+  "fields": "id,number,transDate,customer,description,statusName,age,totalAmount"
   ```
 
-  > **Step 0（实现前必做）**：不带 `fields` 参数调一次接口，打印 1 条真实 invoice 的 JSON，确认各字段名，再填入上方 `fields` 字符串并更新 `analyzer.py` 的字段映射。
+  > Step 0 已完成（探针调用 + detail.do 全字段确认）。
 
-- **预期字段含义**（对照截图）：
+- **字段含义（已实测确认）**：
 
-  | 截图列 | 预期字段名 | 备注 |
-  |--------|-----------|------|
-  | Number | `number` | 发票号 |
-  | Date | `transDate` | 开票日期 |
-  | Customer | `customerName` | 客户名 |
-  | Description | `description` | 品名/备注 |
-  | Status | `status` | Outstanding / Paid 等 |
-  | Age(Day) | `agingDay` | 逾期天数（负数=未到期） |
-  | Total | `grandTotal` | 发票金额（印尼盾 Rp） |
+  | 截图列 | 真实字段 | 取值示例 | 备注 |
+  |--------|---------|---------|------|
+  | Number | `number` | `016/VIG/INV/04/2026` | |
+  | Date | `transDate` | `06/04/2026`（DD/MM/YYYY）| 需解析 |
+  | Customer | `customer.name` | `PT. LANDASAN TEKNIK LESTARI` | 嵌套，`fields=customer` 返回 dict |
+  | Description | `description` | `LTL-IWIP-257101` | |
+  | Status | `statusName` | `Belum Lunas` / `Lunas` | Outstanding=Belum Lunas |
+  | Age(Day) | `age` | `-11`（负=未到期，正=逾期）| |
+  | Total | `totalAmount` | `655766233.0` Rp | |
 
 ---
 
