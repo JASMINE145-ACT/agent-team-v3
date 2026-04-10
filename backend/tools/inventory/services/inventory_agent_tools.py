@@ -86,6 +86,45 @@ def _build_formatted_response(payload: dict[str, Any], keywords: str = "") -> st
     return "\n".join(lines)
 
 
+def _build_formatted_response_list_only(
+    keywords: str,
+    candidates: list[dict[str, Any]],
+    match_source: str,
+    notice: str,
+) -> str:
+    """
+    无 single/已选时的预渲染 Markdown：仅关键词 + 说明 + 来源 + 候选表。
+    供 unmatched / needs_selection 路径输出 formatted_response，前端与主模型可卡片化展示，
+    避免仅返回 JSON 时主模型改写成大段自由文本。
+    """
+    lines: list[str] = []
+    if keywords:
+        lines.append(f"**查询关键词：{keywords}**")
+        lines.append("")
+    if notice.strip():
+        lines.append(notice.strip())
+        lines.append("")
+    lines.append(f"**匹配来源**：{match_source or '—'}")
+    lines.append("")
+    n = len(candidates)
+    lines.append(f"**候选产品**（共 {n} 条）")
+    lines.append("")
+    lines.append("| # | 产品编号(code) | 产品名称 | 来源 | 单价（B级代理） |")
+    lines.append("|---|---|---|---|---|")
+    for i, c in enumerate(candidates, 1):
+        code = c.get("code") or "—"
+        name = c.get("matched_name") or "—"
+        source = c.get("source") or "—"
+        price = c.get("unit_price", "—")
+        lines.append(f"| {i} | {code} | {name} | {source} | {price} |")
+    lines.append("")
+    lines.append(
+        "**提示**：请从表中选择一条物料编号，或补充更具体的型号/系列；"
+        "若需系统代为默认选型，可说明「选第一个」等。"
+    )
+    return "\n".join(lines)
+
+
 def _attach_table_code_hint(payload: dict[str, Any]) -> None:
     """
     在 single 结果顶层重复物料编号，降低主模型在 Markdown 表格里用「—」占位而丢失 code 的概率。
@@ -232,6 +271,12 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
                 "candidates": norm[:max_show],
                 "match_source": match_source_str,
             }
+            payload["formatted_response"] = _build_formatted_response_list_only(
+                keywords,
+                norm[:max_show],
+                match_source_str,
+                notice="**说明**：已列出全部候选（未做自动单选）。",
+            )
             return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
 
         try:
@@ -245,6 +290,12 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
                 "candidates": norm,
                 "match_source": match_source_str,
             }
+            payload["formatted_response"] = _build_formatted_response_list_only(
+                keywords,
+                norm,
+                match_source_str,
+                notice="**说明**：自动选型服务暂不可用，以下为检索到的候选列表。",
+            )
             return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
         if r is None:
             # llm_select_best 返回 None = LLM 判定"无候选真正匹配"（index: 0）
@@ -256,6 +307,12 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
                 "candidates": norm,
                 "match_source": match_source_str,
             }
+            payload["formatted_response"] = _build_formatted_response_list_only(
+                keywords,
+                norm,
+                match_source_str,
+                notice="**说明**：未自动锁定与关键词完全对应的单一物料；下列为相关候选（请从表中选择或补充规格）。",
+            )
             return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
 
         # LLM 无把握（confident: false）：返回精简 options，避免误当成 single 或丢选项
@@ -276,6 +333,12 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
                 "candidates": norm,
                 "match_source": match_source_str,
             }
+            payload["formatted_response"] = _build_formatted_response_list_only(
+                keywords,
+                norm,
+                match_source_str,
+                notice="**说明**：系统置信度较低，已列出精简选项与完整候选表；请确认其一或补充描述。",
+            )
             return {"success": True, "result": json.dumps(payload, ensure_ascii=False)}
 
         chosen_code = (r.get("code") or "").strip()

@@ -133,6 +133,36 @@ class JAgentExtension(AgentExtension):
                     )
                     logger.info("[on_after_tool] returning compact (len=%d)", len(compact))
                     return compact
+                elif data.get("formatted_response"):
+                    # needs_selection / unmatched 等：工具侧已生成与 single 同结构的 Markdown，需推送 SSE 才能走卡片
+                    push = (context or {}).get("push_event")
+                    keywords = (args.get("keywords") or "").strip()
+                    logger.info(
+                        "[on_after_tool] list/unmatched formatted_response branch push=%s",
+                        callable(push),
+                    )
+                    if callable(push):
+                        push("tool_render", {
+                            "formatted_response": data.get("formatted_response", ""),
+                            "keywords": keywords,
+                            "chosen": {},
+                            "chosen_index": None,
+                            "match_source": data.get("match_source", ""),
+                            "selection_reasoning": "",
+                        })
+                    cand_n = len(data.get("candidates") or [])
+                    parts = []
+                    if data.get("unmatched"):
+                        parts.append("未自动锁定唯一匹配")
+                    if data.get("needs_selection"):
+                        parts.append("请从候选中选择或补充规格")
+                    compact = (
+                        f"{RENDERED_MARKER} 「{keywords}」"
+                        f"{'；'.join(parts) if parts else '查询结果'}（共{cand_n}条候选）。"
+                        f"表格已在前端展示；回复时仅简短引导，勿重复整张表。"
+                    )
+                    logger.info("[on_after_tool] list-formatted compact (len=%d)", len(compact))
+                    return compact
                 else:
                     logger.info("[on_after_tool] single=False/None, returning raw obs unchanged")
 

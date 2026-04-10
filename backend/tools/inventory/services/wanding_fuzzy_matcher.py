@@ -279,6 +279,28 @@ MM_TO_INCH = {
 }
 INCH_TO_MM = {v: k for k, v in MM_TO_INCH.items()}
 
+# 国内口语「N 分」管径 → 公称 DN 数字（与价格库 Describrition 中 DN15/DN20 对齐）
+# 4 分 ≈ 1/2" → DN15；6 分 ≈ 3/4" → DN20（避免把「4」单拆出来导致与 DN15 无法匹配）
+FEN_TO_MM_STR = {
+    "4": "15",
+    "6": "20",
+}
+# 整数「N 寸」→ DN（常用对照，与 _split_tokens 中 \d+寸 整段提取配合）
+CUN_INTEGER_TO_MM_STR = {
+    "1": "25",
+    "2": "50",
+    "3": "80",
+    "4": "100",
+    "5": "125",
+    "6": "150",
+    "8": "200",
+    "10": "250",
+    "12": "300",
+}
+
+# 脚本/旧测试兼容别名（仅「寸」映射；「分」见 FEN_TO_MM_STR）
+CUN_TO_MM = CUN_INTEGER_TO_MM_STR
+
 
 def _normalize(s: str) -> str:
     s = (s or "").lower().strip()
@@ -311,6 +333,26 @@ def _expand_unit_tokens(token: str, material: Optional[str] = None) -> set:
     if token in INCH_TO_MM:
         eqs.add(INCH_TO_MM[token])
         eqs.add("dn" + INCH_TO_MM[token])
+        return eqs
+    m_fen = re.fullmatch(r"(\d+)分", token)
+    if m_fen:
+        n = m_fen.group(1)
+        if n in FEN_TO_MM_STR:
+            mm = FEN_TO_MM_STR[n]
+            eqs.add("dn" + mm)
+            eqs.add(mm)
+            if mm in MM_TO_INCH:
+                eqs.add(MM_TO_INCH[mm])
+        return eqs
+    m_cun = re.fullmatch(r"(\d+)寸", token)
+    if m_cun:
+        n = m_cun.group(1)
+        if n in CUN_INTEGER_TO_MM_STR:
+            mm = CUN_INTEGER_TO_MM_STR[n]
+            eqs.add("dn" + mm)
+            eqs.add(mm)
+            if mm in MM_TO_INCH:
+                eqs.add(MM_TO_INCH[mm])
         return eqs
     return eqs
 
@@ -354,6 +396,14 @@ def _split_tokens(text: str) -> List[str]:
             compact = compact + '"'
         tokens.append(compact)
     text = re.sub(r"\d+(?:\.\d+)?\s*[\"”″]", " ", text)
+    # 「N分」口语（4分=DN15、6分=DN20）：整段提取，避免拆成孤立数字「4」导致规格过滤失败
+    for m in re.finditer(r"\d+\s*分", text):
+        tokens.append(re.sub(r"\s+", "", m.group()))
+    text = re.sub(r"\d+\s*分", " ", text)
+    # 「N寸」整数寸（如 2寸→DN50）
+    for m in re.finditer(r"\d+\s*寸", text):
+        tokens.append(re.sub(r"\s+", "", m.group()))
+    text = re.sub(r"\d+\s*寸", " ", text)
     for m in re.finditer(r"dn\s*(\d+)", text, re.I):
         tokens.append("dn" + m.group(1))
         tokens.append(m.group(1))
