@@ -117,8 +117,12 @@ def run_quotation_fill_flow(
         code = result.get("code", "")
         unit_price = result.get("unit_price", 0)
         quote_name = result.get("matched_name", "")[:200]
-        available_qty = result.get("available_qty", 0.0)
-        if available_qty >= qty or fill_even_shortage_for_test:
+        available_qty = float(result.get("available_qty", 0.0) or 0.0)
+        # 报价模块判定只看真实库存；可售仅展示。
+        warehouse_qty = float(
+            result.get("warehouse_qty", result.get("qty_warehouse", 0.0)) or 0.0
+        )
+        if warehouse_qty >= qty or fill_even_shortage_for_test:
             to_fill.append({
                 "row": it.get("row"),
                 "code": code,
@@ -127,13 +131,14 @@ def run_quotation_fill_flow(
                 "qty": qty,
                 "specification": it.get("specification"),
             })
-        if available_qty < qty:
-            shortfall = max(0, qty - available_qty)
+        if warehouse_qty < qty:
+            shortfall = max(0, qty - warehouse_qty)
             shortage.append({
                 "row": it.get("row"),
                 "product_name": it.get("product_name"),
                 "specification": it.get("specification"),
                 "qty": qty,
+                "warehouse_qty": warehouse_qty,
                 "available_qty": available_qty,
                 "shortfall": shortfall,
                 "code": code,

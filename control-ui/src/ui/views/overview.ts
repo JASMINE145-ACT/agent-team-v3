@@ -4,7 +4,8 @@ import { formatRelativeTimestamp, formatDurationHuman } from "../format.ts";
 import type { GatewayHelloOk } from "../gateway.ts";
 import { formatNextRun } from "../presenter.ts";
 import type { UiSettings } from "../storage.ts";
-import type { OosStats, ShortageStats } from "../types.ts";
+import type { OosByTimeRow, OosStats, QuotationDraftStats, ShortageByTimeRow, ShortageStats } from "../types.ts";
+import "./dashboard-charts.ts";
 
 export type OverviewProps = {
   connected: boolean;
@@ -20,6 +21,11 @@ export type OverviewProps = {
   /** Overview 用的无货/缺货统计（来自各自 stats 接口） */
   oosStats: OosStats | null;
   shortageStats: ShortageStats | null;
+  quotationStats: QuotationDraftStats | null;
+  oosByTime: OosByTimeRow[];
+  shortageByTime: ShortageByTimeRow[];
+  dashboardLoading: boolean;
+  dashboardError: string | null;
   onSettingsChange: (next: UiSettings) => void;
   onPasswordChange: (next: string) => void;
   onSessionKeyChange: (next: string) => void;
@@ -310,73 +316,50 @@ export function renderOverview(props: OverviewProps) {
       </div>
     </section>
 
-    <section class="grid grid-cols-2" style="margin-top: 18px;">
-      <div class="card">
-        <div class="card-title">${t("overview.oos.title")}</div>
-        <div class="card-sub">${t("overview.oos.subtitle")}</div>
-        <div class="row" style="margin-top: 12px; gap: 12px; flex-wrap: wrap;">
-          ${props.oosStats
-            ? [
-                {
-                  label: t("overview.oos.stats.totalRecords"),
-                  value: props.oosStats.total_records,
-                },
-                {
-                  label: t("overview.oos.stats.outOfStockCount"),
-                  value: props.oosStats.out_of_stock_count,
-                },
-                {
-                  label: t("overview.oos.stats.today"),
-                  value: props.oosStats.today_count,
-                },
-                {
-                  label: t("overview.oos.stats.reportedGe2"),
-                  value: props.oosStats.notified_count,
-                },
-              ].map(
-                (c) => html`
-                  <div class="card stat-card" style="min-width: 120px;">
-                    <div class="stat-value">${c.value}</div>
-                    <div class="stat-label">${c.label}</div>
-                  </div>
-                `,
-              )
-            : html`<div class="muted">${t("overview.oos.empty")}</div>`}
+    <section style="margin-top: 18px;">
+      <div class="row" style="gap: 12px; flex-wrap: wrap;">
+        <div class="card stat-card" style="min-width: 130px;">
+          <div class="stat-value">${props.oosStats?.out_of_stock_count ?? "—"}</div>
+          <div class="stat-label">${t("overview.dashboard.kpi.oosProducts")}</div>
+        </div>
+        <div class="card stat-card" style="min-width: 130px;">
+          <div class="stat-value">${props.shortageStats?.shortage_product_count ?? "—"}</div>
+          <div class="stat-label">${t("overview.dashboard.kpi.shortageProducts")}</div>
+        </div>
+        <div class="card stat-card" style="min-width: 130px;">
+          <div class="stat-value">${props.quotationStats?.pending_count ?? "—"}</div>
+          <div class="stat-label">${t("overview.dashboard.kpi.pendingQuotations")}</div>
+        </div>
+        <div class="card stat-card" style="min-width: 130px;">
+          <div class="stat-value">${props.quotationStats?.today_count ?? "—"}</div>
+          <div class="stat-label">${t("overview.dashboard.kpi.todayNewQuotations")}</div>
+        </div>
+        <div class="card stat-card" style="min-width: 130px;">
+          <div class="stat-value">${props.quotationStats?.shortage_count ?? "—"}</div>
+          <div class="stat-label">${t("overview.dashboard.kpi.shortageQuotations")}</div>
+        </div>
+        <div class="card stat-card" style="min-width: 130px;">
+          <div class="stat-value">${props.quotationStats?.replenishment_count ?? "—"}</div>
+          <div class="stat-label">${t("overview.dashboard.kpi.replenishmentDrafts")}</div>
         </div>
       </div>
-      <div class="card">
-        <div class="card-title">${t("overview.shortage.title")}</div>
-        <div class="card-sub">${t("overview.shortage.subtitle")}</div>
-        <div class="row" style="margin-top: 12px; gap: 12px; flex-wrap: wrap;">
-          ${props.shortageStats
-            ? [
-                {
-                  label: t("overview.shortage.stats.totalRecords"),
-                  value: props.shortageStats.total_records,
-                },
-                {
-                  label: t("overview.shortage.stats.shortageProductCount"),
-                  value: props.shortageStats.shortage_product_count,
-                },
-                {
-                  label: t("overview.shortage.stats.today"),
-                  value: props.shortageStats.today_count,
-                },
-                {
-                  label: t("overview.shortage.stats.reportedGe2"),
-                  value: props.shortageStats.reported_ge2_count,
-                },
-              ].map(
-                (c) => html`
-                  <div class="card stat-card" style="min-width: 120px;">
-                    <div class="stat-value">${c.value}</div>
-                    <div class="stat-label">${c.label}</div>
-                  </div>
-                `,
-              )
-            : html`<div class="muted">${t("overview.shortage.empty")}</div>`}
-        </div>
-      </div>
+    </section>
+
+    ${
+      props.dashboardError
+        ? html`<section style="margin-top: 12px;">
+            <div class="callout danger">${t("overview.dashboard.error", { error: props.dashboardError })}</div>
+          </section>`
+        : ""
+    }
+
+    <section style="margin-top: 18px;">
+      <dashboard-charts
+        .quotationByTime=${props.quotationStats?.by_time ?? []}
+        .oosByTime=${props.oosByTime}
+        .shortageByTime=${props.shortageByTime}
+        .loading=${props.dashboardLoading}
+      ></dashboard-charts>
     </section>
 
     <section class="card" style="margin-top: 18px;">

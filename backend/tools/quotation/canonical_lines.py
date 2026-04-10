@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 # 规范行 schema（与 pending_quotation_draft.lines 每项一致）：
 # row, row_index, product_name, specification, qty, code, quote_name, quote_spec,
-# unit_price, amount, available_qty, shortfall, is_shortage, match_source
+# unit_price, amount, warehouse_qty, available_qty, shortfall, is_shortage, match_source
 # 约定：specification = 询价规格（来自 item/fi），quote_spec = 报价产品规（规则 + 可选批量 LLM），仅在此模块内赋值。
 
 
@@ -50,7 +50,7 @@ def build_canonical_quotation_lines(
     Args:
         fill_items_merged: match 产出的合并填表项（每项含 row, code, quote_name, unit_price, qty, specification）
         items: 询价行（每项含 row, product_name, specification 等）
-        shortage: 缺货列表（每项含 row, shortfall, available_qty）
+        shortage: 缺货列表（每项含 row, shortfall, warehouse_qty, available_qty）
         run_spec_llm: 是否在构建后调用 extract_specs_batch_llm 覆盖 specification/quote_spec（仍受 QUOTATION_SPEC_LLM 配置约束）
 
     Returns:
@@ -68,16 +68,24 @@ def build_canonical_quotation_lines(
         code = fi.get("code") or ""
         is_shortage = 1 if (code == "无货" or "库存不足" in (fi.get("quote_name") or "")) else 0
         shortfall = 0.0
+        warehouse_qty = 0.0
         available_qty = 0.0
         for s in shortage:
             if s.get("row") == row:
                 shortfall = _to_float(s.get("shortfall", 0), default=0.0)
+                warehouse_qty = _to_float(
+                    s.get("warehouse_qty", s.get("qty_warehouse", s.get("available_qty", 0))),
+                    default=0.0,
+                )
                 available_qty = _to_float(s.get("available_qty", 0), default=0.0)
                 break
         if code == "无货":
+            warehouse_qty = 0.0
             available_qty = 0.0
             shortfall = qty
-        elif not is_shortage and shortfall == 0 and available_qty == 0 and code:
+        elif not is_shortage and shortfall == 0 and warehouse_qty == 0 and code:
+            warehouse_qty = qty
+        if not is_shortage and shortfall == 0 and available_qty == 0 and code:
             available_qty = qty
         quote_name_str = (fi.get("quote_name") or "").strip()
         spec_inquiry = fi.get("specification") or item.get("specification") or ""
@@ -99,6 +107,7 @@ def build_canonical_quotation_lines(
             "quote_spec": quote_spec,
             "unit_price": unit_price,
             "amount": amount,
+            "warehouse_qty": warehouse_qty,
             "available_qty": available_qty,
             "shortfall": shortfall,
             "is_shortage": is_shortage,

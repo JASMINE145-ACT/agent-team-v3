@@ -2,7 +2,7 @@
 询价填充：万鼎匹配 + 按 code 查库存
 
 万鼎匹配：DataBase-style 模糊逻辑（token + 同义词扩展 + 规格等价 + score 排序）。
-返回：{code, matched_name, unit_price, available_qty}，未找到 code 时返回 None。
+返回：{code, matched_name, unit_price, available_qty, warehouse_qty}，未找到 code 时返回 None。
 """
 
 from __future__ import annotations
@@ -188,7 +188,7 @@ def match_price_and_get_inventory(
 ) -> Optional[dict[str, Any]]:
     """
     报价历史查询 + 字段匹配（万鼎）同时进行，结果取并集（按 code 去重），再选型/查库存。
-    返回 {code, matched_name, unit_price, available_qty}，未找到 code 时返回 None。
+    返回 {code, matched_name, unit_price, available_qty, warehouse_qty}，未找到 code 时返回 None。
     allow_suggestions_for_work: 若 True 且 LLM 返回无把握（_suggestions），则返回
     {_needs_human_choice: True, keywords, options: [...]}，供 Work 人工介入。
     """
@@ -290,11 +290,13 @@ def match_price_and_get_inventory(
 
     code = r.get("code", "")
     available_qty = 0.0
+    warehouse_qty = 0.0
     try:
         table = _get_table_agent()
         item = table.get_item_by_code(code)
         if item is not None:
             available_qty = getattr(item, "qty_available", 0.0) or 0.0
+            warehouse_qty = getattr(item, "qty_warehouse", 0.0) or 0.0
     except Exception as e:
         logger.debug("库存查询 %s 失败: %s", code, e)
 
@@ -303,6 +305,7 @@ def match_price_and_get_inventory(
         "matched_name": r.get("matched_name", ""),
         "unit_price": r.get("unit_price", 0.0),
         "available_qty": available_qty,
+        "warehouse_qty": warehouse_qty,
         "match_source": r.get("match_source", "共同"),
     }
     selection_meta = r.get("_selection_meta")

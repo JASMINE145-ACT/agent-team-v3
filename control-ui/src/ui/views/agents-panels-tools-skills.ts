@@ -1,6 +1,13 @@
 import { html, nothing } from "lit";
+import { t } from "../../i18n/index.ts";
 import { normalizeToolName } from "../../agents/tool-policy.ts";
-import type { SkillStatusEntry, SkillStatusReport } from "../types.ts";
+import type {
+  ReportRecord,
+  ReportTask,
+  ReportTaskConfig,
+  SkillStatusEntry,
+  SkillStatusReport,
+} from "../types.ts";
 import {
   isAllowedByPolicy,
   matchesList,
@@ -267,6 +274,20 @@ export function renderAgentSkills(params: {
   onDisableAll: (agentId: string) => void;
   onConfigReload: () => void;
   onConfigSave: () => void;
+  reportsLoading: boolean;
+  reportsError: string | null;
+  reportsTasks: ReportTask[];
+  reportsRecords: ReportRecord[];
+  reportsAdminToken: string;
+  reportsEditingTaskId: string | null;
+  reportsEditForm: ReportTaskConfig;
+  onReportsTokenChange: (token: string) => void;
+  onReportsRefresh: () => void;
+  onReportsRun: (taskKey: string) => void;
+  onReportsEditStart: (task: ReportTask) => void;
+  onReportsEditCancel: () => void;
+  onReportsEditChange: (patch: ReportTaskConfig) => void;
+  onReportsEditSave: (taskKey: string) => void;
 }) {
   const editable = Boolean(params.configForm) && !params.configLoading && !params.configSaving;
   const config = resolveAgentConfig(params.configForm, params.agentId);
@@ -288,6 +309,143 @@ export function renderAgentSkills(params: {
   const totalCount = rawSkills.length;
 
   return html`
+    <section class="card" style="margin-bottom: 12px;">
+      <div class="callout info" style="margin-bottom: 12px;">
+        ${t("agents.reports.whereHint")}
+      </div>
+      <div class="row" style="justify-content: space-between;">
+        <div>
+          <div class="card-title">${t("agents.reports.title")}</div>
+          <div class="card-sub">${t("agents.reports.subtitle")}</div>
+        </div>
+        <button class="btn btn--sm" ?disabled=${params.reportsLoading} @click=${params.onReportsRefresh}>
+          ${params.reportsLoading ? t("common.loading") : t("common.refresh")}
+        </button>
+      </div>
+      <div class="filters" style="margin-top: 12px;">
+        <label class="field" style="flex: 1;">
+          <span>${t("agents.reports.tokenLabel")}</span>
+          <input
+            .value=${params.reportsAdminToken}
+            placeholder="x-reports-token"
+            @input=${(e: Event) => params.onReportsTokenChange((e.target as HTMLInputElement).value)}
+          />
+        </label>
+      </div>
+      ${
+        params.reportsError
+          ? html`<div class="callout danger" style="margin-top: 12px;">${params.reportsError}</div>`
+          : nothing
+      }
+      <div style="margin-top: 12px;">
+        <div class="label">${t("agents.reports.tasks")}</div>
+        ${
+          params.reportsTasks.length === 0
+            ? html`<div class="muted">${t("agents.reports.noTasks")}</div>`
+            : html`
+                <div class="list">
+                  ${params.reportsTasks.map((task) => {
+                    const editing = params.reportsEditingTaskId === task.task_key;
+                    const form = editing ? params.reportsEditForm : {};
+                    return html`
+                      <div class="list-item">
+                        <div class="list-main">
+                          <div class="list-title">${task.title} <span class="mono">(${task.task_key})</span></div>
+                          <div class="list-sub">
+                            enabled=${String(editing ? Boolean(form.enabled ?? task.enabled) : task.enabled)},
+                            cron=${editing ? form.cron_expr ?? task.cron_expr : task.cron_expr},
+                            tz=${editing ? form.timezone ?? task.timezone : task.timezone}
+                          </div>
+                          ${
+                            editing
+                              ? html`
+                                  <div class="row" style="gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+                                    <label class="field" style="min-width: 170px;">
+                                      <span>${t("agents.reports.enabled")}</span>
+                                      <select
+                                        .value=${String(Boolean(form.enabled ?? task.enabled))}
+                                        @change=${(e: Event) =>
+                                          params.onReportsEditChange({
+                                            ...form,
+                                            enabled: (e.target as HTMLSelectElement).value === "true",
+                                          })}
+                                      >
+                                        <option value="true">true</option>
+                                        <option value="false">false</option>
+                                      </select>
+                                    </label>
+                                    <label class="field" style="min-width: 220px;">
+                                      <span>${t("agents.reports.cron")}</span>
+                                      <input
+                                        .value=${form.cron_expr ?? task.cron_expr}
+                                        @input=${(e: Event) =>
+                                          params.onReportsEditChange({
+                                            ...form,
+                                            cron_expr: (e.target as HTMLInputElement).value,
+                                          })}
+                                      />
+                                    </label>
+                                    <label class="field" style="min-width: 180px;">
+                                      <span>${t("agents.reports.timezone")}</span>
+                                      <input
+                                        .value=${form.timezone ?? task.timezone}
+                                        @input=${(e: Event) =>
+                                          params.onReportsEditChange({
+                                            ...form,
+                                            timezone: (e.target as HTMLInputElement).value,
+                                          })}
+                                      />
+                                    </label>
+                                  </div>
+                                `
+                              : nothing
+                          }
+                        </div>
+                        <div class="list-meta row" style="gap: 6px;">
+                          <button class="btn btn--sm" @click=${() => params.onReportsRun(task.task_key)}>
+                            ${t("agents.reports.run")}
+                          </button>
+                          ${
+                            editing
+                              ? html`
+                                  <button class="btn btn--sm primary" @click=${() => params.onReportsEditSave(task.task_key)}>${t("common.save")}</button>
+                                  <button class="btn btn--sm" @click=${params.onReportsEditCancel}>${t("common.cancel")}</button>
+                                `
+                              : html`<button class="btn btn--sm" @click=${() => params.onReportsEditStart(task)}>${t("common.edit")}</button>`
+                          }
+                        </div>
+                      </div>
+                    `;
+                  })}
+                </div>
+              `
+        }
+      </div>
+      <div style="margin-top: 12px;">
+        <div class="label">${t("agents.reports.latestRecords")}</div>
+        ${
+          params.reportsRecords.length === 0
+            ? html`<div class="muted">${t("agents.reports.noRecords")}</div>`
+            : html`
+                <div class="list">
+                  ${params.reportsRecords.map(
+                    (r) => html`
+                      <div class="list-item">
+                        <div class="list-main">
+                          <div class="list-title">
+                            #${r.id} ${r.task_key} - <span class="mono">${r.status}</span>
+                          </div>
+                          <div class="list-sub">${r.started_at}${r.finished_at ? ` -> ${r.finished_at}` : ""}</div>
+                          ${r.error_message ? html`<div class="muted">error: ${r.error_message}</div>` : nothing}
+                        </div>
+                      </div>
+                    `,
+                  )}
+                </div>
+              `
+        }
+      </div>
+    </section>
     <section class="card">
       <div class="row" style="justify-content: space-between;">
         <div>

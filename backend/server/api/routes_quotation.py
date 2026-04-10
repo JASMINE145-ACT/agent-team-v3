@@ -122,6 +122,18 @@ async def quotation_drafts_list(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/api/quotation-drafts/stats")
+async def quotation_drafts_stats(days: int = 7) -> Dict[str, Any]:
+    """Dashboard 用：报价单统计 + 近 N 天趋势。"""
+    try:
+        ds = get_oos_data_service()
+        data = ds.get_quotation_draft_stats(days=max(1, min(90, days)))
+        return {"success": True, "data": data}
+    except Exception as e:
+        logger.exception("quotation-drafts/stats 失败")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/api/quotation-drafts/by-no/{draft_no}")
 async def quotation_drafts_get_by_no(draft_no: str) -> Dict[str, Any]:
     """按 draft_no 查报价记录详情（须在 /{draft_id} 之前定义）。"""

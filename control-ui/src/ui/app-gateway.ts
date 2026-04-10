@@ -64,6 +64,7 @@ type GatewayHost = {
   refreshSessionsAfterChat: Set<string>;
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
+  pendingVisibleRefreshHandler?: (() => void) | null;
 };
 
 type SessionDefaultsSnapshot = {
@@ -158,7 +159,28 @@ export function connectGateway(host: GatewayHost) {
       void loadAgents(host as unknown as OpenClawApp);
       void loadNodes(host as unknown as OpenClawApp, { quiet: true });
       void loadDevices(host as unknown as OpenClawApp, { quiet: true });
-      void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
+      // Avoid duplicate API storms from hidden tabs/windows reconnecting at the same time.
+      if (host.pendingVisibleRefreshHandler && typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", host.pendingVisibleRefreshHandler);
+        host.pendingVisibleRefreshHandler = null;
+      }
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
+      } else if (typeof document !== "undefined") {
+        const onVisible = () => {
+          if (document.visibilityState !== "visible") {
+            return;
+          }
+          document.removeEventListener("visibilitychange", onVisible);
+          host.pendingVisibleRefreshHandler = null;
+          if (host.client !== client || !host.connected) {
+            return;
+          }
+          void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
+        };
+        host.pendingVisibleRefreshHandler = onVisible;
+        document.addEventListener("visibilitychange", onVisible);
+      }
     },
     onClose: ({ code, reason }) => {
       if (host.client !== client) {

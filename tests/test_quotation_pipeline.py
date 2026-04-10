@@ -31,8 +31,8 @@ def test_match_uses_items_when_provided_no_extract_call():
     # 模拟 match_price_and_get_inventory：第一条有库存，第二条缺货
     def fake_match(keywords, customer_level=None, price_library_path=None, allow_suggestions_for_work=None):
         if "PVC" in (keywords or ""):
-            return {"code": "P001", "matched_name": "PVC管", "unit_price": 10.0, "available_qty": 200.0}
-        return {"code": "V001", "matched_name": "阀门", "unit_price": 20.0, "available_qty": 10.0}
+            return {"code": "P001", "matched_name": "PVC管", "unit_price": 10.0, "available_qty": 200.0, "warehouse_qty": 200.0}
+        return {"code": "V001", "matched_name": "阀门", "unit_price": 20.0, "available_qty": 10.0, "warehouse_qty": 10.0}
 
     with patch("backend.tools.quotation.quote_tools.extract_inquiry_items") as mock_extract:
         with patch("backend.tools.inventory.services.match_and_inventory.match_price_and_get_inventory", side_effect=fake_match):
@@ -54,7 +54,7 @@ def test_match_items_structure_to_fill_shortage_unmatched():
 
     items = [{"row": 2, "keywords": "A", "qty": 1, "product_name": "A", "specification": ""}]
     with patch("backend.tools.inventory.services.match_and_inventory.match_price_and_get_inventory") as m:
-        m.return_value = {"code": "C1", "matched_name": "A", "unit_price": 1.0, "available_qty": 10.0}
+        m.return_value = {"code": "C1", "matched_name": "A", "unit_price": 1.0, "available_qty": 10.0, "warehouse_qty": 10.0}
         out = _run_work_quotation_match("/f.xlsx", items=items)
 
     assert out["success"] is True
@@ -64,6 +64,29 @@ def test_match_items_structure_to_fill_shortage_unmatched():
     assert len(out["unmatched"]) == 0
     assert "fill_items_merged" in out
     assert len(out["fill_items_merged"]) >= 1
+
+
+def test_match_decision_uses_warehouse_not_available():
+    """Decision must use warehouse_qty, not available_qty, in quotation flow."""
+    from unittest.mock import patch
+    from backend.agent.work_tools import _run_work_quotation_match
+
+    items = [{"row": 2, "keywords": "A", "qty": 10, "product_name": "A", "specification": ""}]
+    with patch("backend.tools.inventory.services.match_and_inventory.match_price_and_get_inventory") as m:
+        # Conflicting sample: available is high but warehouse is zero.
+        m.return_value = {
+            "code": "C1",
+            "matched_name": "A",
+            "unit_price": 1.0,
+            "available_qty": 90.0,
+            "warehouse_qty": 0.0,
+        }
+        out = _run_work_quotation_match("/f.xlsx", items=items)
+
+    assert out["success"] is True
+    assert len(out["to_fill"]) == 0
+    assert len(out["shortage"]) == 1
+    assert out["shortage"][0]["shortfall"] == 10
 
 
 # ----- 2) 缺货落库/邮件不阻塞主流程 -----
@@ -82,7 +105,7 @@ def test_execute_work_tool_sync_returns_quickly_with_shortage():
 
     # 模拟 match 返回缺货，避免真实请求耗时；落库在后台线程中若未 mock 会阻塞 2s，主线程不应等它
     def fake_match_shortage(*args, **kwargs):
-        return {"code": "C1", "matched_name": "X", "unit_price": 1.0, "available_qty": 5.0}
+        return {"code": "C1", "matched_name": "X", "unit_price": 1.0, "available_qty": 5.0, "warehouse_qty": 5.0}
 
     with patch("backend.agent.work_tools._persist_shortage_records_and_alerts", side_effect=blocking_persist):
         with patch("backend.tools.inventory.services.match_and_inventory.match_price_and_get_inventory", side_effect=fake_match_shortage):
@@ -192,6 +215,62 @@ def test_fill_quotation_writes_dates_and_spec_fallback(temp_quotation_xlsx):
     # 不依赖具体颜色/边框样式，只要求复制后 border/fill 的序列化结果一致（避免因对象实例不同导致比较失败）
     assert repr(tmpl_cell.border) == repr(filled_cell.border)
     assert repr(tmpl_cell.fill) == repr(filled_cell.fill)
+    wb.close()
+    try:
+        Path(out_path).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+@pytest.fixture
+def temp_quotation_xlsx_lingwei_footer():
+    """凌威风格 footer：合计行下第16行为「报价日期」；J:K 合并为标签，L:R 合并为填日期区。"""
+    try:
+        import openpyxl
+    except ImportError:
+        pytest.skip("openpyxl not installed")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    if ws is None:
+        ws = wb.create_sheet("Sheet1")
+    ws.cell(row=1, column=16, value="Tanggal Pengiriman Barang / 交货日期")
+    total_row = 12
+    ws.cell(row=total_row, column=1, value="Total Excluding PPN不含税总价")
+    footer_row = 16
+    ws.merge_cells(start_row=footer_row, start_column=10, end_row=footer_row, end_column=11)
+    ws.cell(row=footer_row, column=10, value="报价日期")
+    ws.merge_cells(start_row=footer_row, start_column=12, end_row=footer_row, end_column=18)
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    import os
+
+    os.close(fd)
+    wb.save(path)
+    yield path
+    try:
+        Path(path).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def test_fill_quotation_quotation_date_goes_to_l_r_merge(temp_quotation_xlsx_lingwei_footer):
+    """报价日期写入 L:R 合并格左上角（列 L），而不是标签右侧落在 J:K 内。"""
+    from backend.tools.quotation.quote_tools import fill_quotation
+    import openpyxl
+
+    fill_items = [{"row": 2, "code": "C1", "quote_name": "X", "unit_price": 1.0, "qty": 1, "specification": ""}]
+    out_path = temp_quotation_xlsx_lingwei_footer + ".filled.xlsx"
+    out = fill_quotation(
+        file_path=temp_quotation_xlsx_lingwei_footer,
+        fill_items=fill_items,
+        output_path=out_path,
+        quotation_date="2026/04/09",
+        delivery_date="2026/04/09",
+    )
+    assert out.get("success") is True
+    wb = openpyxl.load_workbook(out_path, data_only=True)
+    ws = wb.active
+    assert ws is not None
+    assert ws.cell(row=16, column=12).value == "2026/04/09"
     wb.close()
     try:
         Path(out_path).unlink(missing_ok=True)
@@ -326,7 +405,7 @@ def test_match_output_includes_fill_items_for_excel():
     from backend.agent.work_tools import execute_work_tool_sync
 
     with patch("backend.tools.inventory.services.match_and_inventory.match_price_and_get_inventory") as m:
-        m.return_value = {"code": "C1", "matched_name": "X", "unit_price": 1.0, "available_qty": 100.0}
+        m.return_value = {"code": "C1", "matched_name": "X", "unit_price": 1.0, "available_qty": 100.0, "warehouse_qty": 100.0}
         raw = execute_work_tool_sync(
             "work_quotation_match",
             {"file_path": "/f.xlsx", "items": [{"row": 2, "keywords": "X", "qty": 10, "product_name": "X", "specification": ""}]},

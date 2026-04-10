@@ -1,0 +1,140 @@
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import psycopg2
+from pydantic import BaseModel, Field
+
+
+@dataclass
+class DayStats:
+    date: str
+    order_count: int
+    sales_amount: float
+
+
+@dataclass
+class CustomerStat:
+    customer_name: str
+    sales_amount: float
+    order_count: int
+
+
+@dataclass
+class StatusStat:
+    status_name: str
+    count: int
+    total_amount: float
+
+
+@dataclass
+class ReportPayload:
+    week_start: str
+    week_end: str
+    total_sales_amount: float
+    total_order_count: int
+    daily_stats: List[DayStats]
+    top_customers: List[CustomerStat]
+    status_stats: List[StatusStat]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+class TaskConfigPatch(BaseModel):
+    enabled: Optional[bool] = None
+    cron_expr: Optional[str] = None
+    timezone: Optional[str] = None
+    title: Optional[str] = None
+
+
+class ReportTaskResponse(BaseModel):
+    task_key: str
+    title: str
+    enabled: bool
+    cron_expr: str
+    timezone: str
+    updated_at: str
+
+
+class ReportRecordResponse(BaseModel):
+    id: int
+    task_key: str
+    status: str
+    trigger_type: str
+    started_at: str
+    finished_at: Optional[str] = None
+    error_message: Optional[str] = None
+    summary_json: Optional[Dict[str, Any]] = None
+
+
+class ReportRecordDetailResponse(ReportRecordResponse):
+    report_json: Optional[Dict[str, Any]] = None
+    report_md: Optional[str] = None
+
+
+_DDL = [
+    """
+    CREATE TABLE IF NOT EXISTS report_task_config (
+        task_key TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        cron_expr TEXT NOT NULL,
+        timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS report_records (
+        id BIGSERIAL PRIMARY KEY,
+        task_key TEXT NOT NULL,
+        status TEXT NOT NULL,
+        trigger_type TEXT NOT NULL,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        finished_at TIMESTAMPTZ NULL,
+        error_message TEXT NULL,
+        summary_json JSONB NULL,
+        report_json JSONB NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_report_records_task_started
+    ON report_records(task_key, started_at DESC);
+    """,
+]
+
+
+def get_database_url() -> str:
+    db_url = (os.getenv("DATABASE_URL") or "").strip()
+    if not db_url:
+        raise RuntimeError("DATABASE_URL is required for reports module")
+    return db_url
+
+
+def ensure_tables() -> None:
+    conn = psycopg2.connect(get_database_url())
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            for ddl in _DDL:
+                cur.execute(ddl)
+            cur.execute(
+                """
+                INSERT INTO report_task_config(task_key, title, enabled, cron_expr, timezone)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (task_key) DO NOTHING
+                """,
+                ("sales_weekly_basic", "销售发票周报（基础版）", True, "0 9 * * 1", "Asia/Shanghai"),
+            )
+            cur.execute("ALTER TABLE report_records ADD COLUMN IF NOT EXISTS report_md TEXT NULL;")
+    finally:
+        conn.close()
+
+
+def json_dumps(data: Dict[str, Any]) -> str:
+    return json.dumps(data, ensure_ascii=False)
+

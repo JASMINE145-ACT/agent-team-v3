@@ -42,6 +42,7 @@ export type PendingQuotationDraft = {
     quote_spec?: string;
     unit_price?: number | null;
     amount?: number | null;
+    warehouse_qty?: number;
     available_qty?: number;
     shortfall?: number;
     is_shortage?: number;
@@ -230,15 +231,20 @@ function buildDraftFromObservation(obj: Record<string, unknown>): PendingQuotati
     const code = String(fi.code ?? "");
     const quoteName = String(fi.quote_name ?? "").trim();
     let availableQty = 0;
+    let warehouseQty = 0;
     let shortfall = 0;
     for (const s of shortage) {
       if (s.row === row) {
+        warehouseQty = Number(s.warehouse_qty ?? s.qty_warehouse ?? s.available_qty ?? 0);
         availableQty = Number(s.available_qty ?? 0);
         shortfall = Number(s.shortfall ?? 0);
         break;
       }
     }
     const isShortage = isOosCode(code) || quoteName.includes("库存不足");
+    if (!isShortage && shortfall === 0 && warehouseQty === 0 && code && !isOosCode(code)) {
+      warehouseQty = qty;
+    }
     if (!isShortage && shortfall === 0 && availableQty === 0 && code && !isOosCode(code)) {
       availableQty = qty;
     }
@@ -253,6 +259,7 @@ function buildDraftFromObservation(obj: Record<string, unknown>): PendingQuotati
       quote_spec: String(fi.quote_spec ?? ""),
       unit_price: unitPrice,
       amount,
+      warehouse_qty: warehouseQty,
       available_qty: availableQty,
       shortfall,
       is_shortage: isShortage ? 1 : 0,
@@ -333,6 +340,7 @@ function parsePendingDraft(raw: unknown): PendingQuotationDraft {
       quote_spec: optionalString(line.quote_spec),
       unit_price: unitPrice == null || Number.isNaN(unitPrice) ? null : unitPrice,
       amount: line.amount == null ? null : Number(line.amount),
+      warehouse_qty: optionalNumber(line.warehouse_qty),
       available_qty: optionalNumber(line.available_qty) ?? Number(line.available_qty ?? 0),
       shortfall: optionalNumber(line.shortfall) ?? Number(line.shortfall ?? 0),
       is_shortage: optionalNumber(line.is_shortage) ?? (optionalBoolean(line.is_shortage) ? 1 : 0),
@@ -879,7 +887,8 @@ export async function saveQuotationDraft(state: WorkState): Promise<boolean> {
           quote_spec: ln.quote_spec ?? "",
           unit_price: ln.unit_price != null ? Number(ln.unit_price) : null,
           amount: ln.amount != null ? Number(ln.amount) : null,
-          available_qty: Number(ln.available_qty) || 0,
+          // 后端当前草稿表仅持久化 available_qty；这里同步写入库存口径，确保刷新后显示一致。
+          available_qty: Number(ln.warehouse_qty ?? ln.available_qty) || 0,
           shortfall: Number(ln.shortfall) || 0,
           is_shortage: ln.is_shortage ? 1 : 0,
           match_source: ln.match_source ?? null,

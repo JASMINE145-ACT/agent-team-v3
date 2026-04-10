@@ -26,6 +26,10 @@ QUOTATION_DATE_LABEL_KEYWORDS = [
     "Quotation Date",
 ]
 
+# 凌威模板：footer 中「报价日期」标签常在 J:K 合并格，数值应在 L:R 合并格（旧逻辑写 c+1 会落在 J:K 内）。
+QUOTE_DATE_VALUE_MIN_COL = 12  # L
+QUOTE_DATE_VALUE_MAX_COL = 18  # R
+
 
 def _copy_cell_style(source_cell, dest_cell) -> None:
     """
@@ -334,8 +338,13 @@ def _find_quotation_date_cell(
 ) -> Tuple[int, int] | None:
     """
     在合计行下方的 footer 区域查找「报价日期」标签所在行，返回应填写日期的单元格 (row, col) 1-based。
-    约定：日期写在标签所在单元格的右侧一列。
+
+    - 凌威报价单：标签在 J:K 合并格时，旧约定「标签右侧一格」仍落在 J:K 内，错误。
+      若同一行存在列号在 L–R（12–18）内的合并区域，则日期写入该区域左上角。
+    - 其他模板：无 L–R 合并时，回退为标签所在单元格的右侧一列 (c+1)。
     """
+    label_row: int | None = None
+    label_col: int | None = None
     for r in range(total_row_1based + 4, total_row_1based + search_rows + 1):
         for c in range(1, max_cols + 1):
             try:
@@ -344,10 +353,38 @@ def _find_quotation_date_cell(
                     continue
                 s = str(val).strip()
                 if any(kw in s for kw in QUOTATION_DATE_LABEL_KEYWORDS):
-                    return (r, c + 1)
+                    label_row, label_col = r, c
+                    break
             except Exception:
                 continue
-    return None
+        if label_row is not None:
+            break
+    if label_row is None or label_col is None:
+        return None
+
+    try:
+        candidates: list = []
+        for merged_range in ws.merged_cells.ranges:
+            if merged_range.min_row <= label_row <= merged_range.max_row:
+                if (
+                    merged_range.min_col >= QUOTE_DATE_VALUE_MIN_COL
+                    and merged_range.min_col <= QUOTE_DATE_VALUE_MAX_COL
+                ):
+                    candidates.append(merged_range)
+        single_row = [m for m in candidates if m.min_row == m.max_row == label_row]
+        if single_row:
+            prefer_l = [m for m in single_row if m.min_col == QUOTE_DATE_VALUE_MIN_COL]
+            chosen = prefer_l[0] if prefer_l else min(single_row, key=lambda m: m.min_col)
+            return (label_row, chosen.min_col)
+        if candidates:
+            on_row = [m for m in candidates if m.min_row <= label_row <= m.max_row]
+            if on_row:
+                chosen = min(on_row, key=lambda m: (m.min_row, m.min_col))
+                return (label_row, chosen.min_col)
+    except Exception:
+        logger.debug("_find_quotation_date_cell merge scan failed", exc_info=True)
+
+    return (label_row, label_col + 1)
 
 
 def _extract_inquiry_items_smart_fallback(

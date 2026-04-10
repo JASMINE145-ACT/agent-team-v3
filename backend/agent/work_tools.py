@@ -187,8 +187,12 @@ def _run_work_quotation_match(
         code = result.get("code", "")
         unit_price = result.get("unit_price", 0)
         quote_name = (result.get("matched_name", "") or "")[:200]
-        available_qty = result.get("available_qty", 0.0)
-        if available_qty >= qty:
+        available_qty = float(result.get("available_qty", 0.0) or 0.0)
+        # 报价模块判定只看真实库存；可售仅展示。
+        warehouse_qty = float(
+            result.get("warehouse_qty", result.get("qty_warehouse", 0.0)) or 0.0
+        )
+        if warehouse_qty >= qty:
             to_fill.append({
                 "row": row,
                 "code": code,
@@ -198,12 +202,13 @@ def _run_work_quotation_match(
                 "specification": specification,
             })
         else:
-            shortfall = max(0, qty - available_qty)
+            shortfall = max(0, qty - warehouse_qty)
             shortage.append({
                 "row": row,
                 "product_name": product_name,
                 "specification": specification,
                 "qty": qty,
+                "warehouse_qty": warehouse_qty,
                 "available_qty": available_qty,
                 "shortfall": shortfall,
                 "code": code,
@@ -286,14 +291,18 @@ def merge_work_pending_choices(match_result: dict[str, Any], selections: list[di
     shortage = list(match_result.get("shortage", []))
     unmatched = list(match_result.get("unmatched", []))
     fill_items_merged = list(match_result.get("fill_items_merged", []))
-    available_qty_fn = None
+    stock_and_available_qty_fn = None
     try:
         from backend.tools.inventory.agents.table_agent import InventoryTableAgent
         _table = InventoryTableAgent()
-        def _avail(c: str):
+        def _stock_and_avail(c: str):
             it = _table.get_item_by_code(c)
-            return float(getattr(it, "qty_available", 0) or 0) if it else 0.0
-        available_qty_fn = _avail
+            if not it:
+                return 0.0, 0.0
+            stock = float(getattr(it, "qty_warehouse", 0) or 0)
+            avail = float(getattr(it, "qty_available", 0) or 0)
+            return stock, avail
+        stock_and_available_qty_fn = _stock_and_avail
     except Exception:
         pass
     for pc in pending:
@@ -330,17 +339,20 @@ def merge_work_pending_choices(match_result: dict[str, Any], selections: list[di
             continue
         quote_name = (opt.get("matched_name") or "")[:200]
         unit_price = float(opt.get("unit_price", 0) or 0)
-        available_qty = available_qty_fn(code) if available_qty_fn else 0.0
-        if available_qty >= qty:
+        warehouse_qty, available_qty = (
+            stock_and_available_qty_fn(code) if stock_and_available_qty_fn else (0.0, 0.0)
+        )
+        if warehouse_qty >= qty:
             to_fill.append({"row": row, "code": code, "quote_name": quote_name, "unit_price": unit_price, "qty": qty, "specification": specification})
             fill_items_merged.append({"row": row, "code": code, "quote_name": quote_name, "unit_price": unit_price, "qty": qty, "specification": specification})
         else:
-            shortfall = max(0, qty - available_qty)
+            shortfall = max(0, qty - warehouse_qty)
             shortage.append({
                 "row": row,
                 "product_name": product_name,
                 "specification": specification,
                 "qty": qty,
+                "warehouse_qty": warehouse_qty,
                 "available_qty": available_qty,
                 "shortfall": shortfall,
                 "code": code,
@@ -440,11 +452,13 @@ def _persist_shortage_records_and_alerts(file_path: str, shortage_list: list[dic
                     "product_name": s.get("product_name"),
                     "specification": s.get("specification"),
                     "quantity": s.get("qty"),
-                    "available_qty": s.get("available_qty"),
+                    # 报价模块库存判定以真实库存为准；持久化口径保持一致。
+                    "available_qty": s.get("warehouse_qty", s.get("available_qty")),
                     "shortfall": s.get("shortfall"),
                     "code": s.get("code"),
                     "quote_name": s.get("quote_name"),
                     "unit_price": s.get("unit_price"),
+                    "warehouse_qty": s.get("warehouse_qty"),
                 }
                 for s in shortage_list
             ],

@@ -92,6 +92,9 @@ import type {
   SkillStatusReport,
   StatusSummary,
   NostrProfile,
+  ReportRecord,
+  ReportTask,
+  ReportTaskConfig,
 } from "./types.ts";
 import {
   type ChatAttachment,
@@ -259,6 +262,11 @@ export class OpenClawApp extends LitElement {
   @state() overviewOosError: string | null = null;
   @state() overviewShortageStats: import("./types.js").ShortageStats | null = null;
   @state() overviewShortageError: string | null = null;
+  @state() dashboardLoading = false;
+  @state() dashboardError: string | null = null;
+  @state() quotationStats: import("./types.js").QuotationDraftStats | null = null;
+  @state() dashboardOosByTime: import("./types.js").OosByTimeRow[] = [];
+  @state() dashboardShortageByTime: import("./types.js").ShortageByTimeRow[] = [];
 
   @state() agentsLoading = false;
   @state() agentsList: AgentsListResult | null = null;
@@ -420,6 +428,17 @@ export class OpenClawApp extends LitElement {
   @state() skillEdits: Record<string, string> = {};
   @state() skillsBusyKey: string | null = null;
   @state() skillMessages: Record<string, SkillMessage> = {};
+  @state() reportsLoading = false;
+  @state() reportsError: string | null = null;
+  @state() reportsTasks: ReportTask[] = [];
+  @state() reportsRecords: ReportRecord[] = [];
+  @state() reportsAdminToken = "";
+  @state() reportsEditingTaskId: string | null = null;
+  @state() reportsEditForm: ReportTaskConfig = {};
+  @state() reportDetail: ReportRecord | null = null;
+  @state() reportDetailLoading = false;
+  @state() selectedRecordId: number | null = null;
+  @state() reportsCopyJustDone = false;
 
   @state() debugLoading = false;
   @state() debugStatus: StatusSummary | null = null;

@@ -7,3 +7,7 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python run_backend.py
+    # 开启后注册 /api/debug/*（selector-lab 需要）；密钥类请在 Dashboard 单独配置
+    envVars:
+      - key: DEBUG
+        value: "true"

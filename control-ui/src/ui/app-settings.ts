@@ -14,6 +14,7 @@ import { loadBusinessKnowledge } from "./controllers/business-knowledge.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { loadConfig, loadConfigSchema } from "./controllers/config.ts";
 import { loadCronJobs, loadCronStatus } from "./controllers/cron.ts";
+import { fetchDashboard } from "./controllers/dashboard.ts";
 import { loadFulfillDrafts as loadFulfillDraftsFromController } from "./controllers/fulfill.ts";
 import {
   loadProcurementSuggestions as loadProcurementSuggestionsFromController,
@@ -33,6 +34,7 @@ import {
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadSkills } from "./controllers/skills.ts";
+import { loadReports } from "./controllers/reports.ts";
 import {
   inferBasePathFromPathname,
   normalizeBasePath,
@@ -225,6 +227,9 @@ export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "skills") {
     await loadSkills(host as unknown as OpenClawApp);
   }
+  if (host.tab === "reports") {
+    await loadReports(host as unknown as OpenClawApp);
+  }
   if (host.tab === "agents") {
     await loadAgents(host as unknown as OpenClawApp);
     await loadConfig(host as unknown as OpenClawApp);
@@ -238,6 +243,7 @@ export async function refreshActiveTab(host: SettingsHost) {
       void loadAgentIdentity(host as unknown as OpenClawApp, agentId);
       if (host.agentsPanel === "skills") {
         void loadAgentSkills(host as unknown as OpenClawApp, agentId);
+        void loadReports(host as unknown as OpenClawApp);
       }
       if (host.agentsPanel === "channels") {
         void loadChannels(host as unknown as OpenClawApp, false);
@@ -437,6 +443,7 @@ export async function loadOverview(host: SettingsHost) {
     loadSessions(host as unknown as OpenClawApp),
     loadCronStatus(host as unknown as OpenClawApp),
     loadDebug(host as unknown as OpenClawApp),
+    fetchDashboard(host as unknown as Parameters<typeof fetchDashboard>[0]),
   ]);
 }
 

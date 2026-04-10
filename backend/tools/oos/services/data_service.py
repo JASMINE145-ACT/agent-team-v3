@@ -4,7 +4,7 @@
 import json
 import re
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, func, select, text, or_
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
@@ -1008,6 +1008,60 @@ class DataService:
                     "confirmed_at": r.confirmed_at.isoformat() if r.confirmed_at else None,
                 })
             return out
+        finally:
+            session.close()
+
+    def get_quotation_draft_stats(self, days: int = 7) -> Dict:
+        """Dashboard 用：报价单统计 + 近 N 天趋势。"""
+        session = self.SessionLocal()
+        try:
+            days = max(1, min(90, int(days or 7)))
+            today = datetime.now().date()
+            today_start = datetime.combine(today, datetime.min.time())
+            cutoff = datetime.combine(today - timedelta(days=days - 1), datetime.min.time())
+
+            pending_count = (
+                session.query(QuotationDraftDB)
+                .filter(QuotationDraftDB.status == "pending")
+                .count()
+            )
+            today_count = (
+                session.query(QuotationDraftDB)
+                .filter(QuotationDraftDB.created_at >= today_start)
+                .count()
+            )
+            shortage_count = (
+                session.query(QuotationDraftDB.id)
+                .join(QuotationDraftLineDB, QuotationDraftDB.id == QuotationDraftLineDB.draft_id)
+                .filter(QuotationDraftLineDB.shortfall > 0)
+                .distinct()
+                .count()
+            )
+            replenishment_count = session.query(ReplenishmentDraftDB).count()
+
+            rows = (
+                session.query(
+                    func.date(QuotationDraftDB.created_at).label("day"),
+                    func.count(QuotationDraftDB.id).label("cnt"),
+                )
+                .filter(QuotationDraftDB.created_at >= cutoff)
+                .group_by(func.date(QuotationDraftDB.created_at))
+                .all()
+            )
+            row_map = {str(r.day): int(r.cnt or 0) for r in rows}
+
+            by_time = []
+            for i in range(days - 1, -1, -1):
+                d = (today - timedelta(days=i)).isoformat()
+                by_time.append({"date": d, "count": row_map.get(d, 0)})
+
+            return {
+                "pending_count": int(pending_count or 0),
+                "today_count": int(today_count or 0),
+                "shortage_count": int(shortage_count or 0),
+                "replenishment_count": int(replenishment_count or 0),
+                "by_time": by_time,
+            }
         finally:
             session.close()
 

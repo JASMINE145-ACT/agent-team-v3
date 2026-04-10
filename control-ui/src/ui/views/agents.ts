@@ -6,6 +6,9 @@ import type {
   ChannelsStatusSnapshot,
   CronJob,
   CronStatus,
+  ReportRecord,
+  ReportTask,
+  ReportTaskConfig,
   SkillStatusReport,
 } from "../types.ts";
 import {
@@ -63,6 +66,13 @@ export type AgentsProps = {
   agentSkillsError: string | null;
   agentSkillsAgentId: string | null;
   skillsFilter: string;
+  reportsLoading: boolean;
+  reportsError: string | null;
+  reportsTasks: ReportTask[];
+  reportsRecords: ReportRecord[];
+  reportsAdminToken: string;
+  reportsEditingTaskId: string | null;
+  reportsEditForm: ReportTaskConfig;
   onRefresh: () => void;
   onSelectAgent: (agentId: string) => void;
   onSelectPanel: (panel: AgentsPanel) => void;
@@ -84,6 +94,13 @@ export type AgentsProps = {
   onAgentSkillToggle: (agentId: string, skillName: string, enabled: boolean) => void;
   onAgentSkillsClear: (agentId: string) => void;
   onAgentSkillsDisableAll: (agentId: string) => void;
+  onReportsTokenChange: (token: string) => void;
+  onReportsRefresh: () => void;
+  onReportsRun: (taskKey: string) => void;
+  onReportsEditStart: (task: ReportTask) => void;
+  onReportsEditCancel: () => void;
+  onReportsEditChange: (patch: ReportTaskConfig) => void;
+  onReportsEditSave: (taskKey: string) => void;
 };
 
 export type AgentContext = {
@@ -237,6 +254,20 @@ export function renderAgents(props: AgentsProps) {
                         onDisableAll: props.onAgentSkillsDisableAll,
                         onConfigReload: props.onConfigReload,
                         onConfigSave: props.onConfigSave,
+                        reportsLoading: props.reportsLoading,
+                        reportsError: props.reportsError,
+                        reportsTasks: props.reportsTasks,
+                        reportsRecords: props.reportsRecords,
+                        reportsAdminToken: props.reportsAdminToken,
+                        reportsEditingTaskId: props.reportsEditingTaskId,
+                        reportsEditForm: props.reportsEditForm,
+                        onReportsTokenChange: props.onReportsTokenChange,
+                        onReportsRefresh: props.onReportsRefresh,
+                        onReportsRun: props.onReportsRun,
+                        onReportsEditStart: props.onReportsEditStart,
+                        onReportsEditCancel: props.onReportsEditCancel,
+                        onReportsEditChange: props.onReportsEditChange,
+                        onReportsEditSave: props.onReportsEditSave,
                       })
                     : nothing
                 }

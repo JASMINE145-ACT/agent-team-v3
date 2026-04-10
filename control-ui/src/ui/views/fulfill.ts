@@ -302,7 +302,7 @@ export function renderFulfill(props: FulfillProps) {
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.quote_spec ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.unit_price ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.amount ?? ""}</td>
-                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.available_qty ?? ""}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.warehouse_qty ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.shortfall ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.is_shortage ? t("common.yes") : t("common.no")}</td>
                         </tr>

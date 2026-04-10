@@ -54,6 +54,7 @@ import {
   updateSkillEdit,
   updateSkillEnabled,
 } from "./controllers/skills.ts";
+import { loadReportDetail, loadReports, reformatRecord, runReportTask, saveReportTaskConfig } from "./controllers/reports.ts";
 import { icons } from "./icons.ts";
 import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
 import { renderAgents } from "./views/agents.ts";
@@ -72,6 +73,7 @@ import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.t
 import { renderLogs } from "./views/logs.ts";
 import { renderOosDashboard, renderShortageBlock } from "./views/oos-dashboard.ts";
 import { renderNodes } from "./views/nodes.ts";
+import { renderReportsTab } from "./views/reports-tab.ts";
 import { renderOverview } from "./views/overview.ts";
 import { renderSessions } from "./views/sessions.ts";
 import { renderSkills } from "./views/skills.ts";
@@ -238,6 +240,11 @@ export function renderApp(state: AppViewState) {
                 lastChannelsRefresh: state.channelsLastSuccess,
                 oosStats: state.overviewOosStats,
                 shortageStats: state.overviewShortageStats,
+                quotationStats: state.quotationStats,
+                oosByTime: state.dashboardOosByTime,
+                shortageByTime: state.dashboardShortageByTime,
+                dashboardLoading: state.dashboardLoading,
+                dashboardError: state.dashboardError,
                 onSettingsChange: (next) => state.applySettings(next),
                 onPasswordChange: (next) => (state.password = next),
                 onSessionKeyChange: (next) => {
@@ -542,6 +549,13 @@ export function renderApp(state: AppViewState) {
                 agentSkillsError: state.agentSkillsError,
                 agentSkillsAgentId: state.agentSkillsAgentId,
                 skillsFilter: state.skillsFilter,
+                reportsLoading: state.reportsLoading,
+                reportsError: state.reportsError,
+                reportsTasks: state.reportsTasks,
+                reportsRecords: state.reportsRecords,
+                reportsAdminToken: state.reportsAdminToken,
+                reportsEditingTaskId: state.reportsEditingTaskId,
+                reportsEditForm: state.reportsEditForm,
                 onRefresh: async () => {
                   await loadAgents(state);
                   const agentIds = state.agentsList?.agents?.map((entry) => entry.id) ?? [];
@@ -587,6 +601,7 @@ export function renderApp(state: AppViewState) {
                     if (resolvedAgentId) {
                       void loadAgentSkills(state, resolvedAgentId);
                     }
+                    void loadReports(state);
                   }
                   if (panel === "channels") {
                     void loadChannels(state, false);
@@ -763,6 +778,40 @@ export function renderApp(state: AppViewState) {
                     return;
                   }
                   updateConfigFormValue(state, ["agents", "list", index, "skills"], []);
+                },
+                onReportsTokenChange: (token) => {
+                  state.reportsAdminToken = token;
+                },
+                onReportsRefresh: () => {
+                  void loadReports(state);
+                },
+                onReportsRun: (taskKey) => {
+                  void runReportTask(state, taskKey);
+                },
+                onReportsEditStart: (task) => {
+                  state.reportsEditingTaskId = task.task_key;
+                  state.reportsEditForm = {
+                    enabled: task.enabled,
+                    cron_expr: task.cron_expr,
+                    timezone: task.timezone,
+                    title: task.title,
+                  };
+                },
+                onReportsEditCancel: () => {
+                  state.reportsEditingTaskId = null;
+                  state.reportsEditForm = {};
+                },
+                onReportsEditChange: (patch) => {
+                  state.reportsEditForm = patch;
+                },
+                onReportsEditSave: (taskKey) => {
+                  const patch = state.reportsEditForm;
+                  void saveReportTaskConfig(state, taskKey, patch).then(() => {
+                    if (!state.reportsError) {
+                      state.reportsEditingTaskId = null;
+                      state.reportsEditForm = {};
+                    }
+                  });
                 },
                 onModelChange: (agentId, modelId) => {
                   if (!configValue) {
@@ -949,6 +998,47 @@ export function renderApp(state: AppViewState) {
                       : { kind: "gateway" as const };
                   return saveExecApprovals(state, target);
                 },
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "reports"
+            ? renderReportsTab({
+                reportsLoading: state.reportsLoading,
+                reportsError: state.reportsError,
+                reportsTasks: state.reportsTasks,
+                reportsRecords: state.reportsRecords,
+                reportsAdminToken: state.reportsAdminToken,
+                selectedRecordId: state.selectedRecordId,
+                reportDetailLoading: state.reportDetailLoading,
+                reportDetail: state.reportDetail,
+                reportsCopyJustDone: state.reportsCopyJustDone,
+                onTokenChange: (token) => {
+                  state.reportsAdminToken = token;
+                },
+                onRefresh: () => loadReports(state),
+                onRun: (taskKey) => {
+                  void runReportTask(state, taskKey);
+                },
+                onSelectRecord: (recordId) => loadReportDetail(state, recordId),
+                onCopy: () => {
+                  if (!state.reportDetail?.report_md) {
+                    return;
+                  }
+                  void navigator.clipboard
+                    .writeText(state.reportDetail.report_md)
+                    .then(() => {
+                      state.reportsCopyJustDone = true;
+                      window.setTimeout(() => {
+                        state.reportsCopyJustDone = false;
+                      }, 2000);
+                    })
+                    .catch((e: unknown) => {
+                      state.reportsError = e instanceof Error ? e.message : String(e);
+                    });
+                },
+                onReformat: (recordId) => reformatRecord(state, recordId),
               })
             : nothing
         }

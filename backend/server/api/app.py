@@ -22,6 +22,7 @@ from backend.config import Config, get_primary_react_llm_credentials
 from backend.server.api.routes import router
 from backend.server.api.routes_wecom import router as wecom_router
 from backend.server.gateway.gateway import router as ws_router
+from backend.reports.service import start_report_service, stop_report_service
 
 logging.basicConfig(
     level=logging.INFO if not Config.DEBUG else logging.DEBUG,
@@ -219,6 +220,11 @@ async def startup_event():
             except Exception as e:
                 logger.warning("创建目录失败 %s: %s", p, e)
     logger.info("Agent-JK v3 单 Agent 后端启动完成 — %s:%s", Config.API_HOST, Config.API_PORT)
+    try:
+        start_report_service()
+        logger.info("周报调度服务已启动。")
+    except Exception as e:
+        logger.warning("周报调度服务启动失败（不影响 HTTP API）: %s", e)
     # 后台预热库存/报价/无货数据库
     asyncio.create_task(_warmup(agent))
     # 启动企业微信长连接 Bot（wecom-aibot-sdk 或 Dummy 模式，取决于环境配置）
@@ -227,6 +233,14 @@ async def startup_event():
         logger.info("WeCom Bot 长连接协程已启动。")
     except Exception as e:
         logger.warning("启动 WeCom Bot 长连接失败（不影响 HTTP API）: %s", e)
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    try:
+        stop_report_service()
+    except Exception as e:
+        logger.warning("周报调度服务停止失败: %s", e)
 
 
 if __name__ == "__main__":

@@ -482,7 +482,7 @@ export function renderWork(props: WorkProps) {
                             <input type="number" min="0" step="0.01" .value=${line.unit_price != null ? String(line.unit_price) : ""} @change=${(e: Event) => onQuotationLineChange(i, "unit_price", (e.target as HTMLInputElement).value)} style="width: 90px;" aria-label=${t("work.linePrice")} />
                           </td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.amount != null ? line.amount : ""}</td>
-                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.available_qty ?? ""}</td>
+                          <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.warehouse_qty ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.shortfall ?? ""}</td>
                           <td style="padding: 4px 8px; border: 1px solid var(--border);">${line.is_shortage ? t("common.yes") : t("common.no")}</td>
                         </tr>

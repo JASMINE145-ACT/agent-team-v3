@@ -394,6 +394,15 @@ export type ShortageByTimeRow = {
   count?: number;
 };
 
+/** Dashboard 用：报价单统计 */
+export type QuotationDraftStats = {
+  pending_count: number;
+  today_count: number;
+  shortage_count: number;
+  replenishment_count: number;
+  by_time: Array<{ date: string; count: number }>;
+};
+
 /** 成单页：待确认报价单列表项（GET /api/quotation-drafts 单条） */
 export type QuotationDraftListItem = {
   id: number;
@@ -418,6 +427,7 @@ export type QuotationDraftLine = {
   quote_spec?: string | null;
   unit_price?: number | null;
   amount?: number | null;
+  warehouse_qty?: number | null;
   available_qty?: number | null;
   shortfall?: number | null;
   is_shortage?: boolean;
@@ -687,6 +697,35 @@ export type SkillStatusReport = {
   workspaceDir: string;
   managedSkillsDir: string;
   skills: SkillStatusEntry[];
+};
+
+export type ReportTask = {
+  task_key: string;
+  title: string;
+  enabled: boolean;
+  cron_expr: string;
+  timezone: string;
+  updated_at: string;
+};
+
+export type ReportRecord = {
+  id: number;
+  task_key: string;
+  status: "running" | "success" | "failed";
+  trigger_type: string;
+  started_at: string;
+  finished_at?: string | null;
+  error_message?: string | null;
+  summary_json?: Record<string, unknown> | null;
+  report_json?: Record<string, unknown> | null;
+  report_md?: string | null;
+};
+
+export type ReportTaskConfig = {
+  enabled?: boolean;
+  cron_expr?: string;
+  timezone?: string;
+  title?: string;
 };
 
 export type StatusSummary = Record<string, unknown>;

@@ -82,7 +82,16 @@ function parseDraftDetail(raw: unknown, endpoint: string): QuotationDraftDetail 
   const detail = asRecord(raw, endpoint, "data");
   const base = parseDraftListItem(detail, endpoint);
   const linesRaw = asArray(detail.lines, endpoint, "data.lines");
-  const lines = linesRaw.map((ln) => asRecord(ln, endpoint, "data.lines[]")) as QuotationDraftDetail["lines"];
+  const lines = linesRaw.map((ln) => {
+    const line = asRecord(ln, endpoint, "data.lines[]");
+    const warehouseQty = optionalNumber(line.warehouse_qty);
+    const availableQty = optionalNumber(line.available_qty);
+    return {
+      ...line,
+      // 旧草稿可能仅有 available_qty；统一映射到 warehouse_qty 供前端库存列使用。
+      warehouse_qty: warehouseQty ?? availableQty ?? null,
+    };
+  }) as QuotationDraftDetail["lines"];
   return {
     ...base,
     lines,
