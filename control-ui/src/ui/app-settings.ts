@@ -34,6 +34,8 @@ import {
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadSkills } from "./controllers/skills.ts";
+import { loadPriceLibrary, loadProductMapping } from "./controllers/admin-data.ts";
+import type { AdminDataHost } from "./controllers/admin-data.types.ts";
 import { loadReports } from "./controllers/reports.ts";
 import {
   inferBasePathFromPathname,
@@ -278,6 +280,13 @@ export async function refreshActiveTab(host: SettingsHost) {
     host.logsAtBottom = true;
     await loadLogs(host as unknown as OpenClawApp, { reset: true });
     scheduleLogsScroll(host as unknown as Parameters<typeof scheduleLogsScroll>[0], true);
+  }
+  if (host.tab === "admin-data") {
+    const h = host as unknown as AdminDataHost;
+    if (h.adminData.token) {
+      await loadPriceLibrary(h);
+      await loadProductMapping(h);
+    }
   }
 }
 

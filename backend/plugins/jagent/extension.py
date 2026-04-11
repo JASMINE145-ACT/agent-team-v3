@@ -15,6 +15,47 @@ RENDERED_MARKER = "[已渲染到前端]"
 _KNOWN_CHOSEN_FIELDS: set[str] = {"code", "matched_name", "unit_price", "source"}
 
 
+def _handle_batch_obs(obs: str, context: dict | None, _logger: Any) -> str:
+    """
+    处理 match_quotation_batch 的 observation：
+    - 若 obs 是 JSON batch payload → 推送 tool_render SSE + 返回紧凑摘要
+    - 若 obs 已是紧凑文本（fallback）→ 直接返回
+    """
+    try:
+        data = json.loads(obs)
+    except Exception:
+        # obs is already the compact text (serialization fallback)
+        _logger.info("[on_after_tool] batch obs is plain text (len=%d)", len(obs))
+        return obs if obs.startswith(RENDERED_MARKER) else f"{RENDERED_MARKER} 批量查询完成。{obs}"
+    if not data.get("batch_mode"):
+        # Not a batch response; return raw obs
+        return obs
+    push = (context or {}).get("push_event")
+    if callable(push) and data.get("formatted_response"):
+        push("tool_render", {
+            "formatted_response": data.get("formatted_response", ""),
+            "keywords": "批量询价",
+            "chosen": {},
+            "chosen_index": None,
+            "match_source": "batch",
+            "selection_reasoning": "",
+            "batch_mode": True,
+            "resolved_items": data.get("resolved_items") or [],
+            "pending_items": data.get("pending_items") or [],
+            "unmatched_items": data.get("unmatched_items") or [],
+        })
+        _logger.info("[on_after_tool] batch tool_render SSE pushed")
+    else:
+        _logger.info("[on_after_tool] batch SSE skipped: push=%s fmt=%s", callable(push), bool(data.get("formatted_response")))
+    compact = (
+        data.get("batch_compact")
+        or f"{RENDERED_MARKER} 批量查询完成（matched={data.get('matched_count', 0)}, "
+        f"pending={data.get('pending_count', 0)}, unmatched={data.get('unmatched_count', 0)}）。"
+    )
+    _logger.info("[on_after_tool] batch compact (len=%d): %s", len(compact), compact[:80])
+    return compact
+
+
 class JAgentExtension(AgentExtension):
     """业务扩展：聚合三个领域工具注册，技能/输出格式由 PromptProvider 提供。"""
 
@@ -58,12 +99,9 @@ class JAgentExtension(AgentExtension):
 
     def on_after_tool(self, name: str, args: dict, obs: str, context: dict | None = None) -> str:
         """拦截 match_quotation / match_quotation_batch 结果：推送 tool_render SSE → 返回紧凑摘要给 LLM。"""
-        # ── match_quotation_batch: SSE 已在内部逐产品推送，obs 本身即紧凑摘要，直接返回 ──
+        # ── match_quotation_batch: 推送统一汇总卡片 + 返回紧凑摘要 ─────────────────────
         if name == "match_quotation_batch":
-            # tool_render SSE events were already pushed per-product inside _execute_match_quotation_batch.
-            # obs is already the compact summary string (unwrapped by unwrap_tool_result).
-            logger.info("[on_after_tool] match_quotation_batch compact (len=%d)", len(obs))
-            return obs
+            return _handle_batch_obs(obs, context, logger)
 
         # ── match_quotation: 推送 SSE + 返回紧凑摘要 ──────────────────────────
         if name == "match_quotation":
@@ -81,6 +119,9 @@ class JAgentExtension(AgentExtension):
                 logger.warning("[on_after_tool] JSON parse failed: %s", e)
                 pass
             else:
+                # match_quotation auto-routed to batch: obs is batch JSON
+                if data.get("batch_mode"):
+                    return _handle_batch_obs(obs, context, logger)
                 if data.get("single"):
                     push = (context or {}).get("push_event")
                     logger.info("[on_after_tool] single=True, push=%s", callable(push))

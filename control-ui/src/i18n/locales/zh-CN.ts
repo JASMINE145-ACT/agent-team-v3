@@ -47,6 +47,7 @@ export const zh_CN: TranslationMap = {
     config: "配置",
     debug: "调试",
     logs: "日志",
+    "admin-data": "数据管理",
   },
   subtitles: {
     agents: "管理代理工作区、工具和身份。",
@@ -63,6 +64,7 @@ export const zh_CN: TranslationMap = {
     config: "安全地编辑 ~/.openclaw/openclaw.json。",
     debug: "网关快照、事件和手动 RPC 调用。",
     logs: "网关文件日志的实时追踪。",
+    "admin-data": "万鼎价格库与产品映射表（需管理员密码）。",
   },
   overview: {
     health: {

@@ -336,6 +336,8 @@ export type AppViewState = {
   logsLimit: number;
   logsMaxBytes: number;
   logsAtBottom: boolean;
+  /** 万鼎价格库 / 产品映射表管理（/admin-data） */
+  adminData: import("./controllers/admin-data.types.ts").AdminDataState;
   client: GatewayBrowserClient | null;
   refreshSessionsAfterChat: Set<string>;
   connect: () => void;

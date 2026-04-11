@@ -32,6 +32,47 @@ _MAPPING_DF_PATH: Optional[str] = None
 _MAPPING_CACHE_LOCK = threading.Lock()
 
 
+def invalidate_mapping_cache() -> None:
+    """清除映射表 DataFrame 缓存（admin 更新 Neon 后调用）。"""
+    global _MAPPING_DF_CACHE, _MAPPING_DF_PATH
+    with _MAPPING_CACHE_LOCK:
+        _MAPPING_DF_CACHE = None
+        _MAPPING_DF_PATH = None
+    logger.info("mapping_table_matcher: cache cleared")
+
+
+def _try_load_mapping_from_db() -> Optional[pd.DataFrame]:
+    """从 Neon 构建映射表 DataFrame；无数据则返回 None。"""
+    try:
+        from backend.tools.admin.cache import get_product_mapping_rows
+
+        rows = get_product_mapping_rows()
+        if not rows:
+            return None
+        records: List[dict] = []
+        for r in rows:
+            field_name = str(r.get("inquiry_name") or "").strip()
+            spec = str(r.get("spec") or "").strip()
+            code = str(r.get("product_code") or "").strip()
+            matched_name = str(r.get("quotation_name") or "").strip()
+            if not code:
+                continue
+            search_text = f"{field_name} {spec}".strip() if spec else field_name
+            records.append({"search_text": search_text, "code": code, "matched_name": matched_name})
+        if not records:
+            return None
+        df = pd.DataFrame(records)
+        df["norm_text"] = df["search_text"].apply(_normalize)
+        df["spec_tokens"] = df["search_text"].apply(
+            lambda t: frozenset(tok for tok in _split_tokens(t) if re.search(r"\d", tok))
+        )
+        logger.info("mapping_table_matcher: loaded %d rows from DB", len(df))
+        return df
+    except Exception as e:
+        logger.warning("_try_load_mapping_from_db 失败，将 fallback 读 xlsx: %s", e)
+        return None
+
+
 def load_mapping_df(path: str | Path) -> pd.DataFrame:
     """
     加载映射表 Excel，Sheet1，第 1 行为表头，数据从第 2 行起。
@@ -47,6 +88,12 @@ def load_mapping_df(path: str | Path) -> pd.DataFrame:
     with _MAPPING_CACHE_LOCK:
         # double-checked locking
         if _MAPPING_DF_CACHE is not None and _MAPPING_DF_PATH == path_str:
+            return _MAPPING_DF_CACHE
+
+        db_df = _try_load_mapping_from_db()
+        if db_df is not None and not db_df.empty:
+            _MAPPING_DF_CACHE = db_df
+            _MAPPING_DF_PATH = path_str
             return _MAPPING_DF_CACHE
 
         try:

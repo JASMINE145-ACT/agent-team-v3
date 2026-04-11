@@ -219,6 +219,10 @@ export type ToolRenderPayload = {
   chosen_index: number;
   match_source: string;
   selection_reasoning: string;
+  batch_mode?: boolean;
+  resolved_items?: Array<Record<string, unknown>>;
+  pending_items?: Array<Record<string, unknown>>;
+  unmatched_items?: Array<Record<string, unknown>>;
 };
 
 export type ToolRenderItem = {
@@ -262,6 +266,10 @@ export function handleToolRenderEvent(host: ToolRenderHost, payload: AgentEventP
     chosen_index: chosenIndex,
     match_source: matchSource,
     selection_reasoning: typeof data.selection_reasoning === "string" ? data.selection_reasoning : "",
+    batch_mode: Boolean(data.batch_mode),
+    resolved_items: Array.isArray(data.resolved_items) ? (data.resolved_items as Array<Record<string, unknown>>) : [],
+    pending_items: Array.isArray(data.pending_items) ? (data.pending_items as Array<Record<string, unknown>>) : [],
+    unmatched_items: Array.isArray(data.unmatched_items) ? (data.unmatched_items as Array<Record<string, unknown>>) : [],
   };
   host.toolRenderSeq = payload.seq;
   if (!Array.isArray(host.toolRenderItems)) {

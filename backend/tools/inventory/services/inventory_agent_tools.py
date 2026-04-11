@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from typing import Any, Optional
 
@@ -25,6 +26,71 @@ _sql_agent_lock = threading.Lock()
 _resolver: Optional[Any] = None
 _resolver_failed = False
 _resolver_lock = threading.Lock()
+
+
+def _split_batch_keywords(raw_keywords: str) -> list[str]:
+    """
+    将用户一次输入中的多产品关键词拆分为列表（保持输入顺序）。
+    仅按明确分隔符（换行、分号、顿号/逗号）切分；不按空格切分，避免把单产品词组误拆。
+    例：
+      "直接50\n三通50\n水龙头4分" → ["直接50", "三通50", "水龙头4分"]
+      "直接50 三通50"             → []  （单产品，不切）
+    """
+    text = str(raw_keywords or "").strip()
+    if not text:
+        return []
+    parts = [p.strip() for p in re.split(r"[\n\r;；,，、]+", text) if p and p.strip()]
+    if len(parts) >= 2:
+        return parts
+    return []
+
+
+def _build_batch_formatted_response(
+    keywords_list: list[str],
+    resolved_items: list[dict[str, Any]],
+    pending_items: list[dict[str, Any]],
+    unmatched_items: list[dict[str, Any]],
+) -> str:
+    lines: list[str] = []
+    lines.append(f"**批量询价结果**（共 {len(keywords_list)} 项）")
+    lines.append("")
+    lines.append("| 序号 | 查询关键词 | 状态 | 产品编号(code) | 产品名称 | 来源 | 单价（B级代理） |")
+    lines.append("|---|---|---|---|---|---|---|")
+
+    resolved_by_idx = {int(x.get("input_index", -1)): x for x in resolved_items}
+    pending_by_idx = {int(x.get("input_index", -1)): x for x in pending_items}
+    unmatched_by_idx = {int(x.get("input_index", -1)): x for x in unmatched_items}
+
+    for i, kw in enumerate(keywords_list):
+        if i in resolved_by_idx:
+            r = resolved_by_idx[i]
+            chosen = r.get("chosen") or {}
+            lines.append(
+                f"| {i + 1} | {kw} | matched | {chosen.get('code', '—') or '—'} | "
+                f"{chosen.get('matched_name', '—') or '—'} | {r.get('match_source', '—') or '—'} | "
+                f"{chosen.get('unit_price', '—')} |"
+            )
+        elif i in pending_by_idx:
+            p = pending_by_idx[i]
+            opts = p.get("options") or []
+            top = opts[0] if isinstance(opts, list) and opts else {}
+            lines.append(
+                f"| {i + 1} | {kw} | needs_selection | {top.get('code', '—') or '—'} | "
+                f"{top.get('matched_name', '待确认') or '待确认'} | {p.get('match_source', '—') or '—'} | "
+                f"{top.get('unit_price', '—')} |"
+            )
+        else:
+            _ = unmatched_by_idx.get(i, {})
+            lines.append(f"| {i + 1} | {kw} | unmatched | — | — | — | — |")
+
+    if pending_items:
+        lines.append("")
+        lines.append("**待确认项**")
+        for p in pending_items:
+            idx = int(p.get("input_index", -1))
+            kw = p.get("keywords", "")
+            lines.append(f"- 第 {idx + 1} 项「{kw}」需要确认，当前不自动选型。")
+    return "\n".join(lines)
 
 
 def _build_formatted_response(payload: dict[str, Any], keywords: str = "") -> str:
@@ -228,6 +294,15 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
             return {"success": True, "result": "请提供 keywords（产品名+规格）。"}
         customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
         show_all = bool(arguments.get("show_all_candidates", False))
+        if not show_all:
+            batch_keywords = _split_batch_keywords(keywords)
+            min_batch = max(2, int(getattr(config, "MATCH_QUOTATION_BATCH_MIN_ITEMS", 3) or 3))
+            if len(batch_keywords) >= min_batch:
+                return _execute_match_quotation_batch(
+                    {"keywords_list": batch_keywords, "customer_level": customer_level},
+                    push_event=push_event,
+                    ctx=arguments if isinstance(arguments, dict) else None,
+                )
 
         candidates = match_quotation_union(keywords, customer_level=customer_level)
         if not candidates:
@@ -912,27 +987,27 @@ def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, c
     - 入参：keywords_list（产品关键词列表，每项为一个独立产品）、可选 customer_level。
     - 返回：{ success, result(紧凑汇总), items[{ keywords, status, payload }] }。
     """
-    _push = push_event if callable(push_event) else None
-
     keywords_list = arguments.get("keywords_list") or []
     if not isinstance(keywords_list, list) or not keywords_list:
         return {"success": True, "result": "请提供 keywords_list（至少一个产品关键词）。"}
     customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
 
     items_out: list[dict[str, Any]] = []
-    summary_lines: list[str] = []
+    resolved_items: list[dict[str, Any]] = []
+    pending_items: list[dict[str, Any]] = []
+    unmatched_items: list[dict[str, Any]] = []
 
     for idx, kw_raw in enumerate(keywords_list):
         kw = (str(kw_raw or "")).strip()
         if not kw:
-            items_out.append({"keywords": kw, "status": "skipped"})
+            items_out.append({"keywords": kw, "input_index": idx, "status": "skipped"})
             continue
 
         single_args = {"keywords": kw, "customer_level": customer_level}
         result = _execute_match_quotation(single_args, push_event=None)
         obs_str = result.get("result") or ""
         status = "error" if not result.get("success") else "ok"
-        item_entry: dict[str, Any] = {"keywords": kw, "status": status}
+        item_entry: dict[str, Any] = {"keywords": kw, "input_index": idx, "status": status}
 
         try:
             payload = json.loads(obs_str)
@@ -942,69 +1017,64 @@ def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, c
         if payload.get("single"):
             raw_chosen = payload.get("chosen") or {}
             safe_chosen = {k: raw_chosen.get(k) for k in _KNOWN_CHOSEN_FIELDS if k in raw_chosen}
-            chosen_code = (raw_chosen.get("code") or "").strip()
-            render_key = f"{kw}|{chosen_code}" if chosen_code else ""
-            if _push:
-                should_push = True
-                if isinstance(ctx, dict):
-                    pushed_keys = ctx.get("_pushed_render_keys")
-                    if not isinstance(pushed_keys, set):
-                        # compat: migrate legacy _pushed_codes -> _pushed_render_keys
-                        legacy_codes = ctx.get("_pushed_codes")
-                        pushed_keys = set()
-                        if isinstance(legacy_codes, set):
-                            for c in legacy_codes:
-                                c_str = str(c or "").strip()
-                                if c_str:
-                                    pushed_keys.add(f"|{c_str}")
-                        ctx["_pushed_render_keys"] = pushed_keys
-                    if render_key and render_key in pushed_keys:
-                        should_push = False
-                    elif render_key:
-                        pushed_keys.add(render_key)
-                if should_push:
-                    _push("tool_render", {
-                        "formatted_response": payload.get("formatted_response", ""),
-                        "keywords": kw,
-                        "chosen": safe_chosen,
-                        "chosen_index": payload.get("chosen_index"),
-                        "match_source": payload.get("match_source", ""),
-                        "selection_reasoning": payload.get("selection_reasoning", ""),
-                    })
-            chosen = payload.get("chosen") or {}
             item_entry["status"] = "matched"
             item_entry["chosen"] = safe_chosen
             item_entry["chosen_index"] = payload.get("chosen_index")
-            summary_lines.append(
-                f"「{kw}」→ code={chosen.get('code', '')}「{chosen.get('matched_name', '')}」"
-                f" B级价={chosen.get('unit_price', '')}元"
-            )
+            item_entry["match_source"] = payload.get("match_source", "")
+            resolved_items.append(item_entry)
         elif payload.get("unmatched"):
             item_entry["status"] = "unmatched"
-            summary_lines.append(f"「{kw}」→ 未匹配")
+            unmatched_items.append(item_entry)
         elif payload.get("needs_selection"):
             item_entry["status"] = "needs_selection"
-            summary_lines.append(f"「{kw}」→ 需人工选择（{len(payload.get('candidates') or [])}条候选）")
-        elif not result.get("success"):
-            summary_lines.append(f"「{kw}」→ 查询失败")
+            item_entry["options"] = payload.get("candidates") or []
+            item_entry["match_source"] = payload.get("match_source", "")
+            pending_items.append(item_entry)
         else:
-            summary_lines.append(f"「{kw}」→ {obs_str[:80]}")
+            item_entry["status"] = "unmatched"
+            unmatched_items.append(item_entry)
 
         item_entry["payload"] = payload
         items_out.append(item_entry)
 
     n = len(keywords_list)
     matched_count = sum(1 for it in items_out if it.get("status") == "matched")
+    pending_count = sum(1 for it in items_out if it.get("status") == "needs_selection")
+    unmatched_count = sum(1 for it in items_out if it.get("status") == "unmatched")
+    sorted_resolved = sorted(resolved_items, key=lambda x: int(x.get("input_index", 0)))
+    sorted_pending = sorted(pending_items, key=lambda x: int(x.get("input_index", 0)))
+    sorted_unmatched = sorted(unmatched_items, key=lambda x: int(x.get("input_index", 0)))
+    formatted = _build_batch_formatted_response(keywords_list, sorted_resolved, sorted_pending, sorted_unmatched)
     compact = (
-        f"[已渲染到前端] 批量询价 {n} 个产品，已匹配 {matched_count} 个（所有产品已完整查询，"
-        f"**禁止**再次调用 match_quotation 查询列表中任何产品）：\n"
-        + "\n".join(summary_lines)
-        + "\n如用户追问可直接回答，无需再次查询。"
+        f"[已渲染到前端] 批量询价 {n} 个产品：matched={matched_count}, "
+        f"pending={pending_count}, unmatched={unmatched_count}。已产出汇总卡片，禁止逐项重复查询。"
     )
+
+    def _strip_payload(items: list[dict]) -> list[dict]:
+        """Strip the internal `payload` field to prevent serialization issues."""
+        return [{k: v for k, v in it.items() if k != "payload"} for it in items]
+
+    response_payload = {
+        "batch_mode": True,
+        "keywords_count": n,
+        "matched_count": matched_count,
+        "pending_count": pending_count,
+        "unmatched_count": unmatched_count,
+        "resolved_items": _strip_payload(sorted_resolved),
+        "pending_items": _strip_payload(sorted_pending),
+        "unmatched_items": _strip_payload(sorted_unmatched),
+        "formatted_response": formatted,
+        "batch_compact": compact,
+    }
+    try:
+        result_json = json.dumps(response_payload, ensure_ascii=False)
+    except Exception as e:
+        logger.warning("batch json.dumps failed, falling back to compact-only: %s", e)
+        result_json = compact
     return {
         "success": True,
-        "result": compact,
-        "items": items_out,
+        "result": result_json,
+        "items": [{k: v for k, v in it.items() if k != "payload"} for it in items_out],
     }
 
 

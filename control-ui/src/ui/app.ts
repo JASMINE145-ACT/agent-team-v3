@@ -28,6 +28,7 @@ import {
   handleFirstUpdated,
   handleUpdated,
 } from "./app-lifecycle.ts";
+import { initialAdminDataState } from "./controllers/admin-data.ts";
 import { renderApp } from "./app-render.ts";
 import {
   exportLogs as exportLogsInternal,
@@ -465,6 +466,7 @@ export class OpenClawApp extends LitElement {
   @state() logsLimit = 500;
   @state() logsMaxBytes = 250_000;
   @state() logsAtBottom = true;
+  @state() adminData = initialAdminDataState();
 
   client: GatewayBrowserClient | null = null;
   private chatScrollFrame: number | null = null;

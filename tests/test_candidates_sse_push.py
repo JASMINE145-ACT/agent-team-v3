@@ -25,6 +25,66 @@ def _make_llm_result(code="8020020755", name="直通PVC", reasoning="该产品�
 
 
 class TestCandidatesSSEPush:
+    def test_auto_switches_to_batch_when_keywords_count_reaches_threshold(self):
+        from backend.tools.inventory.services.inventory_agent_tools import _execute_match_quotation
+
+        with patch(
+            "backend.tools.inventory.services.inventory_agent_tools._execute_match_quotation_batch",
+            return_value={"success": True, "result": "BATCH_CALLED"},
+        ) as mock_batch:
+            out = _execute_match_quotation({"keywords": "直接50\n三通50\n弯头50", "customer_level": "B"})
+        assert out.get("success") is True
+        assert out.get("result") == "BATCH_CALLED"
+        assert mock_batch.called
+
+    def test_match_quotation_batch_response_shape_and_ordering(self):
+        import json
+        from backend.tools.inventory.services.inventory_agent_tools import _execute_match_quotation_batch
+
+        def _fake_single(args, push_event=None):
+            kw = args.get("keywords")
+            if kw == "A":
+                return {
+                    "success": True,
+                    "result": json.dumps(
+                        {
+                            "single": True,
+                            "chosen": {"code": "C-A", "matched_name": "Name-A", "unit_price": 10, "source": "共同"},
+                            "chosen_index": 1,
+                            "match_source": "共同",
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            if kw == "B":
+                return {
+                    "success": True,
+                    "result": json.dumps(
+                        {
+                            "needs_selection": True,
+                            "candidates": [{"code": "C-B1", "matched_name": "Name-B1", "unit_price": 20}],
+                            "match_source": "历史报价",
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            return {"success": True, "result": json.dumps({"unmatched": True}, ensure_ascii=False)}
+
+        with patch(
+            "backend.tools.inventory.services.inventory_agent_tools._execute_match_quotation",
+            side_effect=_fake_single,
+        ):
+            out = _execute_match_quotation_batch({"keywords_list": ["A", "B", "C"], "customer_level": "B"})
+        payload = json.loads(out["result"])
+        assert payload["batch_mode"] is True
+        assert payload["matched_count"] == 1
+        assert payload["pending_count"] == 1
+        assert payload["unmatched_count"] == 1
+        assert payload["resolved_items"][0]["input_index"] == 0
+        assert payload["pending_items"][0]["input_index"] == 1
+        assert payload["unmatched_items"][0]["input_index"] == 2
+        assert "批量询价结果" in payload["formatted_response"]
+
     def test_push_event_tool_candidates_called(self):
         """push_event must be called with 'tool_candidates' after match_quotation_union."""
         events = []

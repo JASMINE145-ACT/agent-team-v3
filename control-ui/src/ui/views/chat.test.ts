@@ -101,6 +101,32 @@ describe("chat view", () => {
     expect(container.textContent).toContain("查询结果");
   });
 
+  it("renders batch summary table ordered by input_index", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          toolRenderData: {
+            formatted_response: "fallback",
+            chosen: {},
+            chosen_index: 0,
+            match_source: "batch",
+            selection_reasoning: "",
+            batch_mode: true,
+            resolved_items: [{ input_index: 2, chosen: { code: "C3", matched_name: "第三项" } }],
+            pending_items: [{ input_index: 0, options: [{ code: "C1", matched_name: "第一项候选" }] }],
+            unmatched_items: [{ input_index: 1 }],
+          },
+          toolRenderSeq: 3,
+        }),
+      ),
+      container,
+    );
+    const text = container.textContent ?? "";
+    expect(text).toContain("批处理总表");
+    expect(text.indexOf("第一项候选")).toBeLessThan(text.indexOf("第三项"));
+  });
+
   it("replaces marker messages with cards in chronological order", () => {
     const container = document.createElement("div");
     render(

@@ -654,8 +654,68 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
     return false;
   };
 
+  const getInputIndex = (entry: Record<string, unknown>): number => {
+    const raw = entry.input_index;
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      return raw;
+    }
+    if (typeof raw === "string") {
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : 0;
+    }
+    return 0;
+  };
+
+  const buildBatchSummaryMarkdown = (payload: ToolRenderPayload): string => {
+    const resolved = (Array.isArray(payload.resolved_items) ? payload.resolved_items : [])
+      .slice()
+      .sort((a, b) => getInputIndex(a) - getInputIndex(b));
+    const pending = (Array.isArray(payload.pending_items) ? payload.pending_items : [])
+      .slice()
+      .sort((a, b) => getInputIndex(a) - getInputIndex(b));
+    const unmatched = (Array.isArray(payload.unmatched_items) ? payload.unmatched_items : [])
+      .slice()
+      .sort((a, b) => getInputIndex(a) - getInputIndex(b));
+    const lines: string[] = [];
+    lines.push("**批处理总表**");
+    lines.push("");
+    lines.push("| 序号 | 状态 | 产品编号(code) | 产品名称 |");
+    lines.push("|---|---|---|---|");
+    const rows: Array<{ idx: number; line: string }> = [];
+    for (const row of resolved) {
+      const chosen = (row.chosen ?? {}) as Record<string, unknown>;
+      const idx = getInputIndex(row);
+      rows.push({
+        idx,
+        line: `| ${idx + 1} | matched | ${String(chosen.code ?? "—")} | ${String(chosen.matched_name ?? "—")} |`,
+      });
+    }
+    for (const row of pending) {
+      const options = Array.isArray(row.options) ? (row.options as Array<Record<string, unknown>>) : [];
+      const top = options[0] ?? {};
+      const idx = getInputIndex(row);
+      rows.push({
+        idx,
+        line: `| ${idx + 1} | needs_selection | ${String(top.code ?? "—")} | ${String(top.matched_name ?? "待确认")} |`,
+      });
+    }
+    for (const row of unmatched) {
+      const idx = getInputIndex(row);
+      rows.push({ idx, line: `| ${idx + 1} | unmatched | — | — |` });
+    }
+    rows.sort((a, b) => a.idx - b.idx);
+    for (const row of rows) {
+      lines.push(row.line);
+    }
+    return lines.join("\n");
+  };
+
   const pushCardFromItem = (card: ToolRenderItem, fallbackTimestamp: number, fallbackIndex: number) => {
-    const rendered = card.payload.formatted_response?.trim() ?? "";
+    const rendered = (
+      card.payload.batch_mode
+        ? buildBatchSummaryMarkdown(card.payload)
+        : (card.payload.formatted_response?.trim() ?? "")
+    ).trim();
     if (!rendered) {
       return;
     }

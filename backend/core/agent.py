@@ -89,11 +89,18 @@ _MAX_STEPS_HINT = (
 
 # Rework 意图检测
 _REWORK_KEYWORDS = ["错了", "不对", "不是这个", "不是这个", "重新选", "换一个", "不对，是", "不对，应该是", "选另一个", "换一下"]
+_INVENTORY_INTENT_KEYWORDS = ["库存", "可售", "有多少", "还有吗", "有没有货", "还有多少"]
 
 
 def _detect_rework_intent(user_input: str) -> bool:
     """检测用户是否在表达"报价/选型错误"意图，触发 rework 流程。"""
     return any(kw in user_input for kw in _REWORK_KEYWORDS)
+
+
+def _detect_inventory_intent(user_input: str) -> bool:
+    """检测用户是否明确在查询库存意图。"""
+    text = str(user_input or "")
+    return any(kw in text for kw in _INVENTORY_INTENT_KEYWORDS)
 
 
 def _should_use_anthropic_messages_api(base_url: str) -> bool:
@@ -334,6 +341,7 @@ class CoreAgent:
         tool_obs_cache: Dict[str, str] = {}
         last_profit_batch_obs: Optional[str] = None
         last_profit_batch_items: int = 0
+        inventory_intent = _detect_inventory_intent(user_input)
 
         try:
             from backend.config import Config
@@ -755,11 +763,13 @@ class CoreAgent:
                             logger.debug("on_event callback failed", exc_info=True)
 
                 # 报价类：无论新执行还是 tool_obs_cache 命中，只要 observation 以渲染标记开头就强制收尾。
-                # 缓存命中分支此前未设置 force_final_answer，会导致多走一步 LLM、重复输出整表。
+                # 但库存意图需继续链路（match_quotation -> get_inventory_by_code），因此仅非库存场景对
+                # match_quotation 触发强制收尾；match_quotation_batch 维持原行为。
                 if name in ("match_quotation", "match_quotation_batch") and isinstance(obs, str):
                     lead = obs.lstrip("\ufeff \t\r\n")
                     if lead.startswith(_RENDERED_MARKER_PREFIX):
-                        force_final_answer = obs
+                        if name == "match_quotation_batch" or not inventory_intent:
+                            force_final_answer = obs
 
                 trace.append({"step": step + 1, "type": "observation", "content": obs})
                 messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": obs})

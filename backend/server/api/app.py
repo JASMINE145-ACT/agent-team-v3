@@ -20,6 +20,7 @@ from starlette.responses import FileResponse
 
 from backend.config import Config, get_primary_react_llm_credentials
 from backend.server.api.routes import router
+from backend.server.api.routes_admin import router as admin_router
 from backend.server.api.routes_wecom import router as wecom_router
 from backend.server.gateway.gateway import router as ws_router
 from backend.reports.service import start_report_service, stop_report_service
@@ -35,6 +36,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 app.include_router(router)
 app.include_router(ws_router)
 app.include_router(wecom_router)
+app.include_router(admin_router)
 
 if Config.DEBUG:
     from backend.server.api.routes_debug import router as debug_router
@@ -194,6 +196,12 @@ async def _warmup(agent=None) -> None:
 @app.on_event("startup")
 async def startup_event():
     Config.validate()
+    try:
+        from backend.tools.admin.repository import setup_tables
+
+        setup_tables()
+    except Exception as e:
+        logger.warning("Admin 数据表初始化跳过: %s", e)
     # 注册统一工具层中的后端工具（库存 / 无货登记 / 行情告警）
     try:
         from backend.tools.tool_registry import register_builtin_tools

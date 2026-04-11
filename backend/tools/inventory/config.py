@@ -168,6 +168,8 @@ class InventoryConfig:
     # - WORK_MATCH_MAX_WORKERS: Work 匹配阶段每文件并行行数上限（默认 5）
     WORK_SINGLE_CAND_USE_LLM: bool = os.environ.get("WORK_SINGLE_CAND_USE_LLM", "0").strip().lower() in ("1", "true", "yes")
     WORK_MATCH_MAX_WORKERS: int = int(os.environ.get("WORK_MATCH_MAX_WORKERS", "5"))
+    # 聊天多产品询价阈值：当一条消息可拆出 >= N 个产品关键词时，优先走 match_quotation_batch
+    MATCH_QUOTATION_BATCH_MIN_ITEMS: int = int(os.environ.get("MATCH_QUOTATION_BATCH_MIN_ITEMS", "3"))
 
 
 # 全局配置实例

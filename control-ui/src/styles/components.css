@@ -2104,3 +2104,207 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- Data admin (price library / mapping) ---------- */
+.admin-panel {
+  padding: 16px 20px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.admin-login {
+  max-width: 380px;
+  margin: 48px auto;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-login__title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.admin-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.admin-subtabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.admin-subtab {
+  padding: 8px 18px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+}
+
+.admin-subtab.is-active {
+  color: var(--accent, #6b8cff);
+  border-bottom-color: var(--accent, #6b8cff);
+}
+
+.admin-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-input {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface, var(--card));
+  color: var(--text);
+  font-size: 0.9rem;
+  min-width: 120px;
+}
+
+.admin-input--grow {
+  flex: 1;
+  min-width: 180px;
+}
+
+.admin-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.admin-btn--primary {
+  background: var(--accent, #6b8cff);
+  color: #fff;
+  border-color: transparent;
+}
+
+.admin-btn--ghost {
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.admin-btn--sm {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
+.admin-btn--danger {
+  background: color-mix(in srgb, #f87171 25%, transparent);
+  border-color: #f87171;
+  color: #fecaca;
+}
+
+.admin-upload input[type="file"] {
+  display: none;
+}
+
+.admin-upload span {
+  display: inline-block;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.admin-table th {
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.admin-cell {
+  width: 100%;
+  min-width: 72px;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: color-mix(in srgb, var(--card) 80%, transparent);
+  color: var(--text);
+  font-size: inherit;
+}
+
+.admin-cell:focus {
+  border-color: var(--accent, #6b8cff);
+  outline: none;
+}
+
+.admin-cell--num {
+  max-width: 88px;
+  text-align: right;
+}
+
+.admin-actions {
+  white-space: nowrap;
+  display: flex;
+  gap: 4px;
+}
+
+.admin-err {
+  color: #f87171;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.admin-muted {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0;
+}

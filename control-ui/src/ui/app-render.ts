@@ -54,6 +54,23 @@ import {
   updateSkillEdit,
   updateSkillEnabled,
 } from "./controllers/skills.ts";
+import {
+  addMappingRow,
+  addPriceRow,
+  adminLogin,
+  adminLogout,
+  deleteMappingRow,
+  deletePriceRow,
+  loadPriceLibrary,
+  loadProductMapping,
+  patchMappingItem,
+  patchPriceItem,
+  saveMappingRow,
+  savePriceRow,
+  uploadPriceLibrary,
+  uploadProductMapping,
+} from "./controllers/admin-data.ts";
+import type { AdminDataHost } from "./controllers/admin-data.types.ts";
 import { loadReportDetail, loadReports, reformatRecord, runReportTask, saveReportTaskConfig } from "./controllers/reports.ts";
 import { icons } from "./icons.ts";
 import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
@@ -70,6 +87,7 @@ import { renderProcurement } from "./views/procurement.ts";
 import { renderDebug } from "./views/debug.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
+import { renderAdminData } from "./views/admin-data.ts";
 import { renderLogs } from "./views/logs.ts";
 import { renderOosDashboard, renderShortageBlock } from "./views/oos-dashboard.ts";
 import { renderNodes } from "./views/nodes.ts";
@@ -1169,6 +1187,70 @@ export function renderApp(state: AppViewState) {
                 onSave: () => saveConfig(state),
                 onApply: () => applyConfig(state),
                 onUpdate: () => runUpdate(state),
+              })
+            : nothing
+        }
+
+        ${
+          state.tab === "admin-data"
+            ? renderAdminData({
+                host: { basePath: state.basePath ?? "", adminData: state.adminData },
+                onLogin: async (password) => {
+                  const h = state as unknown as AdminDataHost;
+                  await adminLogin(h, password);
+                  if (state.adminData.token) {
+                    await loadPriceLibrary(h);
+                    await loadProductMapping(h);
+                  }
+                },
+                onLogout: () => {
+                  adminLogout(state as unknown as AdminDataHost);
+                },
+                onSubTab: (tab) => {
+                  state.adminData = { ...state.adminData, activeSubTab: tab };
+                },
+                onPriceQueryInput: (q) => {
+                  state.adminData = { ...state.adminData, priceQuery: q };
+                },
+                onPriceQueryApply: async () => {
+                  state.adminData = { ...state.adminData, pricePage: 1 };
+                  await loadPriceLibrary(state as unknown as AdminDataHost);
+                },
+                onPriceRefresh: () => loadPriceLibrary(state as unknown as AdminDataHost),
+                onPriceFieldChange: (index, patch) =>
+                  patchPriceItem(state as unknown as AdminDataHost, index, patch),
+                onPriceSave: async (index) => {
+                  const row = state.adminData.priceItems[index];
+                  if (row) await savePriceRow(state as unknown as AdminDataHost, row);
+                },
+                onPriceDelete: async (id) => {
+                  await deletePriceRow(state as unknown as AdminDataHost, id);
+                },
+                onPriceUpload: async (file) => {
+                  await uploadPriceLibrary(state as unknown as AdminDataHost, file);
+                },
+                onPriceAddRow: () => addPriceRow(state as unknown as AdminDataHost),
+                onMappingQueryInput: (q) => {
+                  state.adminData = { ...state.adminData, mappingQuery: q };
+                },
+                onMappingQueryApply: async () => {
+                  state.adminData = { ...state.adminData, mappingPage: 1 };
+                  await loadProductMapping(state as unknown as AdminDataHost);
+                },
+                onMappingRefresh: () => loadProductMapping(state as unknown as AdminDataHost),
+                onMappingFieldChange: (index, patch) =>
+                  patchMappingItem(state as unknown as AdminDataHost, index, patch),
+                onMappingSave: async (index) => {
+                  const row = state.adminData.mappingItems[index];
+                  if (row) await saveMappingRow(state as unknown as AdminDataHost, row);
+                },
+                onMappingDelete: async (id) => {
+                  await deleteMappingRow(state as unknown as AdminDataHost, id);
+                },
+                onMappingUpload: async (file) => {
+                  await uploadProductMapping(state as unknown as AdminDataHost, file);
+                },
+                onMappingAddRow: () => addMappingRow(state as unknown as AdminDataHost),
               })
             : nothing
         }

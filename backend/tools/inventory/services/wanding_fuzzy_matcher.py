@@ -697,20 +697,91 @@ def load_wanding_df(
         return pd.DataFrame()
 
 
+def invalidate_wanding_cache() -> None:
+    """清除万鼎 DataFrame 缓存（admin 更新 Neon 数据后调用）。"""
+    global _full_df_cache
+    with _df_cache_lock:
+        _df_cache.clear()
+    with _full_df_lock:
+        _full_df_cache = None
+    logger.info("wanding_fuzzy_matcher: DataFrame caches cleared")
+
+
+def _level_to_db_price_field(level: str) -> Optional[str]:
+    """A/B/C/D 档 → DB 列名；出厂/采购/E 档等返回 None（走本地 xlsx）。"""
+    lu = level.upper()
+    if "FACTORY" in lu or "PURCHASE" in lu:
+        return None
+    if lu.startswith("E_") or lu == "E":
+        return None
+    if lu.startswith("A_") or lu == "A":
+        return "price_a"
+    if lu.startswith("B_") or lu == "B":
+        return "price_b"
+    if lu.startswith("C_") or lu == "C":
+        return "price_c"
+    if lu.startswith("D_") or lu in ("D", "D_LOW", "D_NOADJ", "D_WHOLESALE"):
+        return "price_d"
+    return None
+
+
+def _try_load_from_db(level: str) -> Optional[pd.DataFrame]:
+    """从 Neon admin 缓存行构建 DataFrame；无数据或不可用则返回 None（fallback xlsx）。"""
+    try:
+        from backend.tools.admin.cache import get_price_library_rows
+
+        rows = get_price_library_rows()
+        if not rows:
+            return None
+        field = _level_to_db_price_field(level)
+        if field is None:
+            return None
+        records = []
+        for r in rows:
+            up = r.get(field)
+            try:
+                up_f = float(up) if up is not None else 0.0
+            except (TypeError, ValueError):
+                up_f = 0.0
+            records.append(
+                {
+                    "Material": str(r.get("material") or "").strip(),
+                    "Describrition": str(r.get("description") or "").strip(),
+                    "unit_price": up_f,
+                }
+            )
+        df = pd.DataFrame(records)
+        if df.empty:
+            return None
+        df["norm_text"] = df["Describrition"].apply(_normalize)
+        df["spec_tokens"] = df["Describrition"].apply(
+            lambda t: frozenset(tok for tok in _split_tokens(t) if re.search(r"\d", tok))
+        )
+        logger.info("wanding_fuzzy_matcher: loaded %d rows from DB (level=%s)", len(df), level)
+        return df
+    except Exception as e:
+        logger.warning("_try_load_from_db 失败，将 fallback 读 xlsx: %s", e)
+        return None
+
+
 # 缓存 DataFrame，按 path:level 隔离
 _df_cache: dict[str, pd.DataFrame] = {}
 _df_cache_lock = threading.Lock()
 
 
 def _get_cached_df(path, customer_level: str) -> pd.DataFrame:
-    """线程安全地获取（或加载）指定 path+level 的 DataFrame。"""
+    """线程安全地获取 DataFrame。优先 Neon（有数据时），否则读本地 xlsx。"""
     level = _normalize_price_level(customer_level)
     cache_key = f"{path}:{level}"
     if cache_key in _df_cache:
         return _df_cache[cache_key]
     with _df_cache_lock:
         if cache_key not in _df_cache:
-            _df_cache[cache_key] = load_wanding_df(path, customer_level=level)
+            df_db = _try_load_from_db(level)
+            if df_db is not None and not df_db.empty:
+                _df_cache[cache_key] = df_db
+            else:
+                _df_cache[cache_key] = load_wanding_df(path, customer_level=level)
     return _df_cache[cache_key]
 
 

@@ -520,3 +520,64 @@ Live-probed `/api/sales-invoice/list.do`: `filter.transDate.startDate` / `endDat
 ### Follow-up (same day)
 
 - Sidebar **周报** tab had only Refresh; added per-task **立即运行** wired to `POST /api/reports/tasks/{task_key}/run` (`control-ui` `reports-tab.ts` + `app-render.ts`). `npm run build` OK.
+
+## Session 21: 2026-04-10 — Admin 价格库 follow-up（上传限制、删除错误、HTTP 语义）
+
+**Date**: 2026-04-10
+
+### Summary
+
+Completed review follow-ups: Excel uploads use `Config.MAX_UPLOAD_MB` with chunked read + 413; `deletePriceRow` / `deleteMappingRow` surface non-401 errors. Repository update/delete now return `Optional[bool]` (None = DB unavailable or error, False = not found, True = ok); admin routes map None → 503, False → 404.
+
+### Main Changes
+
+- `backend/server/api/routes_admin.py` — `_read_upload_limited` chunked; upload endpoints unchanged behavior otherwise.
+- `backend/tools/admin/repository.py` — tri-state return on update/delete four functions.
+- `control-ui/src/ui/controllers/admin-data.ts` — delete handlers set `priceError` / `mappingError` on failure.
+
+### Testing
+
+- [OK] `py -3 -m pytest tests/test_smoke.py -q`
+- [OK] `npm run build` (control-ui)
+- [OK] Import `routes_admin`
+
+### Status
+
+[OK] **Completed** (full suite not run; unrelated pre-existing failure in `test_wanding_fuzzy_matcher_units.py`)
+
+## Session 22: 2026-04-10 — Batch quotation mode (>=3 items) end-to-end
+
+**Date**: 2026-04-10
+**Task**: batch-quotation-mode-implementation
+
+### Summary
+
+Implemented the batch quotation mode plan: auto-switch at `>=3` items, consolidated batch payload (`resolved/pending/unmatched` with `input_index`), one SSE summary card, and frontend ordered batch table rendering.
+
+### Main Changes
+
+- Added config threshold in `backend/tools/inventory/config.py`:
+  - `MATCH_QUOTATION_BATCH_MIN_ITEMS` (default `3`).
+- Updated `backend/tools/inventory/services/inventory_agent_tools.py`:
+  - Added multi-keyword splitter for auto batch routing from `match_quotation`.
+  - Extended `_execute_match_quotation_batch` output to include:
+    - `resolved_items[]`, `pending_items[]`, `unmatched_items[]`
+    - per-item `input_index`
+    - backward-compatible `items[]`
+  - Added consolidated `formatted_response` markdown and JSON result payload for extension consumption.
+- Updated `backend/plugins/jagent/extension.py`:
+  - `match_quotation_batch` now pushes a single unified `tool_render` batch summary card.
+  - Returns compact marker summary for LLM continuation without per-item re-querying.
+- Updated frontend tool stream and chat rendering:
+  - `control-ui/src/ui/app-tool-stream.ts`: support batch payload fields.
+  - `control-ui/src/ui/views/chat.ts`: added batch summary rendering branch and global `input_index` ordering.
+
+### Testing
+
+- [OK] `py -m pytest tests/test_candidates_sse_push.py -q` (10 passed)
+- [OK] `npm test -- "src/ui/views/chat.test.ts" -t "renders batch summary table ordered by input_index"` (passed)
+- [OK] `ReadLints` on changed backend/frontend/test files (no lints)
+
+### Status
+
+[OK] **Completed**
