@@ -40,6 +40,13 @@ export const icons = {
       <line x1="10" x2="8" y1="9" y2="9" />
     </svg>
   `,
+  database: html`
+    <svg viewBox="0 0 24 24">
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+      <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
+    </svg>
+  `,
   zap: html`
     <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
   `,

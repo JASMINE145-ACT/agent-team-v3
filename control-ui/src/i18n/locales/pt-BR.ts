@@ -136,6 +136,14 @@ export const pt_BR: TranslationMap = {
         imageItem: "Imagem ({count})",
         remove: "Remover mensagem da fila",
       },
+      candidatesPreview: {
+        query: "Pesquisando: {keywords}",
+        colCode: "Código",
+        colName: "Produto",
+        colPrice: "Preço",
+        more: "…e mais {n}",
+        selecting: "A IA está escolhendo a melhor opção entre {n} candidato(s)…",
+      },
       compose: {
         placeholder: {
           withImages: "Adicione uma mensagem ou cole mais imagens…",

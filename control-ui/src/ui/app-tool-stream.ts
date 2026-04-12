@@ -168,6 +168,7 @@ export function resetToolRender(host: ToolRenderHost) {
   host.toolRenderData = null;
   host.toolRenderSeq = null;
   host.toolRenderItems = [];
+  host.candidatePreviews = [];
 }
 
 export type CompactionStatus = {
@@ -234,11 +235,54 @@ export type ToolRenderItem = {
   payload: ToolRenderPayload;
 };
 
+export type CandidatesPreviewItem = {
+  id: string;
+  runId: string;
+  keywords: string;
+  candidates: Array<{ code: string; matched_name: string; unit_price: number; source?: string }>;
+  match_source: string;
+};
+
 export type ToolRenderHost = ToolStreamHost & {
   toolRenderData?: ToolRenderPayload | null;
   toolRenderSeq?: number | null;
   toolRenderItems?: ToolRenderItem[];
+  candidatePreviews?: CandidatesPreviewItem[];
 };
+
+function popCandidatePreviewForRun(host: ToolRenderHost, runId: string): void {
+  if (!Array.isArray(host.candidatePreviews) || host.candidatePreviews.length === 0) {
+    return;
+  }
+  const idx = host.candidatePreviews.findIndex((p) => p.runId === runId);
+  if (idx === -1) {
+    return;
+  }
+  host.candidatePreviews = [...host.candidatePreviews.slice(0, idx), ...host.candidatePreviews.slice(idx + 1)];
+}
+
+export function handleCandidatesEvent(host: ToolRenderHost, payload: AgentEventPayload): void {
+  const data = payload.data ?? {};
+  const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+  if (candidates.length === 0) {
+    return;
+  }
+
+  if (!Array.isArray(host.candidatePreviews)) {
+    host.candidatePreviews = [];
+  }
+  const counter = host.candidatePreviews.length;
+  host.candidatePreviews = [
+    ...host.candidatePreviews,
+    {
+      id: `${payload.runId}:candidates:${counter}`,
+      runId: payload.runId,
+      keywords: typeof data.keywords === "string" ? data.keywords : "",
+      candidates: candidates as CandidatesPreviewItem["candidates"],
+      match_source: typeof data.match_source === "string" ? data.match_source : "",
+    },
+  ];
+}
 
 export function handleToolRenderEvent(host: ToolRenderHost, payload: AgentEventPayload) {
   const data = payload.data ?? {};
@@ -289,6 +333,7 @@ export function handleToolRenderEvent(host: ToolRenderHost, payload: AgentEventP
     existing.payload = nextItem.payload;
     existing.ts = nextItem.ts;
     existing.sessionKey = nextItem.sessionKey;
+    popCandidatePreviewForRun(host, payload.runId);
     return;
   }
   const dedup = host.toolRenderItems.find(
@@ -301,9 +346,11 @@ export function handleToolRenderEvent(host: ToolRenderHost, payload: AgentEventP
     dedup.ts = nextItem.ts;
     dedup.sessionKey = nextItem.sessionKey;
     dedup.payload = nextItem.payload;
+    popCandidatePreviewForRun(host, payload.runId);
     return;
   }
   host.toolRenderItems.push(nextItem);
+  popCandidatePreviewForRun(host, payload.runId);
 }
 
 export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPayload) {
@@ -314,6 +361,25 @@ export function handleAgentEvent(host: ToolStreamHost, payload?: AgentEventPaylo
   // Handle compaction events
   if (payload.stream === "compaction") {
     handleCompactionEvent(host as CompactionHost, payload);
+    return;
+  }
+
+  // Candidates preview (after fuzzy match, before LLM selection)
+  if (payload.stream === "tool_candidates") {
+    const sessionKey = typeof payload.sessionKey === "string" ? payload.sessionKey : undefined;
+    if (sessionKey && sessionKey !== host.sessionKey) {
+      return;
+    }
+    if (!sessionKey && host.chatRunId && payload.runId !== host.chatRunId) {
+      return;
+    }
+    if (host.chatRunId && payload.runId !== host.chatRunId) {
+      return;
+    }
+    if (!host.chatRunId) {
+      return;
+    }
+    handleCandidatesEvent(host as ToolRenderHost, payload);
     return;
   }
 

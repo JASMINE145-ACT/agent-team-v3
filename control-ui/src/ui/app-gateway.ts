@@ -11,6 +11,7 @@ import {
   resetToolRender,
   resetToolStream,
   type AgentEventPayload,
+  type CandidatesPreviewItem,
   type ToolRenderItem,
   type ToolRenderPayload,
 } from "./app-tool-stream.ts";
@@ -61,6 +62,7 @@ type GatewayHost = {
   toolRenderData: ToolRenderPayload | null;
   toolRenderSeq: number | null;
   toolRenderItems: ToolRenderItem[];
+  candidatePreviews: CandidatesPreviewItem[];
   refreshSessionsAfterChat: Set<string>;
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;

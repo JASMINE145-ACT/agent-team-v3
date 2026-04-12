@@ -188,6 +188,14 @@ export const zh_CN: TranslationMap = {
         imageItem: "图片（{count}）",
         remove: "移除排队消息",
       },
+      candidatesPreview: {
+        query: "正在查询：{keywords}",
+        colCode: "编号",
+        colName: "产品名称",
+        colPrice: "单价",
+        more: "…及 {n} 条更多",
+        selecting: "AI 正在从 {n} 个候选中选择最匹配的产品…",
+      },
       compose: {
         placeholder: {
           withImages: "添加消息或继续粘贴图片…",

@@ -531,4 +531,40 @@ describe("chat view", () => {
     expect(text.indexOf("Q2")).toBeLessThan(text.indexOf("CARD-NEW"));
     expect(text.indexOf("CARD-NEW")).toBeGreaterThan(text.indexOf("Q1"));
   });
+
+  it("renders candidates preview card when candidatePreviews has items", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          candidatePreviews: [
+            {
+              id: "run-1:candidates:0",
+              runId: "run-1",
+              keywords: "直通50",
+              candidates: [
+                { code: "C001", matched_name: "直通PVC DN50", unit_price: 12.5, source: "历史报价" },
+                { code: "C002", matched_name: "直通UPVC DN50", unit_price: 13.0, source: "字段匹配" },
+              ],
+              match_source: "历史报价",
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+    const text = container.textContent ?? "";
+    expect(text).toContain("直通50");
+    expect(text).toContain("C001");
+    expect(text).toContain("C002");
+    expect(text.toLowerCase()).toContain("ai");
+  });
+
+  it("does not render candidates preview when candidatePreviews is empty", () => {
+    const container = document.createElement("div");
+    render(renderChat(createProps({ candidatePreviews: [] })), container);
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("直通50");
+    expect(text).not.toContain("C001");
+  });
 });

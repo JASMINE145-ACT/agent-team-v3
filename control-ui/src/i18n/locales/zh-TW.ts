@@ -133,6 +133,14 @@ export const zh_TW: TranslationMap = {
         imageItem: "圖片（{count}）",
         remove: "移除排隊訊息",
       },
+      candidatesPreview: {
+        query: "正在查詢：{keywords}",
+        colCode: "編號",
+        colName: "產品名稱",
+        colPrice: "單價",
+        more: "…及 {n} 筆更多",
+        selecting: "AI 正在從 {n} 個候選中選擇最符合的產品…",
+      },
       compose: {
         placeholder: {
           withImages: "新增訊息或繼續貼上圖片…",

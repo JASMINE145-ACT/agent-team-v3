@@ -61,6 +61,13 @@ export async function adminLogin(host: AdminDataHost, password: string): Promise
       body: JSON.stringify({ password }),
     });
     const data = (await res.json().catch(() => ({}))) as { detail?: unknown; token?: string };
+    if (res.status === 503) {
+      patch(host, {
+        loginError: "管理功能未启用（服务端未配置 ADMIN_PASSWORD）",
+        loginLoading: false,
+      });
+      return;
+    }
     if (!res.ok) {
       const d = data.detail;
       const msg =
@@ -202,6 +209,9 @@ export async function deletePriceRow(host: AdminDataHost, id: number): Promise<v
 export async function uploadPriceLibrary(host: AdminDataHost, file: File): Promise<void> {
   const tok = host.adminData.token;
   if (!tok) return;
+  if (!confirm("将用上传文件全表替换万鼎价格库，确认？")) {
+    return;
+  }
   patch(host, { priceUploading: true, priceError: null });
   try {
     const form = new FormData();
@@ -335,6 +345,9 @@ export async function deleteMappingRow(host: AdminDataHost, id: number): Promise
 export async function uploadProductMapping(host: AdminDataHost, file: File): Promise<void> {
   const tok = host.adminData.token;
   if (!tok) return;
+  if (!confirm("将用上传文件全表替换产品映射表，确认？")) {
+    return;
+  }
   patch(host, { mappingUploading: true, mappingError: null });
   try {
     const form = new FormData();

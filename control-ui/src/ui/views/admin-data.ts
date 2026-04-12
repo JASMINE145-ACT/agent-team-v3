@@ -1,5 +1,5 @@
 import { html, nothing } from "lit";
-import type { AdminDataHost, AdminDataState, PriceRow } from "../controllers/admin-data.types.ts";
+import type { AdminDataHost, AdminDataState, MappingRow, PriceRow } from "../controllers/admin-data.types.ts";
 
 export type AdminDataViewProps = {
   host: AdminDataHost;

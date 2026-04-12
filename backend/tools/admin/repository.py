@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy import create_engine, text
@@ -32,16 +34,28 @@ def _get_engine() -> Optional[Engine]:
     return _engine
 
 
+def _run_migration_sql(conn, sql_path: Path) -> None:
+    raw = sql_path.read_text(encoding="utf-8")
+    stripped = re.sub(r"--[^\n]*", "", raw)
+    parts = [p.strip() for p in re.split(r";\s*", stripped) if p.strip()]
+    for part in parts:
+        conn.execute(text(part + ";"))
+
+
 def setup_tables() -> None:
-    """建表（若不存在）。启动时调用一次。"""
+    """建表（若不存在）。启动时调用一次。优先执行 migrations/001_create_price_tables.sql。"""
     engine = _get_engine()
     if engine is None:
         return
+    mig = Path(__file__).resolve().parent / "migrations" / "001_create_price_tables.sql"
     try:
         with engine.begin() as conn:
-            conn.execute(
-                text(
-                    """
+            if mig.is_file():
+                _run_migration_sql(conn, mig)
+            else:
+                conn.execute(
+                    text(
+                        """
                 CREATE TABLE IF NOT EXISTS price_library (
                     id          SERIAL PRIMARY KEY,
                     material    TEXT NOT NULL DEFAULT '',
@@ -53,11 +67,11 @@ def setup_tables() -> None:
                     updated_at  TIMESTAMPTZ DEFAULT NOW()
                 )
             """
+                    )
                 )
-            )
-            conn.execute(
-                text(
-                    """
+                conn.execute(
+                    text(
+                        """
                 CREATE TABLE IF NOT EXISTS product_mapping (
                     id              SERIAL PRIMARY KEY,
                     inquiry_name    TEXT NOT NULL DEFAULT '',
@@ -67,8 +81,16 @@ def setup_tables() -> None:
                     updated_at      TIMESTAMPTZ DEFAULT NOW()
                 )
             """
+                    )
                 )
-            )
+                conn.execute(
+                    text(
+                        """
+                CREATE INDEX IF NOT EXISTS idx_price_library_description_gin
+                    ON price_library USING gin (to_tsvector('simple', description))
+            """
+                    )
+                )
         logger.info("Admin tables ready.")
     except Exception as e:
         logger.warning("建表失败: %s", e)

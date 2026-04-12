@@ -123,6 +123,24 @@ class TestCandidatesSSEPush:
         assert len(payload["candidates"]) == 1
         assert "match_source" in payload
 
+    def test_tool_candidates_includes_keywords(self):
+        """tool_candidates payload must include the 'keywords' field from the query."""
+        events = []
+        push = lambda event_type, payload: events.append((event_type, payload))
+
+        from backend.tools.inventory.services.inventory_agent_tools import _execute_match_quotation
+        candidates_raw = [{"code": "8020020755", "matched_name": "直通PVC", "unit_price": 100.0, "source": "历史报价"}]
+
+        with patch("backend.tools.inventory.services.match_and_inventory.match_quotation_union",
+                   return_value=candidates_raw):
+            with patch("backend.tools.inventory.services.llm_selector.llm_select_best",
+                       return_value=_make_llm_result()):
+                _execute_match_quotation({"keywords": "直通50"}, push_event=push)
+
+        payload = next(p for et, p in events if et == "tool_candidates")
+        assert "keywords" in payload, "tool_candidates must include 'keywords' field"
+        assert payload["keywords"] == "直通50"
+
     def test_push_event_tool_selection_done_called(self):
         """push_event must be called with 'tool_selection_done' after llm_select_best succeeds."""
         events = []

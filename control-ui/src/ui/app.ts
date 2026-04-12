@@ -60,6 +60,7 @@ import {
   resetToolRender as resetToolRenderInternal,
   type ToolStreamEntry,
   type CompactionStatus,
+  type CandidatesPreviewItem,
   type ToolRenderItem,
   type ToolRenderPayload,
 } from "./app-tool-stream.ts";
@@ -483,6 +484,7 @@ export class OpenClawApp extends LitElement {
   @state() toolRenderData: ToolRenderPayload | null = null;
   @state() toolRenderSeq: number | null = null;
   @state() toolRenderItems: ToolRenderItem[] = [];
+  @state() candidatePreviews: CandidatesPreviewItem[] = [];
   refreshSessionsAfterChat = new Set<string>();
   basePath = "";
   private popStateHandler = () =>

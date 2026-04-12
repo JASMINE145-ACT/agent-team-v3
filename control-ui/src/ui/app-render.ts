@@ -1093,6 +1093,7 @@ export function renderApp(state: AppViewState) {
                 toolRenderData: state.toolRenderData,
                 toolRenderSeq: state.toolRenderSeq,
                 toolRenderItems: state.toolRenderItems,
+                candidatePreviews: state.candidatePreviews,
                 assistantAvatarUrl: chatAvatarUrl,
                 messages: state.chatMessages,
                 toolMessages: state.chatToolMessages,

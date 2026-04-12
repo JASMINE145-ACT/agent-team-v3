@@ -333,6 +333,7 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
         # tool_selection_done is only pushed in the single-choice path (confident LLM result).
         # SSE consumers must NOT treat tool_selection_done as a mandatory terminal event.
         _push_event("tool_candidates", {
+            "keywords": keywords,
             "candidates": norm,
             "match_source": match_source_str,
         })

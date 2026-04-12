@@ -158,7 +158,7 @@ export function iconForTab(tab: Tab): IconName {
     case "logs":
       return "scrollText";
     case "admin-data":
-      return "fileText";
+      return "database";
     default:
       return "folder";
   }

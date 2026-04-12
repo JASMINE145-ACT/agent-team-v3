@@ -189,6 +189,14 @@ export const en: TranslationMap = {
         imageItem: "Image ({count})",
         remove: "Remove queued message",
       },
+      candidatesPreview: {
+        query: "Searching: {keywords}",
+        colCode: "Code",
+        colName: "Product",
+        colPrice: "Unit price",
+        more: "…and {n} more",
+        selecting: "AI is choosing the best match from {n} candidate(s)…",
+      },
       compose: {
         placeholder: {
           withImages: "Add a message or paste more images…",

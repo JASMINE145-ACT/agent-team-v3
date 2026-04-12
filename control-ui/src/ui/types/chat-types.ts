@@ -2,12 +2,15 @@
  * Chat message types for the UI layer.
  */
 
+import type { CandidatesPreviewItem } from "../app-tool-stream.ts";
+
 /** Union type for items in the chat thread */
 export type ChatItem =
   | { kind: "message"; key: string; message: unknown }
   | { kind: "divider"; key: string; label: string; timestamp: number }
   | { kind: "stream"; key: string; text: string; startedAt: number }
-  | { kind: "reading-indicator"; key: string };
+  | { kind: "reading-indicator"; key: string }
+  | { kind: "candidates-preview"; key: string; preview: CandidatesPreviewItem };
 
 /** A group of consecutive messages from the same role (Slack-style layout) */
 export type MessageGroup = {

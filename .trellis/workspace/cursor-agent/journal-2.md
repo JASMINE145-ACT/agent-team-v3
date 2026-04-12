@@ -581,3 +581,42 @@ Implemented the batch quotation mode plan: auto-switch at `>=3` items, consolida
 ### Status
 
 [OK] **Completed**
+
+## Session 23: 2026-04-11 — Neon admin plan alignment (migrations + UI polish)
+
+**Date**: 2026-04-11
+**Task**: price-library-neon-admin spec/plan follow-up
+
+### Summary
+
+Aligned implementation with `docs/superpowers/specs/2026-04-10-price-library-neon-admin-design.md`: added `001_create_price_tables.sql` + GIN index, `setup_tables()` runs migration file; frontend: login 503 message, upload confirm dialogs, database tab icon, fixed `MappingRow` type import in admin view.
+
+### Testing
+
+- [OK] `npm run build` (control-ui)
+- [OK] `py -3 -c` import `backend.tools.admin.repository`
+
+### Status
+
+[OK] **Completed**
+
+## Session 24: 2026-04-11 — Candidates SSE preview (tool_candidates UI)
+
+**Date**: 2026-04-11
+**Task**: `docs/superpowers/plans/2026-04-11-candidates-sse-preview.md`
+
+### Summary
+
+- Backend: `_execute_match_quotation` `tool_candidates` payload includes `keywords`.
+- Frontend: `CandidatesPreviewItem`, `handleCandidatesEvent`, FIFO pop on `tool_render` in `app-tool-stream.ts`; `candidatePreviews` state on app; chat renders dashed preview card (max 5 rows) before final tool cards; i18n + CSS; exported `renderAvatar` for reuse.
+- Tests: `test_tool_candidates_includes_keywords`, `app-tool-stream.candidates.test.ts`, two chat tests for preview.
+
+### Testing
+
+- [OK] `py -3 -m pytest tests/test_candidates_sse_push.py -q` (11 passed)
+- [OK] Vitest: `app-tool-stream.candidates.test.ts` + new chat preview tests (pass; 4 unrelated `chat.test.ts` failures on locale/button)
+- [OK] `npm run build`
+
+### Status
+
+[OK] **Completed**

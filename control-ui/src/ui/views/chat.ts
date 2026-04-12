@@ -2,6 +2,7 @@ import { html, nothing } from "lit";
 import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
 import {
+  renderAvatar,
   renderMessageGroup,
   renderReadingIndicatorGroup,
   renderStreamingGroup,
@@ -12,6 +13,7 @@ import { icons } from "../icons.ts";
 import { detectTextDirection } from "../text-direction.ts";
 import {
   RENDERED_MARKER,
+  type CandidatesPreviewItem,
   type ToolRenderItem,
   type ToolRenderPayload,
 } from "../app-tool-stream.ts";
@@ -40,6 +42,8 @@ export type ChatProps = {
   toolRenderData?: ToolRenderPayload | null;
   toolRenderSeq?: number | null;
   toolRenderItems?: ToolRenderItem[];
+  /** Live SSE: fuzzy candidates before LLM selection (match_quotation single path) */
+  candidatePreviews?: CandidatesPreviewItem[];
   messages: unknown[];
   toolMessages: unknown[];
   stream: string | null;
@@ -91,7 +95,71 @@ export type ChatProps = {
 };
 
 const COMPACTION_TOAST_DURATION_MS = 5000;
+const CANDIDATES_PREVIEW_MAX_ROWS = 5;
 const ALLOWED_DROP_EXT = /\.(xlsx|xls|xlsm|pdf)$/i;
+
+function formatPricePreview(n: number): string {
+  if (!Number.isFinite(n)) {
+    return "—";
+  }
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
+function renderCandidatesPreviewCard(
+  preview: CandidatesPreviewItem,
+  assistant: { name: string; avatar: string | null },
+) {
+  const rows = preview.candidates;
+  const total = rows.length;
+  const shown = rows.slice(0, CANDIDATES_PREVIEW_MAX_ROWS);
+  const extra = total > CANDIDATES_PREVIEW_MAX_ROWS ? total - CANDIDATES_PREVIEW_MAX_ROWS : 0;
+  return html`
+    <div class="chat-group assistant">
+      ${renderAvatar("assistant", assistant)}
+      <div class="chat-group-messages">
+        <div class="chat-tool-render chat-candidates-preview" role="status" aria-live="polite">
+          <div class="candidates-preview-card">
+            <div class="candidates-preview-card__title">
+              ${icons.search}
+              <span>${t("chat.ui.candidatesPreview.query", { keywords: preview.keywords || "—" })}</span>
+            </div>
+            <table class="candidates-preview-card__table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>${t("chat.ui.candidatesPreview.colCode")}</th>
+                  <th>${t("chat.ui.candidatesPreview.colName")}</th>
+                  <th>${t("chat.ui.candidatesPreview.colPrice")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${shown.map(
+                  (c, i) => html`
+                    <tr>
+                      <td>${i + 1}</td>
+                      <td>${c.code}</td>
+                      <td>${c.matched_name}</td>
+                      <td>${formatPricePreview(c.unit_price)}</td>
+                    </tr>
+                  `,
+                )}
+              </tbody>
+            </table>
+            ${extra > 0
+              ? html`<p class="candidates-preview-card__more">
+                  ${t("chat.ui.candidatesPreview.more", { n: String(extra) })}
+                </p>`
+              : nothing}
+            <div class="candidates-preview-card__status">
+              ${icons.loader}
+              <span>${t("chat.ui.candidatesPreview.selecting", { n: String(total) })}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
 
 function pickFirstExcelOrPdf(files: FileList): File | null {
   for (let i = 0; i < files.length; i++) {
@@ -335,6 +403,10 @@ export function renderChat(props: ChatProps) {
               props.onOpenSidebar,
               assistantIdentity,
             );
+          }
+
+          if (item.kind === "candidates-preview") {
+            return renderCandidatesPreviewCard(item.preview, assistantIdentity);
           }
 
           if (item.kind === "group") {
@@ -875,6 +947,15 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
         message: tools[i],
       });
     }
+  }
+
+  const previews = Array.isArray(props.candidatePreviews) ? props.candidatePreviews : [];
+  for (let i = 0; i < previews.length; i++) {
+    items.push({
+      kind: "candidates-preview",
+      key: `candidates-preview:${previews[i].id}`,
+      preview: previews[i],
+    });
   }
 
   // Live fallback: cards received before history refresh (no marker in history yet).
