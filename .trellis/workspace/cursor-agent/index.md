@@ -9,8 +9,8 @@
 | Item | Status |
 |------|--------|
 | Active File | `journal-2.md` |
-| Total Sessions | 13 |
-| Last Active | 2026-04-03 |
+| Total Sessions | 26 |
+| Last Active | 2026-04-12 |
 
 ---
 
@@ -19,7 +19,7 @@
 | File | Lines | Status |
 |------|-------|--------|
 | `journal-1.md` | ~230 | Archived |
-| `journal-2.md` | ~180 | Active |
+| `journal-2.md` | ~650 | Active |
 
 ---
 
@@ -27,6 +27,8 @@
 
 | # | Date | Title |
 |---|------|-------|
+| 26 | 2026-04-12 | Session Neon persistence（agent-team-v3：SessionBackend / WeCom / API） |
+| 25 | 2026-04-12 | 周报两阶段管道（analysis_md + LLM + Lit reports UI） |
 | 13 | 2026-04-03 | GLM 思考模型 Plan B（reasoning_content fallback + max_tokens 16000） |
 | 12 | 2026-04-03 | match_quotation 三项修复（selection_reasoning 显示 + GLM 路由 + 来源优先级） |
 | 11 | 2026-04-03 | Reasoning 显示修复 + Selector Reasoning 需求确认 |

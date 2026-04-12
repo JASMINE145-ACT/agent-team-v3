@@ -320,6 +320,7 @@ export type AppViewState = {
   reportDetailLoading: boolean;
   selectedRecordId: number | null;
   reportsCopyJustDone: boolean;
+  reportsDetailTab: "data" | "analysis";
   debugLoading: boolean;
   debugStatus: StatusSummary | null;
   debugHealth: HealthSnapshot | null;

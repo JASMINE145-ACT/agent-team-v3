@@ -98,7 +98,9 @@ _DDL = [
         finished_at TIMESTAMPTZ NULL,
         error_message TEXT NULL,
         summary_json JSONB NULL,
-        report_json JSONB NULL
+        report_json JSONB NULL,
+        analysis_md TEXT NULL,
+        analysis_status TEXT NOT NULL DEFAULT 'pending'
     );
     """,
     """
@@ -131,6 +133,10 @@ def ensure_tables() -> None:
                 ("sales_weekly_basic", "销售发票周报（基础版）", True, "0 9 * * 1", "Asia/Shanghai"),
             )
             cur.execute("ALTER TABLE report_records ADD COLUMN IF NOT EXISTS report_md TEXT NULL;")
+            cur.execute("ALTER TABLE report_records ADD COLUMN IF NOT EXISTS analysis_md TEXT NULL;")
+            cur.execute(
+                "ALTER TABLE report_records ADD COLUMN IF NOT EXISTS analysis_status TEXT NOT NULL DEFAULT 'pending';"
+            )
     finally:
         conn.close()
 

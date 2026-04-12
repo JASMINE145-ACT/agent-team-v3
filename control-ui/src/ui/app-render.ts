@@ -71,7 +71,14 @@ import {
   uploadProductMapping,
 } from "./controllers/admin-data.ts";
 import type { AdminDataHost } from "./controllers/admin-data.types.ts";
-import { loadReportDetail, loadReports, reformatRecord, runReportTask, saveReportTaskConfig } from "./controllers/reports.ts";
+import {
+  loadReportDetail,
+  loadReports,
+  reanalyzeRecord,
+  runReportTask,
+  saveReportTaskConfig,
+  stopAnalysisPoller,
+} from "./controllers/reports.ts";
 import { icons } from "./icons.ts";
 import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
 import { renderAgents } from "./views/agents.ts";
@@ -1031,7 +1038,9 @@ export function renderApp(state: AppViewState) {
                 selectedRecordId: state.selectedRecordId,
                 reportDetailLoading: state.reportDetailLoading,
                 reportDetail: state.reportDetail,
-                reportsCopyJustDone: state.reportsCopyJustDone,
+                reportsDetailTab: state.reportsDetailTab,
+                reportsEditingTaskId: state.reportsEditingTaskId,
+                reportsEditForm: state.reportsEditForm,
                 onTokenChange: (token) => {
                   state.reportsAdminToken = token;
                 },
@@ -1039,24 +1048,40 @@ export function renderApp(state: AppViewState) {
                 onRun: (taskKey) => {
                   void runReportTask(state, taskKey);
                 },
-                onSelectRecord: (recordId) => loadReportDetail(state, recordId),
-                onCopy: () => {
-                  if (!state.reportDetail?.report_md) {
-                    return;
-                  }
-                  void navigator.clipboard
-                    .writeText(state.reportDetail.report_md)
-                    .then(() => {
-                      state.reportsCopyJustDone = true;
-                      window.setTimeout(() => {
-                        state.reportsCopyJustDone = false;
-                      }, 2000);
-                    })
-                    .catch((e: unknown) => {
-                      state.reportsError = e instanceof Error ? e.message : String(e);
-                    });
+                onSelectRecord: (recordId) => {
+                  stopAnalysisPoller();
+                  void loadReportDetail(state, recordId);
                 },
-                onReformat: (recordId) => reformatRecord(state, recordId),
+                onDetailTabChange: (tab) => {
+                  state.reportsDetailTab = tab;
+                },
+                onReanalyze: (recordId) => {
+                  void reanalyzeRecord(state, recordId);
+                },
+                onEditTask: (task) => {
+                  state.reportsEditingTaskId = task.task_key;
+                  state.reportsEditForm = {
+                    enabled: task.enabled,
+                    cron_expr: task.cron_expr,
+                    timezone: task.timezone,
+                    title: task.title,
+                  };
+                },
+                onCancelEdit: () => {
+                  state.reportsEditingTaskId = null;
+                  state.reportsEditForm = {};
+                },
+                onEditFormChange: (patch) => {
+                  state.reportsEditForm = patch;
+                },
+                onSaveEdit: (taskKey) => {
+                  void saveReportTaskConfig(state, taskKey, state.reportsEditForm).then(() => {
+                    if (!state.reportsError) {
+                      state.reportsEditingTaskId = null;
+                      state.reportsEditForm = {};
+                    }
+                  });
+                },
               })
             : nothing
         }

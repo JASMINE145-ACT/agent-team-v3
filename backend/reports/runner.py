@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta
 from typing import Any, Dict, Tuple
 
@@ -9,6 +10,7 @@ from psycopg2.extras import Json
 from backend.reports.accurate_fetcher import fetch_sales_invoices
 from backend.reports.analyzer import analyze_sales_orders
 from backend.reports.formatter import format_report_md
+from backend.reports.llm_analyzer import run_llm_analysis
 from backend.reports.models import get_database_url
 
 
@@ -55,11 +57,18 @@ def run_report_task(task_key: str = "sales_weekly_basic", trigger_type: str = "m
                         finished_at=NOW(),
                         summary_json=%s,
                         report_json=%s,
-                        report_md=%s
+                        report_md=%s,
+                        analysis_status='pending'
                     WHERE id=%s
                     """,
                     (Json(summary), Json(payload.to_dict()), report_md, record_id),
                 )
+        db_url_for_thread = get_database_url()
+        threading.Thread(
+            target=run_llm_analysis,
+            args=(db_url_for_thread, record_id, task_key, payload),
+            daemon=True,
+        ).start()
         return {"record_id": record_id, "status": "success", "summary": summary}
     except Exception as e:
         if record_id is not None:

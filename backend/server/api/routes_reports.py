@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from typing import Any, Dict, List
 
 import psycopg2
@@ -11,6 +12,7 @@ from fastapi import APIRouter, Header, HTTPException
 
 from backend.reports.accurate_fetcher import ping_accurate
 from backend.reports.formatter import format_report_md
+from backend.reports.llm_analyzer import run_llm_analysis
 from backend.reports.models import CustomerStat, DayStats, ReportPayload, StatusStat, TaskConfigPatch, get_database_url
 from backend.reports.runner import run_report_task
 from backend.reports.service import _parse_cron, reload_task
@@ -179,7 +181,8 @@ async def list_records(limit: int = 20, x_reports_token: str | None = Header(def
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, task_key, status, trigger_type, started_at, finished_at, error_message, summary_json
+                    SELECT id, task_key, status, trigger_type, started_at, finished_at,
+                           error_message, summary_json, analysis_status
                     FROM report_records
                     ORDER BY id DESC
                     LIMIT %s
@@ -197,6 +200,7 @@ async def list_records(limit: int = 20, x_reports_token: str | None = Header(def
                     "finished_at": r[5].isoformat() if r[5] else None,
                     "error_message": r[6],
                     "summary_json": r[7],
+                    "analysis_status": r[8] if r[8] is not None else "pending",
                 }
                 for r in rows
             ]
@@ -217,7 +221,9 @@ async def get_record_detail(record_id: int, x_reports_token: str | None = Header
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, task_key, status, trigger_type, started_at, finished_at, error_message, summary_json, report_json, report_md
+                    SELECT id, task_key, status, trigger_type, started_at, finished_at,
+                           error_message, summary_json, report_json, report_md,
+                           analysis_md, analysis_status
                     FROM report_records
                     WHERE id=%s
                     """,
@@ -237,6 +243,8 @@ async def get_record_detail(record_id: int, x_reports_token: str | None = Header
                 "summary_json": row[7],
                 "report_json": row[8],
                 "report_md": row[9],
+                "analysis_md": row[10],
+                "analysis_status": row[11] if row[11] is not None else "pending",
             }
         finally:
             conn.close()
@@ -289,3 +297,53 @@ async def reformat_record(record_id: int, x_reports_token: str | None = Header(d
         raise HTTPException(status_code=404, detail=f"record not found or has no report_json: {record_id}")
     return {"success": True}
 
+
+@router.post("/api/reports/records/{record_id}/reanalyze")
+async def reanalyze_record(
+    record_id: int, x_reports_token: str | None = Header(default=None)
+) -> Dict[str, Any]:
+    """重跑 LLM 分析，不重新抓数据。"""
+    _require_reports_token(x_reports_token)
+
+    def _load_for_reanalyze() -> Dict[str, Any] | None:
+        conn = _conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT task_key, report_json FROM report_records WHERE id=%s",
+                    (record_id,),
+                )
+                row = cur.fetchone()
+            if not row or not row[1]:
+                return None
+            return {"task_key": str(row[0]), "report_json": row[1]}
+        finally:
+            conn.close()
+
+    record = await asyncio.to_thread(_load_for_reanalyze)
+    if not record:
+        raise HTTPException(
+            status_code=404, detail=f"record not found or has no report_json: {record_id}"
+        )
+
+    rj = record["report_json"] if isinstance(record["report_json"], dict) else json.loads(record["report_json"])
+    try:
+        payload = ReportPayload(
+            week_start=str(rj.get("week_start", "")),
+            week_end=str(rj.get("week_end", "")),
+            total_sales_amount=float(rj.get("total_sales_amount", 0)),
+            total_order_count=int(rj.get("total_order_count", 0)),
+            daily_stats=[DayStats(**item) for item in (rj.get("daily_stats") or [])],
+            top_customers=[CustomerStat(**item) for item in (rj.get("top_customers") or [])],
+            status_stats=[StatusStat(**item) for item in (rj.get("status_stats") or [])],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"invalid report_json: {exc}")
+
+    db_url = get_database_url()
+    threading.Thread(
+        target=run_llm_analysis,
+        args=(db_url, record_id, record["task_key"], payload),
+        daemon=True,
+    ).start()
+    return {"success": True}

@@ -719,6 +719,8 @@ export type ReportRecord = {
   summary_json?: Record<string, unknown> | null;
   report_json?: Record<string, unknown> | null;
   report_md?: string | null;
+  analysis_md?: string | null;
+  analysis_status?: "pending" | "running" | "done" | "failed" | null;
 };
 
 export type ReportTaskConfig = {

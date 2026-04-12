@@ -620,3 +620,51 @@ Aligned implementation with `docs/superpowers/specs/2026-04-10-price-library-neo
 ### Status
 
 [OK] **Completed**
+
+## Session 25: 2026-04-12 — 周报两阶段管道（analysis_md + Lit UI）
+
+**Date**: 2026-04-12
+**Spec / Plan**: `docs/superpowers/specs/2026-04-12-weekly-report-enhancement-design.md`, `docs/superpowers/plans/2026-04-12-weekly-report-enhancement.md`
+
+### Summary
+
+- **原则**：原始 `report_json` / `report_md` 不经过 LLM；Phase 2 单独写入 `analysis_md`，`analysis_status`：`pending` → `running` → `done` / `failed`。
+- **DB**：`report_records` 增加 `analysis_md`、`analysis_status`（`_DDL` + `ensure_tables` ALTER）。
+- **后端**：新建 `backend/reports/llm_analyzer.py`（取同 `task_key` 上一条成功 `report_json` 作环比、Claude Haiku、`_set_analysis_status` 短连接避免 LLM 期间长占连接）；`runner.py` Phase 1 成功后 `daemon` 线程触发分析；`routes_reports.py` 列表/详情扩展字段，`POST .../reanalyze`。
+- **前端**：`ReportRecord` + `reportsDetailTab`；`reanalyzeRecord` + 轮询（`inFlight` 防重叠）；`reports-tab.ts` 重写（数据 tab 结构化表格 + 智能分析 Markdown）；i18n；`app-render` 接线。
+- **Review 跟进**：失败写回 `failed` 时记录日志（避免静默吞掉）。
+
+### Testing
+
+- [OK] `py -m pytest tests/test_reports_llm_analyzer.py` (5 passed)
+- [OK] `npm run build` (control-ui)
+- 注：全量 `pytest -k "not live"` 存在与本次无关的既有失败，未在本次扩大范围修复。
+
+### Status
+
+[OK] **Completed**
+
+## Session 26: 2026-04-12 — Session Neon persistence (agent-team-v3)
+
+**Date**: 2026-04-12
+**Task**: `docs/superpowers/plans/2026-04-12-session-neon-persistence.md` + design spec
+
+### Summary
+
+Implemented session storage strategy in repo path **`agent-team-v3/`** (parallel to this tree): `SessionBackend` protocol, `FileBackend` (JSON), `NeonBackend` (psycopg2 pool + `sessions`/`turns` DDL + `session_aux` JSONB for sidecar). `SessionStore` delegates I/O; `DATABASE_URL` selects Neon with fallback to file backend on init failure. `Turn.from_user` + `CoreAgent.save_turn(from_user=ctx)`; WeCom uses fixed `session_id = "wecom"`, `/new` → `clear_turns`, file bind calls `flush_session_aux`. HTTP: `routes_sessions.py` (`GET/POST/DELETE /api/sessions`); startup `ensure_session("wecom")`. Gateway `sessions` handler path from `Config.SESSION_STORE_DIR`. Full test run: **114 passed**.
+
+### Main Changes (paths relative to `agent-team-v3/`)
+
+- New: `backend/agent/session_backend.py`, `session_backend_file.py`, `session_backend_neon.py`
+- Modified: `backend/agent/session.py`, `backend/core/agent.py`, `backend/wecom_bot/handler.py`, `backend/server/api/app.py`, `routes.py`, `backend/server/gateway/handlers/sessions.py`
+- New: `backend/server/api/routes_sessions.py`
+- Tests: `tests/test_session_turn.py`, `test_session_backend_file.py`, `test_session_backend_neon.py`, `test_session_store_refactored.py`, `test_wecom_handler_session.py`, `test_routes_sessions.py`; adjusted `test_oos_tools_refactor.py`, `test_current_topic_injection.py`
+
+### Lessons
+
+- Neon needs explicit **sidecar** (`session_aux`) for summary/tool_memory/file_path parity with file JSON; **`load_turns`** should use **newest N by ts** then chronological order for injection.
+- Shared WeCom session is **by approved spec**; per-user isolation would be a separate product change.
+
+### Status
+
+[OK] **Completed**

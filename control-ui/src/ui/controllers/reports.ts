@@ -10,6 +10,7 @@ export type ReportsState = {
   reportDetail: ReportRecord | null;
   reportDetailLoading: boolean;
   selectedRecordId: number | null;
+  reportsDetailTab: "data" | "analysis";
 };
 
 function apiUrl(basePath: string, path: string): string {
@@ -103,6 +104,12 @@ export async function loadReportDetail(state: ReportsState, id: number): Promise
     const detail = await parseResponse<ReportRecord>(res);
     if (state.selectedRecordId === requestedId) {
       state.reportDetail = detail;
+      const aStatus = detail?.analysis_status;
+      if (aStatus === "running" || aStatus === "pending") {
+        startAnalysisPoller(state, id);
+      } else {
+        stopAnalysisPoller();
+      }
     }
   } catch (err) {
     state.reportsError = err instanceof Error ? err.message : String(err);
@@ -131,3 +138,51 @@ export async function reformatRecord(state: ReportsState, id: number): Promise<v
   }
 }
 
+let _analysisPoller: ReturnType<typeof window.setInterval> | null = null;
+let _analysisPollInFlight = false;
+
+export function stopAnalysisPoller(): void {
+  if (_analysisPoller !== null) {
+    window.clearInterval(_analysisPoller);
+    _analysisPoller = null;
+  }
+  _analysisPollInFlight = false;
+}
+
+export function startAnalysisPoller(state: ReportsState, id: number): void {
+  stopAnalysisPoller();
+  _analysisPoller = window.setInterval(async () => {
+    if (state.selectedRecordId !== id) {
+      stopAnalysisPoller();
+      return;
+    }
+    if (_analysisPollInFlight) {
+      return;
+    }
+    _analysisPollInFlight = true;
+    try {
+      await loadReportDetail(state, id);
+      const status = state.reportDetail?.analysis_status;
+      if (status === "done" || status === "failed") {
+        stopAnalysisPoller();
+      }
+    } finally {
+      _analysisPollInFlight = false;
+    }
+  }, 3000);
+}
+
+export async function reanalyzeRecord(state: ReportsState, id: number): Promise<void> {
+  state.reportsError = null;
+  try {
+    const res = await fetch(apiUrl(state.basePath, `/api/reports/records/${id}/reanalyze`), {
+      method: "POST",
+      headers: headers(state.reportsAdminToken),
+    });
+    await parseResponse<Record<string, unknown>>(res);
+    await loadReportDetail(state, id);
+    startAnalysisPoller(state, id);
+  } catch (err) {
+    state.reportsError = err instanceof Error ? err.message : String(err);
+  }
+}
