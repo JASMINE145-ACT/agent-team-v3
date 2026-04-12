@@ -2447,3 +2447,175 @@
   font-size: 0.8rem;
   margin: 0;
 }
+
+/* Work quotation — trace timeline (readable steps + raw JSON) */
+.work-trace {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+}
+
+.work-trace__heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+  margin-bottom: 12px;
+  letter-spacing: -0.02em;
+}
+
+.work-trace__list {
+  margin: 0;
+  padding: 0 0 0 1.15rem;
+  list-style: decimal;
+}
+
+.work-trace__li {
+  margin: 0 0 12px;
+  padding-left: 4px;
+}
+
+.work-trace__li:last-child {
+  margin-bottom: 0;
+}
+
+.work-trace__card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--card);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.work-trace__card--tool {
+  border-left: 3px solid color-mix(in srgb, var(--accent, #6b8cff) 70%, transparent);
+}
+
+.work-trace__card--obs {
+  border-left: 3px solid color-mix(in srgb, #34d399 65%, transparent);
+}
+
+.work-trace__card--metrics {
+  border-left: 3px solid color-mix(in srgb, #fbbf24 70%, transparent);
+}
+
+.work-trace__card--unknown {
+  border-left: 3px solid var(--muted);
+}
+
+.work-trace__card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+}
+
+.work-trace__step-num {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.work-trace__type-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+  color: var(--muted);
+}
+
+.work-trace__tool-name {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.work-trace__args-pre,
+.work-trace__fallback-pre,
+.work-trace__json-pre,
+.work-trace__raw-pre {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 85%, var(--card));
+  border: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.work-trace__raw-pre {
+  max-height: 360px;
+}
+
+.work-trace__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.work-trace__k {
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.work-trace__err {
+  color: #f87171;
+}
+
+.work-trace__parse-fail {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.work-trace__md {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.work-trace__metrics-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.work-trace__badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent, #6b8cff) 12%, transparent);
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.work-trace__duration {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.work-trace__raw {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.work-trace__raw-summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  user-select: none;
+}
+
+.work-trace__raw-summary:hover {
+  color: var(--text-strong);
+}

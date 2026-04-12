@@ -1,6 +1,7 @@
 import { html, nothing } from "lit";
 import { t } from "../../i18n/index.ts";
 import type { WorkState, WorkPendingChoice } from "../controllers/work.ts";
+import { renderWorkTraceTimeline } from "./work-trace.ts";
 
 /** 浠锋牸妗ｄ綅锛歷alue 涓庡悗绔竴鑷达紝labelKey 瀵瑰簲 i18n key銆?*/
 const PRICE_LEVEL_OPTIONS: { value: string; labelKey: string }[] = [
@@ -544,14 +545,7 @@ export function renderWork(props: WorkProps) {
               ${workResult.answer ? html`<div style="white-space: pre-wrap; margin-bottom: 14px;">${workResult.answer}</div>` : nothing}
               ${workResult.error ? html`<p style="color: var(--danger, #e53935);">${workResult.error}</p>` : nothing}
 
-              ${workResult.trace?.length
-                ? html`
-                    <details style="margin-top: 14px;">
-                      <summary>${t("work.trace", { count: String(workResult.trace.length) })}</summary>
-                      <pre style="max-height: 420px; overflow: auto; margin-top: 8px; font-size: 11px; white-space: pre-wrap;">${JSON.stringify(workResult.trace, null, 2)}</pre>
-                    </details>
-                  `
-                : nothing}
+              ${workResult.trace?.length ? html`<div style="margin-top: 16px;">${renderWorkTraceTimeline(workResult.trace)}</div>` : nothing}
             </div>
           </section>
         `
