@@ -41,8 +41,147 @@
 }
 
 /* ===========================================
-   Stats - Bold values, subtle labels
+   Work tab — quotation layout (centered column, relaxed spacing)
    =========================================== */
+
+.work-quotation__inner {
+  box-sizing: border-box;
+  max-width: 1120px;
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.work-quotation__head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.work-quotation__panel {
+  box-sizing: border-box;
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary, #fafafa);
+}
+
+.work-quotation__panel--upload {
+  border-style: dashed;
+}
+
+.work-quotation__panel-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.work-quotation__panel-hint {
+  font-size: 12px;
+  margin: 6px 0 10px 0;
+  color: var(--muted);
+}
+
+.work-quotation__textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 120px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  resize: vertical;
+}
+
+.work-quotation__text-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.work-quotation__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 20px;
+  align-items: center;
+}
+
+.work-quotation__run-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.work-quotation__stages {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.work-quotation__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.work-quotation__action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  align-items: center;
+}
+
+.work-quotation__status-line {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+  max-width: 100%;
+}
+
+.work-quotation__customer-level {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.work-quotation__customer-level > label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.work-quotation__file-input {
+  display: block;
+  margin-top: 8px;
+}
+
+.work-quotation__file-list {
+  margin-top: 10px;
+  padding-left: 20px;
+  font-size: 13px;
+}
+
+.work-quotation__error-banner {
+  padding: 12px 14px;
+  border: 1px solid var(--danger, #e53935);
+  border-radius: 8px;
+}
+
+/* Secondary work cards: align with main column width */
+.work-quotation--follow .work-quotation__inner {
+  max-width: 1120px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 
 .stat {
   background: var(--card);
