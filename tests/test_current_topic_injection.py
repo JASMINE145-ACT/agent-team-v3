@@ -26,17 +26,19 @@ def test_current_topic_appears_in_user_message():
         resp.usage.completion_tokens = 20
         return resp
 
-    store = SessionStore(persist_dir=None)
+    turn_one = Turn(
+        query="外螺纹堵头 dn50 多少钱",
+        agent="single",
+        answer="B档 10 元。",
+        ts=time.time(),
+    )
+    backend = MagicMock()
+    backend.load_turns.return_value = [turn_one]
+    backend.read_session_sidecar = MagicMock(return_value={})
+    store = SessionStore(backend=backend)
     session = Session(
         session_id="test-sid",
-        turns=[
-            Turn(
-                query="外螺纹堵头 dn50 多少钱",
-                agent="single",
-                answer="B档 10 元。",
-                ts=time.time(),
-            )
-        ],
+        turns=[turn_one],
         file_path=None,
     )
     store._mem["test-sid"] = session

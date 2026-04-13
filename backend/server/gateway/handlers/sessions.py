@@ -29,10 +29,15 @@ def handle_sessions_list(params: dict) -> dict:
             "verboseLevel": verbose_level or None,
             "reasoningLevel": reasoning_level or None,
         })
-    persist_dir = getattr(store, "_persist_dir", None)
+    try:
+        from backend.config import Config
+
+        persist_dir = getattr(Config, "SESSION_STORE_DIR", None) or "data/sessions"
+    except Exception:
+        persist_dir = "data/sessions"
     return {
         "ts": time.time(),
-        "path": str(persist_dir) if persist_dir else "",
+        "path": str(persist_dir),
         "count": len(sessions),
         "defaults": {"model": None, "contextTokens": None},
         "sessions": sessions,

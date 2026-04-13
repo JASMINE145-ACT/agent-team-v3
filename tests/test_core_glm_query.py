@@ -30,6 +30,18 @@ if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
 
+def _mock_session_store():
+    from unittest.mock import MagicMock
+
+    from backend.agent.session import SessionStore
+
+    b = MagicMock()
+    b.load_turns.return_value = []
+    b.list_sessions.return_value = []
+    b.read_session_sidecar = MagicMock(return_value={})
+    return SessionStore(backend=b)
+
+
 def _has_llm_credentials() -> bool:
     from backend.config import Config
 
@@ -111,7 +123,7 @@ class TestCoreGLMQuery(unittest.TestCase):
                 base_url=Config.OPENAI_BASE_URL,
                 model=Config.LLM_MODEL,
                 extensions=[],
-                session_store=SessionStore(persist_dir=None),
+                session_store=_mock_session_store(),
             )
             out = await agent.execute_react(
                 user_input="只回复一个单词：PONG。不要调用任何工具。",
@@ -138,7 +150,7 @@ class TestCoreGLMQuery(unittest.TestCase):
                 base_url=Config.OPENAI_BASE_URL,
                 model=Config.LLM_MODEL,
                 extensions=[_MinimalEchoExtension()],
-                session_store=SessionStore(persist_dir=None),
+                session_store=_mock_session_store(),
             )
             out = await agent.execute_react(
                 user_input='请调用工具 core_test_echo，参数 message 必须为 "test-ok"。',

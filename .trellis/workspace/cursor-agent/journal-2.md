@@ -668,3 +668,17 @@ Implemented session storage strategy in repo path **`agent-team-v3/`** (parallel
 ### Status
 
 [OK] **Completed**
+
+## Session 27: 2026-04-12 — Render 部署对话 / WebSocket 排查与 render.yaml 修正
+
+**Date**: 2026-04-12
+
+### Summary
+
+- **根因倾向**：`render.yaml` 曾设 `DEBUG=true`，`run_backend.py` 会 `reload=Config.DEBUG`，在 Render 托管环境启用 uvicorn **reload** 易导致不稳定；生产应默认 `DEBUG=false`。
+- **已改**：`render.yaml` 中 `DEBUG` → `"false"`，并注释说明需在 Dashboard 临时开调试时再改回。
+- **排查清单（用户侧）**：确认 Dashboard **有效** `DEBUG`（勿与 Blueprint 重复冲突）；`PORT` 由 Render 注入；会话持久化需 **`DATABASE_URL`**（Neon）且启动日志应显示 Neon 成功而非仅 FileBackend；**免费实例休眠**会断开 WebSocket；若前端与 API **不同源**须在控制 UI 里把 `gatewayUrl` 设为 `wss://<你的 Render 域名>/ws`。
+
+### Status
+
+[OK] **Completed**（配置修正）；线上行为需用户在 Render 日志与环境变量中核对。

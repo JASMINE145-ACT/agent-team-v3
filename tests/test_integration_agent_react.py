@@ -33,6 +33,19 @@ except Exception:  # pragma: no cover
         return fn
 
 
+def _mock_session_store():
+    """In-memory SessionStore for tests (no filesystem / DB)."""
+    from unittest.mock import MagicMock
+
+    from backend.agent.session import SessionStore
+
+    b = MagicMock()
+    b.load_turns.return_value = []
+    b.list_sessions.return_value = []
+    b.read_session_sidecar = MagicMock(return_value={})
+    return SessionStore(backend=b)
+
+
 def _trace_tool_names(trace: list) -> list[str]:
     names: list[str] = []
     for t in trace or []:
@@ -57,7 +70,7 @@ class TestJAgentToolRegistry(unittest.TestCase):
             base_url=Config.OPENAI_BASE_URL or "https://open.bigmodel.cn/api/paas/v4/",
             model=getattr(Config, "LLM_MODEL", "glm-4.5-air"),
             extensions=[JAgentExtension()],
-            session_store=SessionStore(persist_dir=None),
+            session_store=_mock_session_store(),
         )
         defs = agent._registry.get_definitions()
         names = {d["function"]["name"] for d in defs if isinstance(d, dict) and "function" in d}
@@ -76,7 +89,7 @@ class TestJAgentToolRegistry(unittest.TestCase):
             base_url=Config.OPENAI_BASE_URL or "https://open.bigmodel.cn/api/paas/v4/",
             model=getattr(Config, "LLM_MODEL", "glm-4.5-air"),
             extensions=[JAgentExtension()],
-            session_store=SessionStore(persist_dir=None),
+            session_store=_mock_session_store(),
         )
         sp = agent._system_prompt
         self.assertIn("工具", sp)
@@ -159,7 +172,7 @@ class TestLiveDn50PriceQueryAnthropic(unittest.TestCase):
                 base_url=pb or "",
                 model=Config.LLM_MODEL,
                 extensions=[JAgentExtension()],
-                session_store=SessionStore(persist_dir=None),
+                session_store=_mock_session_store(),
             )
             self.assertTrue(agent._use_anthropic, "anthropic 主链路应启用 Anthropic Messages（MiniMax …/anthropic）")
             self.assertIsInstance(agent.client, Anthropic, "主模型 client 应为 Anthropic SDK")
@@ -226,7 +239,7 @@ class TestLiveDn50PriceQueryOpenAICompat(unittest.TestCase):
                 base_url=Config.OPENAI_BASE_URL,
                 model=Config.LLM_MODEL,
                 extensions=[JAgentExtension()],
-                session_store=SessionStore(persist_dir=None),
+                session_store=_mock_session_store(),
             )
             self.assertIsNotNone(agent.client)
             out = await agent.execute_react(

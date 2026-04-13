@@ -74,11 +74,13 @@ def test_jagent_extension_registers_oos_tools_into_tool_registry():
     from backend.core.extension import ExtensionContext
     from backend.core.registry import ToolRegistry
     from backend.plugins.jagent.extension import JAgentExtension
+    from unittest.mock import MagicMock
+
     from backend.agent.session import SessionStore
 
     registry = ToolRegistry()
     # SessionStore 在当前测试中不参与逻辑，仅为类型满足构造 ExtensionContext
-    dummy_session_store = SessionStore()
+    dummy_session_store = SessionStore(backend=MagicMock())
     ctx = ExtensionContext(registry=registry, session_store=dummy_session_store)
 
     ext = JAgentExtension()

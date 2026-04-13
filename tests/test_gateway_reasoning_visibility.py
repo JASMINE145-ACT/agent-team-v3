@@ -1,10 +1,13 @@
+from pathlib import Path
+
 from backend.agent.session import SessionStore
+from backend.agent.session_backend_file import FileBackend
 from backend.server.gateway.handlers.chat import handle_chat_history
 from backend.server.gateway.handlers.sessions import handle_sessions_list, handle_sessions_patch
 
 
 def test_chat_history_includes_saved_thinking(monkeypatch, tmp_path):
-    store = SessionStore(persist_dir=tmp_path)
+    store = SessionStore(backend=FileBackend(Path(tmp_path)))
     monkeypatch.setattr("backend.server.gateway.handlers.chat.get_session_store", lambda: store)
 
     store.save_turn(
@@ -28,7 +31,7 @@ def test_chat_history_includes_saved_thinking(monkeypatch, tmp_path):
 
 
 def test_sessions_patch_persists_reasoning_and_history_returns_levels(monkeypatch, tmp_path):
-    store = SessionStore(persist_dir=tmp_path)
+    store = SessionStore(backend=FileBackend(Path(tmp_path)))
     monkeypatch.setattr("backend.server.gateway.handlers.sessions.get_session_store", lambda: store)
     monkeypatch.setattr("backend.server.gateway.handlers.chat.get_session_store", lambda: store)
 

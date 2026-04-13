@@ -14,6 +14,7 @@ from backend.server.api.routes_activity import router as router_activity
 from backend.server.api.routes_tools import router as router_tools
 from backend.server.api.routes_notify import router as router_notify
 from backend.server.api.routes_reports import router as router_reports
+from backend.server.api.routes_sessions import router as router_sessions
 
 router = APIRouter()
 router.include_router(router_health, tags=["health"])
@@ -27,3 +28,4 @@ router.include_router(router_activity, tags=["activity"])
 router.include_router(router_tools, tags=["tools"])
 router.include_router(router_notify, tags=["notify"])
 router.include_router(router_reports, tags=["reports"])
+router.include_router(router_sessions, tags=["sessions"])

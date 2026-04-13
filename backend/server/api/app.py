@@ -227,6 +227,14 @@ async def startup_event():
                 logger.debug("目录就绪: %s", p)
             except Exception as e:
                 logger.warning("创建目录失败 %s: %s", p, e)
+    try:
+        from backend.agent.session import get_session_store
+
+        get_session_store().ensure_session("wecom", label="企业微信")
+        logger.info("企业微信 session 行已确保（sessions 表 / JSON）")
+    except Exception as e:
+        logger.warning("ensure wecom session 跳过: %s", e)
+
     logger.info("Agent-JK v3 单 Agent 后端启动完成 — %s:%s", Config.API_HOST, Config.API_PORT)
     try:
         start_report_service()

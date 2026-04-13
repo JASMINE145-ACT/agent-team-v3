@@ -818,6 +818,7 @@ class CoreAgent:
                     input_tokens=last_usage.get("prompt_tokens") if last_usage else None,
                     output_tokens=last_usage.get("completion_tokens") if last_usage else None,
                     extra={"tool_renders": tool_renders} if tool_renders else None,
+                    from_user=ctx.get("from_user") or None,
                 )
             except Exception as e:
                 logger.warning("Session save_turn failed: %s", e)

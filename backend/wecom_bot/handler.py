@@ -121,6 +121,7 @@ def _bind_session_file_path(
             session.file_id = file_id
         if excel_meta:
             session.excel_meta = excel_meta
+        store.flush_session_aux(session_id)
     except Exception:
         logger.debug("failed to bind session file_path", exc_info=True)
 
