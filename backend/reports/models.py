@@ -141,6 +141,27 @@ def ensure_tables() -> None:
         conn.close()
 
 
+def reset_stale_running_analyses() -> int:
+    """服务启动时调用：把遗留的 analysis_status='running' 重置为 'failed'。
+    后台分析线程在上次进程退出时已消亡，若不清理会导致前端永久轮询。
+    返回被重置的行数。
+    """
+    try:
+        db_url = get_database_url()
+    except RuntimeError:
+        return 0
+    conn = psycopg2.connect(db_url)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE report_records SET analysis_status='failed' WHERE analysis_status='running'"
+                )
+                return cur.rowcount or 0
+    finally:
+        conn.close()
+
+
 def json_dumps(data: Dict[str, Any]) -> str:
     return json.dumps(data, ensure_ascii=False)
 

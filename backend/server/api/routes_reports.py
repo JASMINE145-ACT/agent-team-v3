@@ -347,3 +347,13 @@ async def reanalyze_record(
         daemon=True,
     ).start()
     return {"success": True}
+
+
+@router.post("/api/reports/reset-stale")
+async def reset_stale_analyses(x_reports_token: str | None = Header(default=None)) -> Dict[str, Any]:
+    """把遗留的 analysis_status='running' 批量重置为 'failed'（进程重启后手动修复脏数据）。"""
+    _require_reports_token(x_reports_token)
+    from backend.reports.models import reset_stale_running_analyses
+
+    count = await asyncio.to_thread(reset_stale_running_analyses)
+    return {"success": True, "reset_count": count}

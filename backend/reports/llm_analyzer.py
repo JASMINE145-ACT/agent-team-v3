@@ -87,9 +87,11 @@ def _message_text(message: Any) -> str:
 
 def call_llm_for_analysis(prompt: str) -> str:
     """调用 Claude Haiku 生成分析文本。"""
+    # 显式超时，避免在 Render 等环境请求挂起导致 analysis_status 永久停留在 running
     client = anthropic.Anthropic(
         api_key=Config.ANTHROPIC_API_KEY,
         base_url=Config.ANTHROPIC_BASE_URL or None,
+        timeout=180.0,
     )
     message = client.messages.create(
         model=ANALYSIS_MODEL,

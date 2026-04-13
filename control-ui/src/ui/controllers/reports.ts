@@ -92,10 +92,22 @@ export async function saveReportTaskConfig(
   }
 }
 
-export async function loadReportDetail(state: ReportsState, id: number): Promise<void> {
-  state.selectedRecordId = id;
-  state.reportDetailLoading = true;
-  state.reportsError = null;
+export type LoadReportDetailOptions = {
+  /** 轮询分析状态时为 true：不切换 reportDetailLoading，避免整页反复进入加载态 */
+  soft?: boolean;
+};
+
+export async function loadReportDetail(
+  state: ReportsState,
+  id: number,
+  opts?: LoadReportDetailOptions,
+): Promise<void> {
+  const soft = opts?.soft === true;
+  if (!soft) {
+    state.selectedRecordId = id;
+    state.reportDetailLoading = true;
+    state.reportsError = null;
+  }
   const requestedId = id;
   try {
     const res = await fetch(apiUrl(state.basePath, `/api/reports/records/${id}`), {
@@ -105,19 +117,24 @@ export async function loadReportDetail(state: ReportsState, id: number): Promise
     if (state.selectedRecordId === requestedId) {
       state.reportDetail = detail;
       const aStatus = detail?.analysis_status;
-      if (aStatus === "running" || aStatus === "pending") {
-        startAnalysisPoller(state, id);
-      } else {
-        stopAnalysisPoller();
+      // soft 轮询时不要重复 startAnalysisPoller，否则会重置定时器与超时计数
+      if (!soft) {
+        if (aStatus === "running" || aStatus === "pending") {
+          startAnalysisPoller(state, id);
+        } else {
+          stopAnalysisPoller();
+        }
       }
     }
   } catch (err) {
-    state.reportsError = err instanceof Error ? err.message : String(err);
-    if (state.selectedRecordId === requestedId) {
+    if (!soft) {
+      state.reportsError = err instanceof Error ? err.message : String(err);
+    }
+    if (state.selectedRecordId === requestedId && !soft) {
       state.reportDetail = null;
     }
   } finally {
-    if (state.selectedRecordId === requestedId) {
+    if (!soft && state.selectedRecordId === requestedId) {
       state.reportDetailLoading = false;
     }
   }
@@ -140,6 +157,9 @@ export async function reformatRecord(state: ReportsState, id: number): Promise<v
 
 let _analysisPoller: ReturnType<typeof window.setInterval> | null = null;
 let _analysisPollInFlight = false;
+/** 约 4 分钟（80×3s）后停止轮询，避免永久请求 */
+let _analysisPollTicks = 0;
+const _ANALYSIS_POLL_MAX_TICKS = 80;
 
 export function stopAnalysisPoller(): void {
   if (_analysisPoller !== null) {
@@ -147,6 +167,7 @@ export function stopAnalysisPoller(): void {
     _analysisPoller = null;
   }
   _analysisPollInFlight = false;
+  _analysisPollTicks = 0;
 }
 
 export function startAnalysisPoller(state: ReportsState, id: number): void {
@@ -159,9 +180,19 @@ export function startAnalysisPoller(state: ReportsState, id: number): void {
     if (_analysisPollInFlight) {
       return;
     }
+    _analysisPollTicks += 1;
+    if (_analysisPollTicks > _ANALYSIS_POLL_MAX_TICKS) {
+      stopAnalysisPoller();
+      const st = state.reportDetail?.analysis_status;
+      if ((st === "running" || st === "pending") && state.reportsError == null) {
+        state.reportsError =
+          "智能分析等待超时。请检查服务端日志与 ANTHROPIC_API_KEY，或稍后点击「重新分析」。";
+      }
+      return;
+    }
     _analysisPollInFlight = true;
     try {
-      await loadReportDetail(state, id);
+      await loadReportDetail(state, id, { soft: true });
       const status = state.reportDetail?.analysis_status;
       if (status === "done" || status === "failed") {
         stopAnalysisPoller();

@@ -202,6 +202,15 @@ async def startup_event():
         setup_tables()
     except Exception as e:
         logger.warning("Admin 数据表初始化跳过: %s", e)
+    # 重置上次进程退出时遗留的 running 分析：线程已消亡，不重置会让前端永久轮询
+    try:
+        from backend.reports.models import reset_stale_running_analyses
+
+        reset_count = reset_stale_running_analyses()
+        if reset_count:
+            logger.warning("已重置 %d 条遗留的 analysis_status=running → failed", reset_count)
+    except Exception as e:
+        logger.debug("reset_stale_running_analyses 跳过（可能无 DATABASE_URL）: %s", e)
     # 注册统一工具层中的后端工具（库存 / 无货登记 / 行情告警）
     try:
         from backend.tools.tool_registry import register_builtin_tools
