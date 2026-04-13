@@ -981,17 +981,34 @@ def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str,
     }
 
 
+_MATCH_QUOTATION_BATCH_MAX_ITEMS = int(
+    getattr(config, "MATCH_QUOTATION_BATCH_MAX_ITEMS", 0) or 0
+) or 15
+
+
 def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     批量询价匹配（只读）：对 keywords_list 中每个产品独立调用 match_quotation，
     每个产品结果各自推送 tool_render SSE，最终返回紧凑汇总供 LLM 用。
     - 入参：keywords_list（产品关键词列表，每项为一个独立产品）、可选 customer_level。
+    - 每次最多 _MATCH_QUOTATION_BATCH_MAX_ITEMS（默认 15）条；超出时截断并告知剩余。
     - 返回：{ success, result(紧凑汇总), items[{ keywords, status, payload }] }。
     """
     keywords_list = arguments.get("keywords_list") or []
     if not isinstance(keywords_list, list) or not keywords_list:
         return {"success": True, "result": "请提供 keywords_list（至少一个产品关键词）。"}
     customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
+
+    # 强制分批：超出上限时只处理前 N 条，并在结果中提示剩余项
+    max_items = _MATCH_QUOTATION_BATCH_MAX_ITEMS
+    remaining_keywords: list[str] = []
+    if len(keywords_list) > max_items:
+        remaining_keywords = [str(k).strip() for k in keywords_list[max_items:] if str(k).strip()]
+        keywords_list = keywords_list[:max_items]
+        logger.warning(
+            "match_quotation_batch: 超出单次上限 %d 条，本次处理前 %d 条，剩余 %d 条需再次调用。",
+            max_items, max_items, len(remaining_keywords),
+        )
 
     items_out: list[dict[str, Any]] = []
     resolved_items: list[dict[str, Any]] = []
@@ -1050,6 +1067,13 @@ def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, c
         f"[已渲染到前端] 批量询价 {n} 个产品：matched={matched_count}, "
         f"pending={pending_count}, unmatched={unmatched_count}。已产出汇总卡片，禁止逐项重复查询。"
     )
+    if remaining_keywords:
+        remaining_hint = (
+            f"\n\n⚠️ 本次仅处理了前 {n} 个产品（单次上限 {max_items} 条）。"
+            f"还有 {len(remaining_keywords)} 个产品未查询，请再次调用 match_quotation_batch，"
+            f"keywords_list={remaining_keywords[:10]}{'…等' if len(remaining_keywords) > 10 else ''}。"
+        )
+        compact += remaining_hint
 
     def _strip_payload(items: list[dict]) -> list[dict]:
         """Strip the internal `payload` field to prevent serialization issues."""

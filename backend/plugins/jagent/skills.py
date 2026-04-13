@@ -15,7 +15,7 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **get_inventory_by_code_batch(codes)**：当用户要求对**多个**编号（如整张表、或 5 个以上编号）查库存时，**必须**使用本工具，一次传入多个物料编号 codes；禁止对每个产品单独多次调用 get_inventory_by_code。单次最多 50 条，更多请分批调用；结果在 data.items 中与输入 1:1 对齐（含 input_index、code、item_status、item）。
 - **modify_inventory(code, action, quantity, memo?)**：**锁定可售**（action=lock，占位）或**增补/归零**（action=supplement）。需物料编号（code）；建议先 get_inventory_by_code 确认。supplement 时 quantity>0 为增补，quantity=0 为将用户仓/可售归零。仅当用户明确说「锁定/预留」「增补/入库/加库存」或「改回 0/归零」时使用。需 INVENTORY_MODIFY_ENABLED=1 才真实写 ACCURATE。
 - **match_quotation(keywords, customer_level?)**：**询价/查 code 时优先用本工具**。同时查报价历史与万鼎字段匹配，结果取并集，每条候选带 **source**（历史报价/字段匹配/共同）。返回格式含 candidates、match_source，单条时含 chosen。这样「直接50mm」等既能命中历史也能命中万鼎时，会显示 共同 或 历史报价。可选参数 `show_all_candidates=true`：跳过 LLM 选型，直接返回所有候选列表（用户说「全部list/所有候选/我想自己选」时使用）。
-- **match_quotation_batch(keywords_list, customer_level?)**：多产品价格查询专用。一次传入多个关键词，逐项返回匹配结果与渲染卡片；同一批次产品禁止再逐个调用 match_quotation，避免重复卡片与重复选型。
+- **match_quotation_batch(keywords_list, customer_level?)**：多产品价格查询专用。一次传入多个关键词，逐项返回匹配结果与渲染卡片；同一批次产品禁止再逐个调用 match_quotation，避免重复卡片与重复选型。**单次最多 15 条**；产品总数 >15 时必须分多次调用（如 40 个产品 → 第1次 1~15，第2次 16~30，第3次 31~40），每次调用完成后再发起下一次，不得一次传入超过 15 个关键词。
 - **select_wanding_match(keywords, candidates)**：LLM 选型。needs_selection 且用户要「选一个」时调用；传入 match_source（来自上一步 observation）。
 - **get_profit_by_price(code?, product_name?, price)**：报价员已知道「万鼎商品编号或完整产品名 + 实际成交价/报单价」时，用本工具在万鼎价格库中锁定对应行与最接近的价格档位，返回该档位的利润率以及所有档位的价格/利润率列表，便于比较。
 - **get_profit_by_price_batch(items)**：当用户要求对**多个**产品（如整张表、或 5 个以上编号）查利润率/档位时，**必须**使用本工具，一次传入多组 { code, price }；禁止对每个产品单独多次调用 get_profit_by_price。单次最多 50 条，更多请分批调用。
@@ -23,7 +23,7 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **查库存的调用顺序（重要）**：① 用户用**中文**说产品名且要查库存（如「50三通的库存」「DN40弯头还有多少」）→ **禁止**直接用 search_inventory（仅适配英文）。应先 **match_quotation(keywords)** 得到 code/候选，再用 **get_inventory_by_code(code)** 查库存；单条候选时直接用其 code，多候选时先选型或取首条。② 用户用**英文**产品名查库存 → 可用 search_inventory(keywords)。③ 用户已给出 10 位物料编号 → 直接用 get_inventory_by_code(code)。
 - **keywords 关键词保护（重要）**：中文管件/产品名称词——「直接（接头）」「直通」「弯头」「三通」「变径」「大小头」「堵头」「管帽」「活接」「由令」「套管」「法兰」「管卡」「管夹」等——**即使语法上看似副词或助词，也必须原样保留在 keywords 中，禁止去除**。例：「直接dn50」→ keywords=「直接dn50」（❌ 不得简化为「dn50」）；「三通 dn25 价格」→ keywords=「三通 dn25」；「弯头dn40库存」→ keywords=「弯头 dn40」。
 - **询价/查 code/查物料编号**：**统一调用 match_quotation**（一次得到历史+万鼎并集及匹配来源），不再切换历史/字段单独工具。得 code 后可用 get_inventory_by_code 查库存。
-- **多产品价格查询**：用户在一条消息里问 ≥2 个产品的价格（如「直接50 三通50 价格」）时，**必须使用 match_quotation_batch(keywords_list=["直接50", "三通50"])** 一次性批量查询，不得把多个产品名拼成一个 keywords 传入 match_quotation，也不得多次单独调用 match_quotation；批量工具为每个产品独立展示报价卡片。**match_quotation_batch 返回后严禁再次调用 match_quotation 查询其中任何产品，否则会出现重复卡片。**
+- **多产品价格查询**：用户在一条消息里问 ≥2 个产品的价格（如「直接50 三通50 价格」）时，**必须使用 match_quotation_batch(keywords_list=["直接50", "三通50"])** 批量查询，不得把多个产品名拼成一个 keywords 传入 match_quotation，也不得多次单独调用 match_quotation。**单次 keywords_list 上限 15 条；超过 15 个产品时必须分多次顺序调用**（例如 40 个 → 第1批 1~15 → 第2批 16~30 → 第3批 31~40），每批调用完再发起下一批，不允许将全部产品塞入一次调用。**每批 match_quotation_batch 返回后严禁再次调用 match_quotation 查询其中任何产品，否则会出现重复卡片。**
 - **「全部价格」「各档价格」**：统一通过 **match_quotation(keywords, customer_level?)** 查询。**档位与自然语言对应**：用户说「**二级代理**」「二级代理价格」→ customer_level=A；「**一级代理**」→ B；「**聚万大客户**」→ C；「**青山大客户**」「青山大客户价格」→ D（降低利润率用 D_low）；「**大唐大客户**」→ E。**出厂/采购价**：用户要「出厂价含税」「出厂价不含税」「采购不含税」时传 customer_level=FACTORY_INC_TAX / FACTORY_EXC_TAX / PURCHASE_EXC_TAX。档位代码：A/B/C/D/D_LOW/E 及 FACTORY_INC_TAX/FACTORY_EXC_TAX/PURCHASE_EXC_TAX。按用户要求的档位查询并汇总成表格「客户级别 | 客户价」。
 - **回复用户时档位一律用全名**：出厂价_含税、出厂价_不含税、采购不含税；（二级代理）A级别 利润率/报单价格；（一级代理）B级别 利润率/报单价格；（聚万大客户）C级别 利润率/报单价格；（青山大客户）D级别 利润率/报单价格/降低利润率；（大唐大客户）E级别（包运费） 利润率/报单价格。表格列名或文中提到价格档位时写上述全名，不要只写 A类/B类。
 - **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。
@@ -107,9 +107,12 @@ INVENTORY & PRICE DECISION RULES
 
 [Batch Handling Rules]
 - IF the user attaches an Excel and asks to check inventory/价格/利润率 for the whole sheet or a large subset,
-  THEN you SHOULD use the batch tools with codes or {code, price} items parsed from the sheet, within the 50-items-per-call limit.
-- IF a batch exceeds the configured max items per call (50),
-  THEN you MUST split it into multiple batch tool calls and KEEP the mapping 1:1 via input_index in the final reply.
+  THEN you SHOULD use the batch tools with codes or {code, price} items parsed from the sheet, within the per-call limit.
+  Per-call limits: match_quotation_batch ≤15 items; get_inventory_by_code_batch ≤50; get_profit_by_price_batch ≤50.
+- IF a batch exceeds the per-call limit,
+  THEN you MUST split it into multiple sequential batch tool calls and KEEP the mapping 1:1 via input_index in the final reply.
+  Example: 40 products → call 1 (items 1-15) → call 2 (items 16-30) → call 3 (items 31-40).
+  NEVER pass more than 15 keywords to match_quotation_batch in a single call.
 
 [Keyword Protection Rules]
 - IF the keywords contain any **Chinese pipe fitting/product terms** such as 「直接（接头）」「直通」「弯头」「三通」「变径」「大小头」「堵头」「管帽」「活接」「由令」「套管」「法兰」「管卡」「管夹」,
