@@ -2619,3 +2619,48 @@
 .work-trace__raw-summary:hover {
   color: var(--text-strong);
 }
+
+/* Agents tab — expandable tool list */
+.tool-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tool-row-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  background: var(--card);
+}
+
+.tool-row-summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-row-summary::before {
+  content: "▶";
+  font-size: 10px;
+  color: var(--muted);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+
+details[open] > .tool-row-summary::before {
+  transform: rotate(90deg);
+}
+
+.tool-row-params {
+  margin: 0;
+  padding: 12px;
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border-top: 1px solid var(--border);
+}

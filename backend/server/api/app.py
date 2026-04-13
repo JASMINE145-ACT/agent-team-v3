@@ -21,6 +21,7 @@ from starlette.responses import FileResponse
 from backend.config import Config, get_primary_react_llm_credentials
 from backend.server.api.routes import router
 from backend.server.api.routes_admin import router as admin_router
+from backend.server.api.routes_agent_info import router as agent_info_router
 from backend.server.api.routes_wecom import router as wecom_router
 from backend.server.gateway.gateway import router as ws_router
 from backend.reports.service import start_report_service, stop_report_service
@@ -37,6 +38,7 @@ app.include_router(router)
 app.include_router(ws_router)
 app.include_router(wecom_router)
 app.include_router(admin_router)
+app.include_router(agent_info_router)
 
 if Config.DEBUG:
     from backend.server.api.routes_debug import router as debug_router

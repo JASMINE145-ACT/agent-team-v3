@@ -2,6 +2,7 @@ import { html, nothing } from "lit";
 import { t } from "../../i18n/index.ts";
 import { normalizeToolName } from "../../agents/tool-policy.ts";
 import type {
+  AgentInfoTool,
   ReportRecord,
   ReportTask,
   ReportTaskConfig,
@@ -24,235 +25,42 @@ import {
   renderSkillStatusChips,
 } from "./skills-shared.ts";
 
-export function renderAgentTools(params: {
-  agentId: string;
-  configForm: Record<string, unknown> | null;
-  configLoading: boolean;
-  configSaving: boolean;
-  configDirty: boolean;
-  onProfileChange: (agentId: string, profile: string | null, clearAllow: boolean) => void;
-  onOverridesChange: (agentId: string, alsoAllow: string[], deny: string[]) => void;
-  onConfigReload: () => void;
-  onConfigSave: () => void;
-}) {
-  const config = resolveAgentConfig(params.configForm, params.agentId);
-  const agentTools = config.entry?.tools ?? {};
-  const globalTools = config.globalTools ?? {};
-  const profile = agentTools.profile ?? globalTools.profile ?? "full";
-  const profileSource = agentTools.profile
-    ? "agent override"
-    : globalTools.profile
-      ? "global default"
-      : "default";
-  const hasAgentAllow = Array.isArray(agentTools.allow) && agentTools.allow.length > 0;
-  const hasGlobalAllow = Array.isArray(globalTools.allow) && globalTools.allow.length > 0;
-  const editable =
-    Boolean(params.configForm) && !params.configLoading && !params.configSaving && !hasAgentAllow;
-  const alsoAllow = hasAgentAllow
-    ? []
-    : Array.isArray(agentTools.alsoAllow)
-      ? agentTools.alsoAllow
-      : [];
-  const deny = hasAgentAllow ? [] : Array.isArray(agentTools.deny) ? agentTools.deny : [];
-  const basePolicy = hasAgentAllow
-    ? { allow: agentTools.allow ?? [], deny: agentTools.deny ?? [] }
-    : (resolveToolProfile(profile) ?? undefined);
-  const toolIds = TOOL_SECTIONS.flatMap((section) => section.tools.map((tool) => tool.id));
-
-  const resolveAllowed = (toolId: string) => {
-    const baseAllowed = isAllowedByPolicy(toolId, basePolicy);
-    const extraAllowed = matchesList(toolId, alsoAllow);
-    const denied = matchesList(toolId, deny);
-    const allowed = (baseAllowed || extraAllowed) && !denied;
-    return {
-      allowed,
-      baseAllowed,
-      denied,
-    };
-  };
-  const enabledCount = toolIds.filter((toolId) => resolveAllowed(toolId).allowed).length;
-
-  const updateTool = (toolId: string, nextEnabled: boolean) => {
-    const nextAllow = new Set(
-      alsoAllow.map((entry) => normalizeToolName(entry)).filter((entry) => entry.length > 0),
-    );
-    const nextDeny = new Set(
-      deny.map((entry) => normalizeToolName(entry)).filter((entry) => entry.length > 0),
-    );
-    const baseAllowed = resolveAllowed(toolId).baseAllowed;
-    const normalized = normalizeToolName(toolId);
-    if (nextEnabled) {
-      nextDeny.delete(normalized);
-      if (!baseAllowed) {
-        nextAllow.add(normalized);
-      }
-    } else {
-      nextAllow.delete(normalized);
-      nextDeny.add(normalized);
-    }
-    params.onOverridesChange(params.agentId, [...nextAllow], [...nextDeny]);
-  };
-
-  const updateAll = (nextEnabled: boolean) => {
-    const nextAllow = new Set(
-      alsoAllow.map((entry) => normalizeToolName(entry)).filter((entry) => entry.length > 0),
-    );
-    const nextDeny = new Set(
-      deny.map((entry) => normalizeToolName(entry)).filter((entry) => entry.length > 0),
-    );
-    for (const toolId of toolIds) {
-      const baseAllowed = resolveAllowed(toolId).baseAllowed;
-      const normalized = normalizeToolName(toolId);
-      if (nextEnabled) {
-        nextDeny.delete(normalized);
-        if (!baseAllowed) {
-          nextAllow.add(normalized);
-        }
-      } else {
-        nextAllow.delete(normalized);
-        nextDeny.add(normalized);
-      }
-    }
-    params.onOverridesChange(params.agentId, [...nextAllow], [...nextDeny]);
-  };
-
+/** 从 GET /api/agent/info 的 tools 列表渲染只读工具清单（名称 + 描述，展开参数）。 */
+export function renderAgentTools(params: { tools: AgentInfoTool[] }) {
+  const { tools } = params;
+  if (tools.length === 0) {
+    return html`
+      <section class="card">
+        <div class="card-title">Tools</div>
+        <div class="muted" style="margin-top: 12px;">暂无已注册工具</div>
+      </section>
+    `;
+  }
   return html`
     <section class="card">
-      <div class="row" style="justify-content: space-between;">
-        <div>
-          <div class="card-title">Tool Access</div>
-          <div class="card-sub">
-            Profile + per-tool overrides for this agent.
-            <span class="mono">${enabledCount}/${toolIds.length}</span> enabled.
-          </div>
-        </div>
-        <div class="row" style="gap: 8px;">
-          <button class="btn btn--sm" ?disabled=${!editable} @click=${() => updateAll(true)}>
-            Enable All
-          </button>
-          <button class="btn btn--sm" ?disabled=${!editable} @click=${() => updateAll(false)}>
-            Disable All
-          </button>
-          <button class="btn btn--sm" ?disabled=${params.configLoading} @click=${params.onConfigReload}>
-            Reload Config
-          </button>
-          <button
-            class="btn btn--sm primary"
-            ?disabled=${params.configSaving || !params.configDirty}
-            @click=${params.onConfigSave}
-          >
-            ${params.configSaving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-
-      ${
-        !params.configForm
-          ? html`
-              <div class="callout info" style="margin-top: 12px">
-                Load the gateway config to adjust tool profiles.
-              </div>
-            `
-          : nothing
-      }
-      ${
-        hasAgentAllow
-          ? html`
-              <div class="callout info" style="margin-top: 12px">
-                This agent is using an explicit allowlist in config. Tool overrides are managed in the Config tab.
-              </div>
-            `
-          : nothing
-      }
-      ${
-        hasGlobalAllow
-          ? html`
-              <div class="callout info" style="margin-top: 12px">
-                Global tools.allow is set. Agent overrides cannot enable tools that are globally blocked.
-              </div>
-            `
-          : nothing
-      }
-
-      <div class="agent-tools-meta" style="margin-top: 16px;">
-        <div class="agent-kv">
-          <div class="label">Profile</div>
-          <div class="mono">${profile}</div>
-        </div>
-        <div class="agent-kv">
-          <div class="label">Source</div>
-          <div>${profileSource}</div>
-        </div>
-        ${
-          params.configDirty
-            ? html`
-                <div class="agent-kv">
-                  <div class="label">Status</div>
-                  <div class="mono">unsaved</div>
-                </div>
-              `
-            : nothing
-        }
-      </div>
-
-      <div class="agent-tools-presets" style="margin-top: 16px;">
-        <div class="label">Quick Presets</div>
-        <div class="agent-tools-buttons">
-          ${PROFILE_OPTIONS.map(
-            (option) => html`
-              <button
-                class="btn btn--sm ${profile === option.id ? "active" : ""}"
-                ?disabled=${!editable}
-                @click=${() => params.onProfileChange(params.agentId, option.id, true)}
-              >
-                ${option.label}
-              </button>
-            `,
-          )}
-          <button
-            class="btn btn--sm"
-            ?disabled=${!editable}
-            @click=${() => params.onProfileChange(params.agentId, null, false)}
-          >
-            Inherit
-          </button>
-        </div>
-      </div>
-
-      <div class="agent-tools-grid" style="margin-top: 20px;">
-        ${TOOL_SECTIONS.map(
-          (section) =>
-            html`
-              <div class="agent-tools-section">
-                <div class="agent-tools-header">${section.label}</div>
-                <div class="agent-tools-list">
-                  ${section.tools.map((tool) => {
-                    const { allowed } = resolveAllowed(tool.id);
-                    return html`
-                      <div class="agent-tool-row">
-                        <div>
-                          <div class="agent-tool-title mono">${tool.label}</div>
-                          <div class="agent-tool-sub">${tool.description}</div>
-                        </div>
-                        <label class="cfg-toggle">
-                          <input
-                            type="checkbox"
-                            .checked=${allowed}
-                            ?disabled=${!editable}
-                            @change=${(e: Event) =>
-                              updateTool(tool.id, (e.target as HTMLInputElement).checked)}
-                          />
-                          <span class="cfg-toggle__track"></span>
-                        </label>
-                      </div>
-                    `;
-                  })}
-                </div>
-              </div>
-            `,
-        )}
+      <div class="card-title">Tools</div>
+      <div class="card-sub">${tools.length} registered</div>
+      <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 4px;">
+        ${tools.map((tool) => renderToolRow(tool))}
       </div>
     </section>
+  `;
+}
+
+function renderToolRow(tool: AgentInfoTool) {
+  const paramsJson = JSON.stringify(tool.parameters, null, 2);
+  const shortDesc =
+    tool.description.length > 80 ? tool.description.slice(0, 80) + "…" : tool.description;
+  return html`
+    <details class="tool-row">
+      <summary class="tool-row-summary">
+        <span class="mono" style="font-weight: 600; min-width: 220px; display: inline-block;"
+          >${tool.name}</span
+        >
+        <span class="muted">${shortDesc}</span>
+      </summary>
+      <pre class="tool-row-params">${paramsJson}</pre>
+    </details>
   `;
 }
 

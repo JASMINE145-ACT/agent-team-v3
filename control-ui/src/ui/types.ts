@@ -734,6 +734,29 @@ export type StatusSummary = Record<string, unknown>;
 
 export type HealthSnapshot = Record<string, unknown>;
 
+export type AgentInfoTool = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+export type AgentInfo = {
+  agent: { name: string; version: string };
+  llm: {
+    primary_model: string;
+    primary_provider: string;
+    fallback_model: string | null;
+    fallback_configured: boolean;
+    max_tokens: number;
+  };
+  health: {
+    status: string;
+    active_sessions: number | null;
+    tool_count: number;
+  };
+  tools: AgentInfoTool[];
+};
+
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
 
 export type LogEntry = {
