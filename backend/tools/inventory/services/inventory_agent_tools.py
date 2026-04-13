@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 from backend.tools.inventory.config import config
@@ -983,7 +984,10 @@ def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str,
 
 _MATCH_QUOTATION_BATCH_MAX_ITEMS = int(
     getattr(config, "MATCH_QUOTATION_BATCH_MAX_ITEMS", 0) or 0
-) or 15
+) or 20  # 并行执行后可适当提高上限
+_MATCH_QUOTATION_BATCH_MAX_WORKERS = int(
+    getattr(config, "MATCH_QUOTATION_BATCH_MAX_WORKERS", 0) or 0
+) or 8  # 单次最大并行线程数（受 LLM API 并发限制）
 
 
 def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1010,28 +1014,21 @@ def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, c
             max_items, max_items, len(remaining_keywords),
         )
 
-    items_out: list[dict[str, Any]] = []
-    resolved_items: list[dict[str, Any]] = []
-    pending_items: list[dict[str, Any]] = []
-    unmatched_items: list[dict[str, Any]] = []
-
-    for idx, kw_raw in enumerate(keywords_list):
+    # 并行查询：每个关键词独立调用 _execute_match_quotation（只读、无共享写状态）
+    # 函数本身已在 asyncio.to_thread 内运行，此处用 ThreadPoolExecutor 再并行 N 条查询
+    def _query_one(idx: int, kw_raw: Any) -> dict[str, Any]:
         kw = (str(kw_raw or "")).strip()
         if not kw:
-            items_out.append({"keywords": kw, "input_index": idx, "status": "skipped"})
-            continue
-
+            return {"keywords": kw, "input_index": idx, "status": "skipped", "payload": {}}
         single_args = {"keywords": kw, "customer_level": customer_level}
         result = _execute_match_quotation(single_args, push_event=None)
         obs_str = result.get("result") or ""
         status = "error" if not result.get("success") else "ok"
         item_entry: dict[str, Any] = {"keywords": kw, "input_index": idx, "status": status}
-
         try:
             payload = json.loads(obs_str)
         except Exception:
             payload = {}
-
         if payload.get("single"):
             raw_chosen = payload.get("chosen") or {}
             safe_chosen = {k: raw_chosen.get(k) for k in _KNOWN_CHOSEN_FIELDS if k in raw_chosen}
@@ -1039,20 +1036,47 @@ def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, c
             item_entry["chosen"] = safe_chosen
             item_entry["chosen_index"] = payload.get("chosen_index")
             item_entry["match_source"] = payload.get("match_source", "")
-            resolved_items.append(item_entry)
         elif payload.get("unmatched"):
             item_entry["status"] = "unmatched"
-            unmatched_items.append(item_entry)
         elif payload.get("needs_selection"):
             item_entry["status"] = "needs_selection"
             item_entry["options"] = payload.get("candidates") or []
             item_entry["match_source"] = payload.get("match_source", "")
-            pending_items.append(item_entry)
         else:
             item_entry["status"] = "unmatched"
-            unmatched_items.append(item_entry)
-
         item_entry["payload"] = payload
+        return item_entry
+
+    max_workers = min(_MATCH_QUOTATION_BATCH_MAX_WORKERS, len(keywords_list))
+    raw_results: list[dict[str, Any]] = [{}] * len(keywords_list)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_query_one, idx, kw_raw): idx
+            for idx, kw_raw in enumerate(keywords_list)
+        }
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                raw_results[idx] = future.result()
+            except Exception as exc:
+                kw = (str(keywords_list[idx] or "")).strip()
+                logger.warning("match_quotation_batch: item %d %r raised: %s", idx, kw, exc)
+                raw_results[idx] = {"keywords": kw, "input_index": idx, "status": "error", "payload": {}}
+
+    items_out: list[dict[str, Any]] = []
+    resolved_items: list[dict[str, Any]] = []
+    pending_items: list[dict[str, Any]] = []
+    unmatched_items: list[dict[str, Any]] = []
+    for item_entry in raw_results:
+        if not item_entry:
+            continue
+        s = item_entry.get("status")
+        if s == "matched":
+            resolved_items.append(item_entry)
+        elif s == "needs_selection":
+            pending_items.append(item_entry)
+        elif s != "skipped":
+            unmatched_items.append(item_entry)
         items_out.append(item_entry)
 
     n = len(keywords_list)
