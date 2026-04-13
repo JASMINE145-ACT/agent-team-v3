@@ -682,3 +682,22 @@ Implemented session storage strategy in repo path **`agent-team-v3/`** (parallel
 ### Status
 
 [OK] **Completed**（配置修正）；线上行为需用户在 Render 日志与环境变量中核对。
+
+## Session 28: 2026-04-13 — 周报「分析中」无限轮询与遗留 running 修复
+
+**Date**: 2026-04-13
+
+### Summary
+
+- **根因**：进程重启后 `run_llm_analysis` 守护线程消失，但 `report_records.analysis_status` 仍可能为 **`running`**；前端对 `pending`/`running` 每 3s 轮询，且旧版 `loadReportDetail` 每次把 **`reportDetailLoading=true`**，表现为整页闪刷、永远「分析中」。
+- **后端**：`reset_stale_running_analyses()` 在 **startup** 将遗留 `running` → `failed`；`POST /api/reports/reset-stale` 供带 token 手动批量修复；`llm_analyzer` 对 Anthropic 设 **`timeout=180s`**，降低再次挂死概率。
+- **前端**：轮询使用 **`loadReportDetail(..., { soft: true })`**，不切换 loading；仅非 soft 首次加载时启停 poller，避免重置轮询计数；约 **80×3s** 硬停并提示检查配置或「重新分析」。
+- **Git**：`dbae649`（`fix(reports): stop infinite poll; reset stale running analysis on startup`），含 `dist/control-ui` 重建。
+
+### Testing
+
+- [OK] `py -m pytest tests/test_reports_llm_analyzer.py tests/test_reports_analyzer.py -q`
+
+### Status
+
+[OK] **Completed**

@@ -9,8 +9,8 @@
 | Item | Status |
 |------|--------|
 | Active File | `journal-2.md` |
-| Total Sessions | 26 |
-| Last Active | 2026-04-12 |
+| Total Sessions | 28 |
+| Last Active | 2026-04-13 |
 
 ---
 
@@ -19,7 +19,7 @@
 | File | Lines | Status |
 |------|-------|--------|
 | `journal-1.md` | ~230 | Archived |
-| `journal-2.md` | ~650 | Active |
+| `journal-2.md` | ~720 | Active |
 
 ---
 
@@ -27,6 +27,8 @@
 
 | # | Date | Title |
 |---|------|-------|
+| 28 | 2026-04-13 | 周报分析无限轮询修复（startup 重置 running + soft poll + LLM timeout） |
+| 27 | 2026-04-12 | Render 部署 / WebSocket 与 render.yaml DEBUG |
 | 26 | 2026-04-12 | Session Neon persistence（agent-team-v3：SessionBackend / WeCom / API） |
 | 25 | 2026-04-12 | 周报两阶段管道（analysis_md + LLM + Lit reports UI） |
 | 13 | 2026-04-03 | GLM 思考模型 Plan B（reasoning_content fallback + max_tokens 16000） |

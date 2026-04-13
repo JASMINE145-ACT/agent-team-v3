@@ -65,6 +65,18 @@ All tools are exposed through a single `CoreAgent` ReAct loop. No multi-agent or
 ### Rework Mechanism
 User says "错了"/"不对" → agent detects rework intent → presents candidates → user confirms → `record_correction_to_knowledge` writes to knowledge base.
 
+### Weekly reports: `analysis_status` and process restarts (2026-04)
+
+Phase-2 LLM analysis runs in a **daemon thread** (`run_llm_analysis` from `runner.py` / `reanalyze`). If the process exits while `analysis_status='running'`, no thread completes the update — the row stays `running` forever and the control UI polls until timeout.
+
+**Mitigations in code** (see `backend/reports/models.py`, `app.py` startup, `routes_reports.py`):
+
+- On **application startup**, call `reset_stale_running_analyses()` to set any remaining `running` → `failed` (orphaned work).
+- Optional **manual** repair: `POST /api/reports/reset-stale` with `x-reports-token`.
+- LLM call uses an explicit **HTTP timeout** on the Anthropic client so analysis does not hang indefinitely without a terminal status.
+
+Frontend polling uses a **soft** `loadReportDetail` mode so the detail view does not toggle full-page loading on every poll.
+
 ### Tools via AgentExtension
 Business tools register via `AgentExtension.register(ctx)` → `ctx.register_tool(definition, handler)`.
 Skills layer (`plugins/jagent/skills.py`) provides `SKILL_KNOWLEDGE_DOC` and `SKILL_KNOWLEDGE_RULES` for LLM guidance.
