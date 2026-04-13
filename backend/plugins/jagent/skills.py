@@ -24,6 +24,7 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **keywords 关键词保护（重要）**：中文管件/产品名称词——「直接（接头）」「直通」「弯头」「三通」「变径」「大小头」「堵头」「管帽」「活接」「由令」「套管」「法兰」「管卡」「管夹」等——**即使语法上看似副词或助词，也必须原样保留在 keywords 中，禁止去除**。例：「直接dn50」→ keywords=「直接dn50」（❌ 不得简化为「dn50」）；「三通 dn25 价格」→ keywords=「三通 dn25」；「弯头dn40库存」→ keywords=「弯头 dn40」。
 - **询价/查 code/查物料编号**：**统一调用 match_quotation**（一次得到历史+万鼎并集及匹配来源），不再切换历史/字段单独工具。得 code 后可用 get_inventory_by_code 查库存。
 - **多产品价格查询**：用户在一条消息里问 ≥2 个产品的价格（如「直接50 三通50 价格」）时，**必须使用 match_quotation_batch(keywords_list=["直接50", "三通50"])** 批量查询，不得把多个产品名拼成一个 keywords 传入 match_quotation，也不得多次单独调用 match_quotation。**单次 keywords_list 上限 20 条；超过 20 个产品时必须分多次顺序调用**（例如 45 个 → 第1批 1~20 → 第2批 21~40 → 第3批 41~45），每批调用完再发起下一批，不允许将全部产品塞入一次调用。**每批 match_quotation_batch 返回后严禁再次调用 match_quotation 查询其中任何产品，否则会出现重复卡片。**
+- **批量关键词抽取（禁止脑补，重要）**：当用户给出原始清单（多行/逗号/顿号分隔）时，`keywords_list` **只能**来自用户消息中可见的条目逐条抽取；**禁止**补全“常见规格”、禁止“继续添加剩余产品”、禁止把未出现的产品/规格写入列表。拿不准的行应原样保留并标记待确认，而不是自行扩展。
 - **「全部价格」「各档价格」**：统一通过 **match_quotation(keywords, customer_level?)** 查询。**档位与自然语言对应**：用户说「**二级代理**」「二级代理价格」→ customer_level=A；「**一级代理**」→ B；「**聚万大客户**」→ C；「**青山大客户**」「青山大客户价格」→ D（降低利润率用 D_low）；「**大唐大客户**」→ E。**出厂/采购价**：用户要「出厂价含税」「出厂价不含税」「采购不含税」时传 customer_level=FACTORY_INC_TAX / FACTORY_EXC_TAX / PURCHASE_EXC_TAX。档位代码：A/B/C/D/D_LOW/E 及 FACTORY_INC_TAX/FACTORY_EXC_TAX/PURCHASE_EXC_TAX。按用户要求的档位查询并汇总成表格「客户级别 | 客户价」。
 - **回复用户时档位一律用全名**：出厂价_含税、出厂价_不含税、采购不含税；（二级代理）A级别 利润率/报单价格；（一级代理）B级别 利润率/报单价格；（聚万大客户）C级别 利润率/报单价格；（青山大客户）D级别 利润率/报单价格/降低利润率；（大唐大客户）E级别（包运费） 利润率/报单价格。表格列名或文中提到价格档位时写上述全名，不要只写 A类/B类。
 - **needs_selection 时**：用户要「全部价格/所有匹配/列出所有候选」→ 不调 select_wanding_match，直接用 observation 里 candidates 整表回复；要「某一款/选一个」→ 必须 select_wanding_match。
@@ -111,8 +112,12 @@ INVENTORY & PRICE DECISION RULES
   Per-call limits: match_quotation_batch ≤20 items; get_inventory_by_code_batch ≤50; get_profit_by_price_batch ≤50.
 - IF a batch exceeds the per-call limit,
   THEN you MUST split it into multiple sequential batch tool calls and KEEP the mapping 1:1 via input_index in the final reply.
-  Example: 40 products → call 1 (items 1-15) → call 2 (items 16-30) → call 3 (items 31-40).
-  NEVER pass more than 15 keywords to match_quotation_batch in a single call.
+  Example: 45 products → call 1 (items 1-20) → call 2 (items 21-40) → call 3 (items 41-45).
+  NEVER pass more than 20 keywords to match_quotation_batch in a single call.
+- IF the user provides a raw multi-line list/query,
+  THEN `keywords_list` MUST be an exact extraction from that raw text (order-preserving), and you MUST NOT invent, autocomplete, or infer missing sizes/items not explicitly present in the user message.
+- IF an extracted line is ambiguous,
+  THEN keep the original line text unchanged in `keywords_list` and ask the user to confirm; DO NOT normalize/expand that line by yourself.
 
 [Keyword Protection Rules]
 - IF the keywords contain any **Chinese pipe fitting/product terms** such as 「直接（接头）」「直通」「弯头」「三通」「变径」「大小头」「堵头」「管帽」「活接」「由令」「套管」「法兰」「管卡」「管夹」,

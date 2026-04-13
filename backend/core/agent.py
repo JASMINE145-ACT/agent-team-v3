@@ -103,6 +103,63 @@ def _detect_inventory_intent(user_input: str) -> bool:
     return any(kw in text for kw in _INVENTORY_INTENT_KEYWORDS)
 
 
+_FOLLOWUP_CARD_HINT_WORDS = (
+    "这个", "对应", "上面", "那个", "其", "该产品", "这些", "这批", "上一条", "刚才", "对应库存"
+)
+
+
+def _detect_card_followup_intent(user_input: str) -> bool:
+    text = str(user_input or "").strip()
+    if not text:
+        return False
+    if len(text) > 50:
+        return False
+    return any(h in text for h in _FOLLOWUP_CARD_HINT_WORDS)
+
+
+def _extract_card_refs_from_obs(name: str, args: dict, obs: str) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    try:
+        data = json.loads(obs)
+    except Exception:
+        return refs
+    ts = int(time.time() * 1000)
+    if name == "match_quotation" and isinstance(data, dict) and data.get("single"):
+        chosen = data.get("chosen") or {}
+        refs.append(
+            {
+                "keywords": str(args.get("keywords") or "").strip(),
+                "code": str(chosen.get("code") or "").strip(),
+                "matched_name": str(chosen.get("matched_name") or "").strip(),
+                "unit_price": chosen.get("unit_price"),
+                "match_source": str(data.get("match_source") or "").strip(),
+                "chosen_index": data.get("chosen_index"),
+                "source_tool": name,
+                "ts": ts,
+            }
+        )
+    elif name == "match_quotation_batch" and isinstance(data, dict):
+        resolved_items = data.get("resolved_items") or []
+        if isinstance(resolved_items, list):
+            for item in resolved_items:
+                if not isinstance(item, dict):
+                    continue
+                chosen = item.get("chosen") or {}
+                refs.append(
+                    {
+                        "keywords": str(item.get("keywords") or "").strip(),
+                        "code": str(chosen.get("code") or "").strip(),
+                        "matched_name": str(chosen.get("matched_name") or "").strip(),
+                        "unit_price": chosen.get("unit_price"),
+                        "match_source": str(item.get("match_source") or "").strip(),
+                        "chosen_index": item.get("chosen_index"),
+                        "source_tool": name,
+                        "ts": ts,
+                    }
+                )
+    return refs
+
+
 def _should_use_anthropic_messages_api(base_url: str) -> bool:
     """
     是否对当前 base_url 使用 Anthropic Messages SDK（如 MiniMax …/anthropic）。
@@ -234,6 +291,7 @@ class CoreAgent:
 
         user_content = user_input.strip()
         ctx = context or {}
+        card_followup_intent = _detect_card_followup_intent(user_input)
         if session_id:
             ctx.setdefault("session_id", session_id)
         # 若上层未显式设置 preferred_lang，则在核心入口做一次轻量语言检测兜底
@@ -287,6 +345,13 @@ class CoreAgent:
                         user_content += f"\n\n{tool_injection}"
                 except Exception:
                     logger.debug("build_tool_memory_injection 失败，已忽略", exc_info=True)
+            if card_followup_intent:
+                try:
+                    card_injection = self._store.build_card_memory_injection(session, max_items=3)
+                    if card_injection:
+                        user_content += f"\n\n{card_injection}"
+                except Exception:
+                    logger.debug("build_card_memory_injection 失败，已忽略", exc_info=True)
             # U 型注意力：把「本对话当前主题」放在 user 消息绝对末尾，便于模型绑定上一轮与本句
             if session.turns:
                 last_q = (session.turns[-1].query or "").strip()[:80]
@@ -677,6 +742,7 @@ class CoreAgent:
                             obs[:max_chars]
                             + "\n\n…（以上结果因长度限制已截断。行数已按解析结果完整计算，请基于已有内容回答，勿重复调用解析工具。）"
                         )
+                    raw_obs = obs
 
                     for ext in self._extensions:
                         try:
@@ -693,7 +759,7 @@ class CoreAgent:
                     # Rework 机制：当 match_quotation 返回 needs_human_choice 时，存入 session
                     if name == "match_quotation" and session_id and self._store:
                         try:
-                            parsed_obs = json.loads(obs)
+                            parsed_obs = json.loads(raw_obs)
                             if isinstance(parsed_obs, dict) and parsed_obs.get("needs_human_choice"):
                                 self._store.set_pending_human_choice(session_id, parsed_obs)
                             elif parsed_obs.get("single") and session_id:
@@ -743,6 +809,12 @@ class CoreAgent:
                             self._store.append_tool_memory(session_id, record)
                         except Exception:
                             logger.debug("append_tool_memory 失败，已忽略", exc_info=True)
+                        try:
+                            card_refs = _extract_card_refs_from_obs(name, args, raw_obs)
+                            if card_refs:
+                                self._store.append_card_refs(session_id, card_refs, limit=30)
+                        except Exception:
+                            logger.debug("append_card_refs 失败，已忽略", exc_info=True)
 
                     if on_event:
                         try:

@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from dataclasses import asdict, dataclass
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -272,6 +273,100 @@ class SessionStore:
         if len(recent) > limit:
             session.tool_memory["recent_tools"] = recent[-limit:]
         self._persist_sidecar(session)
+
+    def append_card_refs(self, session_id: str, refs: List[Dict[str, Any]], limit: int = 30) -> None:
+        """
+        Persist structured card references for follow-up pronoun queries.
+        De-duplicate by (keywords, code); refresh timestamp and latest fields.
+        """
+        if not refs:
+            return
+        session = self.load(session_id)
+        if session.tool_memory is None:
+            session.tool_memory = {"recent_tools": [], "card_refs": []}
+        card_refs = session.tool_memory.setdefault("card_refs", [])
+        if not isinstance(card_refs, list):
+            card_refs = []
+            session.tool_memory["card_refs"] = card_refs
+
+        def _norm_text(v: Any) -> str:
+            return str(v or "").strip()
+
+        for raw in refs:
+            if not isinstance(raw, dict):
+                continue
+            ref = {
+                "keywords": _norm_text(raw.get("keywords")),
+                "code": _norm_text(raw.get("code")),
+                "matched_name": _norm_text(raw.get("matched_name")),
+                "unit_price": raw.get("unit_price"),
+                "match_source": _norm_text(raw.get("match_source")),
+                "chosen_index": raw.get("chosen_index"),
+                "source_tool": _norm_text(raw.get("source_tool")),
+                "ts": int(raw.get("ts") or int(time.time() * 1000)),
+            }
+            if not (ref["keywords"] or ref["code"]):
+                continue
+
+            dedup_idx = None
+            for i, old in enumerate(card_refs):
+                if not isinstance(old, dict):
+                    continue
+                if (
+                    _norm_text(old.get("keywords")) == ref["keywords"]
+                    and _norm_text(old.get("code")) == ref["code"]
+                ):
+                    dedup_idx = i
+                    break
+            if dedup_idx is not None:
+                card_refs[dedup_idx] = ref
+            else:
+                card_refs.append(ref)
+
+        card_refs.sort(key=lambda x: int((x or {}).get("ts") or 0))
+        if len(card_refs) > limit:
+            session.tool_memory["card_refs"] = card_refs[-limit:]
+        self._persist_sidecar(session)
+
+    def build_card_memory_injection(self, session: Session, max_items: int = 3) -> str:
+        tm = session.tool_memory or {}
+        refs = tm.get("card_refs") or []
+        if not isinstance(refs, list) or not refs:
+            return ""
+        tail = refs[-max_items:]
+        tail = sorted(tail, key=lambda x: int((x or {}).get("ts") or 0), reverse=True)
+        lines: List[str] = ["[最近卡片摘要]"]
+
+        def _safe_text(v: Any, cap: int = 80) -> str:
+            s = str(v or "")
+            # Neutralize control/new lines and prompt-like formatting markers.
+            s = s.replace("\r", " ").replace("\n", " ").replace("\t", " ").strip()
+            s = s.replace("```", "").replace("[", "(").replace("]", ")")
+            s = json.dumps(s, ensure_ascii=False)[1:-1]
+            if len(s) > cap:
+                s = s[: cap - 1] + "…"
+            return s
+
+        for idx, ref in enumerate(tail, 1):
+            if not isinstance(ref, dict):
+                continue
+            keywords = _safe_text(ref.get("keywords"), cap=80)
+            code = _safe_text(ref.get("code"), cap=32)
+            name = _safe_text(ref.get("matched_name"), cap=100)
+            price = ref.get("unit_price")
+            source = _safe_text(ref.get("match_source"), cap=40)
+            if not (keywords or code or name):
+                continue
+            line = (
+                f"{idx}. keywords={keywords} | code={code} | "
+                f"name={name} | price={price} | source={source}"
+            )
+            if len(line) > 220:
+                line = line[:217] + "..."
+            lines.append(line)
+        if len(lines) == 1:
+            return ""
+        return "\n".join(lines)
 
     def update_user_facts(self, session_id: str, patch: Dict[str, Any]) -> None:
         if not patch:

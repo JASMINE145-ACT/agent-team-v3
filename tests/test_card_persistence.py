@@ -160,3 +160,64 @@ def test_chat_history_wrapper_text_preserved_when_tool_renders_present(tmp_path)
     assert len(messages) == 3
     assert messages[1]["__openclaw"]["kind"] == "tool_render"
     assert "以下是" in messages[2]["content"][-1]["text"]
+
+
+def test_append_card_refs_dedup_and_limit(tmp_path):
+    """append_card_refs should deduplicate by (keywords, code) and enforce limit."""
+    store = _file_store(tmp_path)
+    store.append_card_refs("sess-card-1", [
+        {
+            "keywords": "PPR 冷水管 1/2寸",
+            "code": "8010060771",
+            "matched_name": "name-a",
+            "unit_price": 1.0,
+            "match_source": "字段匹配",
+            "chosen_index": 1,
+            "source_tool": "match_quotation",
+            "ts": 1000,
+        },
+        {
+            "keywords": "PPR 冷水管 1/2寸",
+            "code": "8010060771",
+            "matched_name": "name-a-new",
+            "unit_price": 2.0,
+            "match_source": "共同",
+            "chosen_index": 1,
+            "source_tool": "match_quotation",
+            "ts": 2000,
+        },
+        {
+            "keywords": "PPR 冷水管 3/4寸",
+            "code": "8010062266",
+            "matched_name": "name-b",
+            "unit_price": 3.0,
+            "match_source": "共同",
+            "chosen_index": 1,
+            "source_tool": "match_quotation_batch",
+            "ts": 3000,
+        },
+    ], limit=2)
+    session = store.load("sess-card-1")
+    refs = (session.tool_memory or {}).get("card_refs") or []
+    assert len(refs) == 2
+    assert refs[0]["code"] == "8010060771"
+    assert refs[0]["matched_name"] == "name-a-new"
+    assert refs[1]["code"] == "8010062266"
+
+
+def test_build_card_memory_injection(tmp_path):
+    """build_card_memory_injection should render recent refs in reverse recency order."""
+    store = _file_store(tmp_path)
+    sid = "sess-card-2"
+    store.append_card_refs(sid, [
+        {"keywords": "A", "code": "1", "matched_name": "n1", "unit_price": 11, "match_source": "s1", "ts": 1000},
+        {"keywords": "B", "code": "2", "matched_name": "n2", "unit_price": 22, "match_source": "s2", "ts": 2000},
+        {"keywords": "C", "code": "3", "matched_name": "n3", "unit_price": 33, "match_source": "s3", "ts": 3000},
+    ])
+    session = store.load(sid)
+    text = store.build_card_memory_injection(session, max_items=2)
+    assert "[最近卡片摘要]" in text
+    # latest first
+    assert "keywords=C" in text
+    assert "keywords=B" in text
+    assert "keywords=A" not in text
