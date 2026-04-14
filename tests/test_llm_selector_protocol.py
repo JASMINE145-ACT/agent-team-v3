@@ -147,6 +147,40 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.get("code"), "C001")
 
+    @patch("openai.OpenAI")
+    def test_rule_fallback_prefers_corrugated_semantics_over_dn_only_match(self, mock_openai_cls):
+        """For 双壁波纹管 + 10KN + DN300mm, fallback should pick SN8 corrugated pipe."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = RuntimeError("mock llm down")
+        mock_openai_cls.return_value = mock_client
+
+        candidates = [
+            {
+                "code": "8020013762",
+                "matched_name": "印尼(日标)PVC-U排水扩直口管(D排水系列)白色 DN300 (12\") 4M/根 联塑",
+                "unit_price": 880247.0,
+                "source": "共同",
+            },
+            {
+                "code": "8020035096",
+                "matched_name": "(IDN)PIPE双壁波纹管(带扩口) SN4 300 6M/根(N1)",
+                "unit_price": 843177.0,
+                "source": "字段匹配",
+            },
+            {
+                "code": "8020035099",
+                "matched_name": "(IDN)PIPE双壁波纹管(带扩口) SN8 300 6M/根(N1)",
+                "unit_price": 1002854.0,
+                "source": "字段匹配",
+            },
+        ]
+
+        from backend.tools.inventory.services.llm_selector import llm_select_best
+        result = llm_select_best("双壁波纹管10KN DN300mm", candidates)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("code"), "8020035099")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

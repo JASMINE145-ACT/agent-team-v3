@@ -21,6 +21,25 @@ logger = logging.getLogger(__name__)
 # cache format: {"path": str, "mtime": float | None, "content": str}
 _business_knowledge_cache: dict[str, Any] = {}
 
+# Module-level singleton for the fast-path OpenAI client (avoids TCP reconnect per call).
+_selector_client: Any = None
+
+
+def _get_selector_client(api_key: str, base_url: str | None) -> Any:
+    """Return (and lazily create) the module-level fast-path OpenAI client."""
+    global _selector_client
+    if _selector_client is None:
+        from openai import OpenAI
+
+        _selector_client = OpenAI(api_key=api_key, base_url=base_url or None)
+    return _selector_client
+
+
+def _reset_selector_client() -> None:
+    """Reset the singleton — used in tests to force re-creation with new credentials."""
+    global _selector_client
+    _selector_client = None
+
 _BUSINESS_KNOWLEDGE = """
 候选选择业务规则（摘要）：
 1. 选择与关键词最贴近的规格、材质、口径、用途。
@@ -253,12 +272,119 @@ def _extract_content_from_openai_response(resp: Any) -> tuple[str, str, int]:
     return content, str(finish_reason or ""), reasoning_len
 
 
+def _fast_path(
+    keywords: str,
+    candidates: list[dict[str, Any]],
+    config: Any,
+    selector_model: str,
+    knowledge_override: str | None,
+) -> Optional[dict[str, Any]]:
+    """
+    Fast selector path for non-thinking models (e.g. gpt-4o-mini).
+    Uses response_format=json_object and max_tokens=120.
+    Falls back to _rule_based_fallback on any error.
+    """
+    if not candidates:
+        return None
+
+    candidate_limit = int(
+        getattr(config, "LLM_SELECTOR_CANDIDATE_LIMIT", _SELECTOR_DEFAULT_CANDIDATE_LIMIT)
+        if config is not None
+        else _SELECTOR_DEFAULT_CANDIDATE_LIMIT
+    )
+    candidate_limit = max(1, min(candidate_limit, 20))
+
+    knowledge_limit = int(
+        getattr(config, "LLM_SELECTOR_KNOWLEDGE_CHAR_LIMIT", _SELECTOR_DEFAULT_KNOWLEDGE_CHAR_LIMIT)
+        if config is not None
+        else _SELECTOR_DEFAULT_KNOWLEDGE_CHAR_LIMIT
+    )
+    knowledge_limit = max(200, min(knowledge_limit, 4000))
+    _full_knowledge: bool = (
+        os.environ.get("INVENTORY_LLM_SELECTOR_FULL_KNOWLEDGE", "1").strip().lower()
+        in ("1", "true", "yes")
+    )
+
+    sorted_candidates = _sort_candidates_by_source(candidates)
+    llm_candidates = sorted_candidates[:candidate_limit]
+
+    knowledge = (
+        knowledge_override.strip()
+        if knowledge_override and knowledge_override.strip()
+        else _load_business_knowledge()
+    )
+    knowledge_hint = (
+        knowledge if _full_knowledge else _build_knowledge_hint(keywords, knowledge, knowledge_limit)
+    )
+
+    prompt = _build_selector_prompt(keywords, llm_candidates, knowledge_hint)
+
+    api_key = getattr(config, "LLM_SELECTOR_API_KEY", "") if config is not None else ""
+    base_url_raw = getattr(config, "LLM_SELECTOR_BASE_URL", "") if config is not None else ""
+    base_url = base_url_raw.strip() or None
+    timeout = int(getattr(config, "LLM_SELECTOR_TIMEOUT", 15)) if config is not None else 15
+
+    try:
+        client = _get_selector_client(api_key, base_url)
+
+        logger.info(
+            "llm_select_best (fast): model=%s n_candidates=%d prompt_chars=%d",
+            selector_model,
+            len(candidates),
+            len(prompt),
+        )
+
+        resp = client.chat.completions.create(
+            model=selector_model,
+            messages=[
+                {"role": "system", "content": _SYSTEM_SELECTOR},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=120,
+            timeout=timeout,
+            response_format={"type": "json_object"},
+        )
+
+        raw = resp.choices[0].message.content if resp and resp.choices else ""
+        content = (raw or "").strip()
+        if not content:
+            raise ValueError("fast path: empty content from model")
+
+        obj = json.loads(content)
+        idx = int(obj.get("index", 0) or 0)
+        reason = str(obj.get("reason") or obj.get("reasoning") or "")[:_SELECTOR_REASON_MAX_LEN]
+
+        if idx <= 0:
+            return None
+        if idx > len(llm_candidates):
+            return _rule_based_fallback(keywords, candidates, reason="llm_index_out_of_range")
+
+        return _candidate_to_result(llm_candidates[idx - 1], reason)
+
+    except Exception as e:
+        logger.warning("fast path selector failed, fallback to rules: %s", e)
+        return _rule_based_fallback(keywords, candidates, reason="llm_error")
+
+
 def llm_select_best(
     keywords: str,
     candidates: list[dict[str, Any]],
     max_tokens: int | None = None,
+    knowledge_override: str | None = None,
 ) -> Optional[dict[str, Any]]:
-    """Select the best candidate by LLM; return None when LLM decides index=0."""
+    """Select the best candidate by LLM; return None when LLM decides index=0.
+
+    When LLM_SELECTOR_MODEL is set in config, routes to the fast path
+    (_fast_path) which uses a non-thinking model with response_format=json_object
+    and max_tokens=120. Otherwise uses the original glm-4.5-air path unchanged.
+
+    Args:
+        keywords: Product search keywords.
+        candidates: List of candidate dicts with keys: code, matched_name, unit_price, source.
+        max_tokens: Override max_tokens for the old path only. Ignored by fast path.
+        knowledge_override: Override the business knowledge text (fast path only; legacy path ignores).
+    """
     if not candidates:
         return None
 
@@ -266,6 +392,15 @@ def llm_select_best(
         from backend.tools.inventory.config import config
     except Exception:
         config = None
+
+    selector_model = (getattr(config, "LLM_SELECTOR_MODEL", "") or "").strip() if config is not None else ""
+    selector_api_key = (getattr(config, "LLM_SELECTOR_API_KEY", "") or "").strip() if config is not None else ""
+    if selector_model and selector_api_key:
+        return _fast_path(keywords, candidates, config, selector_model, knowledge_override)
+    if selector_model and not selector_api_key:
+        logger.warning(
+            "LLM_SELECTOR_MODEL is set but LLM_SELECTOR_API_KEY is empty; using legacy selector path"
+        )
 
     if max_tokens is None:
         max_tokens = int(
@@ -322,7 +457,7 @@ def llm_select_best(
             else "https://open.bigmodel.cn/api/paas/v4"
         )
         model = getattr(config, "LLM_MODEL", "glm-4.5-air") if config is not None else "glm-4.5-air"
-        timeout = int(getattr(config, "LLM_SELECTOR_TIMEOUT", 22)) if config is not None else 22
+        timeout = int(getattr(config, "LLM_SELECTOR_TIMEOUT", 40)) if config is not None else 40
         mt = min(max(32, int(max_tokens or _SELECTOR_DEFAULT_MAX_TOKENS)), _SELECTOR_MAX_TOKENS_CAP)
 
         from openai import OpenAI
@@ -451,6 +586,10 @@ def _rule_based_fallback(
         return None
 
     kw_tokens = _extract_keyword_tokens(keywords)
+    kw_low = (keywords or "").lower()
+    m_size_mm = re.search(r"(?:dn\s*)?(\d{2,4})\s*mm", kw_low)
+    mm_size = m_size_mm.group(1) if m_size_mm else None
+    kw_corrugated = ("双壁波纹管" in kw_low) or ("corrugated" in kw_low)
 
     best = None
     best_score = -10**9
@@ -468,6 +607,33 @@ def _rule_based_fallback(
         m_dn = re.search(r"dn\s*(\d+)", (keywords or "").lower())
         if m_dn and f"dn{m_dn.group(1)}" in low.replace(" ", ""):
             score += 5
+        # support non-DN size text such as "300mm" against names like "SN8 300"
+        if mm_size and re.search(rf"(?<!\d){re.escape(mm_size)}(?!\d)", low):
+            score += 4
+
+        # semantic hard preferences (higher than source tie-break)
+        if "双壁波纹管" in kw_low:
+            if "双壁波纹管" in low:
+                score += 12
+            else:
+                score -= 8
+        if "热水" in kw_low or "热给水" in kw_low:
+            if "热给水" in low:
+                score += 8
+            if "冷给水" in low:
+                score -= 7
+        if "冷水" in kw_low or "冷给水" in kw_low:
+            if "冷给水" in low:
+                score += 8
+            if "热给水" in low:
+                score -= 7
+
+        # rating level hints in drainage corrugated pipe domain: 10KN ~= SN8
+        if kw_corrugated and "10kn" in kw_low:
+            if "sn8" in low:
+                score += 8
+            if "sn4" in low:
+                score -= 4
 
         # source priority: 共同 > 历史报价 > 字段匹配
         rank = _source_rank(src)

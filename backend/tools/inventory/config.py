@@ -158,6 +158,11 @@ class InventoryConfig:
     LLM_MODEL: str = _inv_llm_model_raw
     LLM_MAX_TOKENS: int = int(os.environ.get("LLM_MAX_TOKENS", "8192"))
     LLM_SELECTOR_MAX_TOKENS: int = int(os.environ.get("LLM_SELECTOR_MAX_TOKENS", "3000"))
+    LLM_SELECTOR_TIMEOUT: int = int(os.environ.get("LLM_SELECTOR_TIMEOUT", "40"))
+    # Fast-path selector model (leave empty to keep old glm-4.5-air path)
+    LLM_SELECTOR_MODEL: str = os.environ.get("LLM_SELECTOR_MODEL", "").strip()
+    LLM_SELECTOR_API_KEY: str = os.environ.get("LLM_SELECTOR_API_KEY", "").strip()
+    LLM_SELECTOR_BASE_URL: str = os.environ.get("LLM_SELECTOR_BASE_URL", "").strip()
     TOOL_RESULT_MAX_CHARS: int = int(os.environ.get("TOOL_RESULT_MAX_CHARS", "8000"))
     LLM_TIMEOUT: int = int(os.environ.get("LLM_TIMEOUT", "60"))
     TOOL_EXEC_TIMEOUT: int = int(os.environ.get("TOOL_EXEC_TIMEOUT", "90"))  # AOL 多 code 时需多次 API 调用，35s 易超时
