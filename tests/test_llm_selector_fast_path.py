@@ -4,7 +4,7 @@ Tests for llm_select_best fast path (LLM_SELECTOR_MODEL set).
 Fast path contract:
 - Triggered when config.LLM_SELECTOR_MODEL is non-empty
 - Uses response_format=json_object
-- Uses max_tokens=120
+- Uses a bounded output cap (default 500 tokens)
 - Uses module-level singleton client (not a new instance each call)
 - Falls back to rules on any error
 - knowledge_override is forwarded to prompt builder
@@ -28,10 +28,14 @@ CANDIDATES = [
 ]
 
 
-def _make_resp(content: str, finish_reason: str = "stop") -> MagicMock:
+def _make_resp(
+    content: str | None,
+    finish_reason: str = "stop",
+    reasoning_content: str | None = None,
+) -> MagicMock:
     msg = MagicMock()
     msg.content = content
-    msg.reasoning_content = None
+    msg.reasoning_content = reasoning_content
     choice = MagicMock()
     choice.message = msg
     choice.finish_reason = finish_reason
@@ -71,8 +75,8 @@ class TestFastPathTriggered(unittest.TestCase):
         )
 
     @patch("openai.OpenAI")
-    def test_fast_path_max_tokens_is_120(self, mock_openai_cls):
-        """Fast path must use max_tokens=120."""
+    def test_fast_path_max_tokens_default_cap(self, mock_openai_cls):
+        """Fast path must use max_tokens matching default fast output cap."""
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = _make_resp(
             json.dumps({"index": 1, "reason": "匹配"}, ensure_ascii=False)
@@ -87,7 +91,79 @@ class TestFastPathTriggered(unittest.TestCase):
             llm_select_best("直通 dn50", CANDIDATES)
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
-        self.assertEqual(call_kwargs.get("max_tokens"), 120, "Fast path must use max_tokens=120")
+        self.assertEqual(call_kwargs.get("max_tokens"), 500, "Fast path must use max_tokens=500 (default cap)")
+
+    @patch("openai.OpenAI")
+    def test_fast_path_gpt5_uses_max_completion_tokens(self, mock_openai_cls):
+        """gpt-5 family rejects max_tokens and non-default temperature."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _make_resp(
+            json.dumps({"index": 1, "reason": "匹配"}, ensure_ascii=False)
+        )
+        mock_openai_cls.return_value = mock_client
+
+        with (
+            patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", "gpt-5-nano"),
+            patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", "sk-test"),
+            patch.object(InventoryConfig, "LLM_SELECTOR_BASE_URL", ""),
+        ):
+            llm_select_best("直通 dn50", CANDIDATES)
+
+        call_kwargs = mock_client.chat.completions.create.call_args[1]
+        self.assertEqual(call_kwargs.get("max_completion_tokens"), 500)
+        self.assertIsNone(call_kwargs.get("max_tokens"))
+        self.assertIsNone(call_kwargs.get("temperature"))
+
+    @patch("openai.OpenAI")
+    def test_fast_path_gpt5_retries_on_length_with_higher_cap(self, mock_openai_cls):
+        """When first fast-path response is empty with finish_reason=length, retry once with higher cap."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = [
+            _make_resp(None, finish_reason="length"),
+            _make_resp(json.dumps({"index": 1, "reason": "匹配"}, ensure_ascii=False)),
+        ]
+        mock_openai_cls.return_value = mock_client
+
+        with (
+            patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", "gpt-5-nano"),
+            patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", "sk-test"),
+            patch.object(InventoryConfig, "LLM_SELECTOR_BASE_URL", ""),
+        ):
+            result = llm_select_best("直通 dn50", CANDIDATES)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+        first_kwargs = mock_client.chat.completions.create.call_args_list[0][1]
+        second_kwargs = mock_client.chat.completions.create.call_args_list[1][1]
+        self.assertEqual(first_kwargs.get("max_completion_tokens"), 500)
+        self.assertEqual(second_kwargs.get("max_completion_tokens"), 1200)
+        self.assertIsNone(first_kwargs.get("temperature"))
+        self.assertIsNone(second_kwargs.get("temperature"))
+
+    @patch("openai.OpenAI")
+    def test_fast_path_rule_fallback_then_legacy_path_success(self, mock_openai_cls):
+        """If fast path degrades to rule fallback, llm_select_best should continue to legacy path."""
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = [
+            RuntimeError("fast path request failed"),
+            _make_resp(json.dumps({"index": 1, "reason": "旧路径匹配成功"}, ensure_ascii=False)),
+        ]
+        mock_openai_cls.return_value = mock_client
+
+        with (
+            patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", "gpt-5-nano"),
+            patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", "sk-test"),
+            patch.object(InventoryConfig, "LLM_SELECTOR_BASE_URL", ""),
+        ):
+            result = llm_select_best("直通 dn50", CANDIDATES)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["code"], "F001")
+        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+        first_kwargs = mock_client.chat.completions.create.call_args_list[0][1]
+        second_kwargs = mock_client.chat.completions.create.call_args_list[1][1]
+        self.assertIn("response_format", first_kwargs)
+        self.assertNotIn("response_format", second_kwargs)
 
     @patch("openai.OpenAI")
     def test_fast_path_uses_singleton_client(self, mock_openai_cls):

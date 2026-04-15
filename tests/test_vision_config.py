@@ -57,6 +57,7 @@ def test_get_image_payloads_for_ocr_size_limit():
 
 def test_run_ocr_for_attachments_injects_text(monkeypatch):
     """run_ocr_for_attachments 在 mock OCR 成功时返回拼接文本。"""
+    monkeypatch.setattr(Config, "GLM_VISION_MODEL", "")
     tiny_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     attachments = [{"type": "image", "content": tiny_b64, "mimeType": "image/png"}]
 

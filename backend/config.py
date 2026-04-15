@@ -110,6 +110,10 @@ class Config:
     _glm_ocr_base = (os.getenv("GLM_OCR_BASE_URL") or "").strip() or "https://open.bigmodel.cn/api/paas/v4"
     GLM_OCR_BASE_URL = _glm_ocr_base.rstrip("/") + "/"
     GLM_OCR_MODEL = (os.getenv("GLM_OCR_MODEL") or "").strip() or "glm-ocr"
+    # Vision OCR: glm-4.6v via chat.completions（留空则继续用 glm-ocr 旧路径）
+    GLM_VISION_MODEL = (os.getenv("GLM_VISION_MODEL") or "").strip()
+    GLM_VISION_API_KEY = (os.getenv("GLM_VISION_API_KEY") or "").strip()  # 空则复用传入的 OCR api_key
+    GLM_VISION_BASE_URL = (os.getenv("GLM_VISION_BASE_URL") or "").strip()  # 空则复用 OCR base_url
     # 单张图片大小上限（字节），超过拒绝；默认 5MB；智谱 OCR 单张 8MB，此处取 min
     try:
         _max_mb = int(os.getenv("MAX_IMAGE_SIZE_MB", "5"))

@@ -9,8 +9,8 @@
 | Item | Status |
 |------|--------|
 | Active File | `journal-2.md` |
-| Total Sessions | 28 |
-| Last Active | 2026-04-13 |
+| Total Sessions | 29 |
+| Last Active | 2026-04-14 |
 
 ---
 
@@ -27,6 +27,7 @@
 
 | # | Date | Title |
 |---|------|-------|
+| 29 | 2026-04-14 | LLM selector fast path + GLM vision OCR |
 | 28 | 2026-04-13 | 周报分析无限轮询修复（startup 重置 running + soft poll + LLM timeout） |
 | 27 | 2026-04-12 | Render 部署 / WebSocket 与 render.yaml DEBUG |
 | 26 | 2026-04-12 | Session Neon persistence（agent-team-v3：SessionBackend / WeCom / API） |

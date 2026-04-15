@@ -25,6 +25,48 @@ Implemented the backend foundation for weekly sales reporting with Accurate fetc
 
 [OK] **Completed**
 
+## Session 29: 2026-04-14 — LLM selector fast path + GLM vision OCR
+
+**Date**: 2026-04-14
+**Task**: llm-selector-fast-path + glm-vision-ocr
+
+### Summary
+
+Implemented and validated two config-gated upgrades: (1) inventory `llm_selector` fast path with dedicated selector model routing, and (2) OCR vision path using `glm-4.6v` with silent fallback to `glm-ocr`.
+
+### Main Changes
+
+- Added selector fast-path config keys in `backend/tools/inventory/config.py` and docs in `.env.example`.
+- Updated `backend/tools/inventory/services/llm_selector.py` with fast path (`response_format=json_object`, singleton client, fallback guard when selector key is missing).
+- Added compatibility fix for `gpt-5-*` models: use `max_completion_tokens` instead of `max_tokens`.
+- Added selector tests: `tests/test_llm_selector_fast_path.py`, and updated `tests/test_llm_selector_protocol.py`.
+- Added GLM vision OCR config keys in `backend/config.py` and env docs in `.env.example`.
+- Added `call_zhipu_vision_ocr()` and vision-first routing with silent fallback in `backend/core/glm_ocr.py`.
+- Added vision OCR tests in `tests/test_vision_ocr.py`; adjusted `tests/test_vision_config.py` to pin old-path behavior when vision model is empty.
+- Added smoke utility `scripts/smoke_glm_vision_ocr.py` and executed live verification against configured Zhipu endpoint.
+- **Follow-up (2026-04-15):** Fast-path default output cap raised **120 → 500** (`LLM_SELECTOR_FAST_OUTPUT_TOKENS` in `InventoryConfig`, clamped 32–4000); mitigates `gpt-5-nano` `finish_reason=length` with empty `content`.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0dce68f` | feat(inventory): LLM selector fast path (LLM_SELECTOR_* env) |
+
+### Testing
+
+- [OK] `pytest tests/test_llm_selector_fast_path.py tests/test_llm_selector_protocol.py -v`
+- [OK] `pytest tests/test_vision_ocr.py tests/test_vision_config.py -v`
+- [OK] Live smoke: `python scripts/smoke_glm_vision_ocr.py` reached `finish_reason=stop` on `glm-4.6v` (empty content on 1x1 blank image is expected).
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Run one live OCR check using a real screenshot containing text (e.g., `3/4寸`) to verify extraction quality, not only endpoint availability.
+- If desired, commit and push the GLM vision OCR code changes as a separate logical commit.
+
 ## Session 19: 2026-04-09 — Weekly invoice report view end-to-end (inline)
 
 **Date**: 2026-04-09

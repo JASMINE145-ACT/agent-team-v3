@@ -36,6 +36,14 @@ try:
 except (TypeError, ValueError):
     GLM_OCR_TIMEOUT_SECONDS = 20
 
+_VISION_OCR_SYSTEM = (
+    "你是专业文字提取助手。从图片中提取所有文字，严格遵守：\n"
+    "1. 分数寸必须写成分数形式：3/4、1/2、1/4、3/8（禁止写成 34、12、14、38）\n"
+    "2. 管径保留原始写法：DN50、dn50、Φ50\n"
+    "3. 按原始布局输出，表格内容用 | 分隔列\n"
+    "4. 只输出图片中的文字，不添加任何解释或总结"
+)
+
 
 def _mime_to_extension(mime: str) -> str:
     m = (mime or "").strip().lower()
@@ -46,6 +54,69 @@ def _mime_to_extension(mime: str) -> str:
     if "bmp" in m:
         return "bmp"
     return "png"
+
+
+def call_zhipu_vision_ocr(
+    image_bytes: bytes,
+    mime: str,
+    api_key: str,
+    base_url: str,
+    model: str,
+    timeout: Optional[int] = None,
+) -> Optional[str]:
+    """
+    调用 glm-4.6v（或任意视觉模型）chat.completions，从截图提取文字。
+
+    使用领域 system prompt，明确要求保留分数写法（3/4、1/2），避免斜杠被吞。
+
+    失败返回 None，由调用方回退到 call_zhipu_ocr。
+    """
+    if not image_bytes or not api_key or not model or not (base_url or "").strip():
+        return None
+    if timeout is None:
+        timeout = GLM_OCR_TIMEOUT_SECONDS
+
+    mime_type = (mime or "image/png").strip() or "image/png"
+    b64 = base64.b64encode(image_bytes).decode()
+    data_uri = f"data:{mime_type};base64,{b64}"
+
+    try:
+        from openai import OpenAI
+
+        bu = (base_url or "").rstrip("/") + "/" if (base_url or "").strip() else None
+        client = OpenAI(api_key=api_key, base_url=bu)
+        logger.info(
+            "GLM Vision OCR: model=%s size=%d bytes mime=%s",
+            model,
+            len(image_bytes),
+            mime_type,
+        )
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _VISION_OCR_SYSTEM},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": data_uri}},
+                        {"type": "text", "text": "请提取图片中所有文字。"},
+                    ],
+                },
+            ],
+            temperature=0,
+            max_tokens=1500,
+            timeout=timeout,
+        )
+        text = (
+            resp.choices[0].message.content if resp and resp.choices else ""
+        ).strip()
+        if not text:
+            logger.warning("GLM Vision OCR: empty response from model")
+            return None
+        return text
+    except Exception as e:
+        logger.warning("GLM Vision OCR failed, will fallback to glm-ocr: %s", e)
+        return None
 
 
 def call_zhipu_ocr(
@@ -298,9 +369,27 @@ def run_ocr_for_attachments(
         return None, err
     if not payloads:
         return None, "未读取到有效图片内容，请检查图片数据后重试。"
+    try:
+        from backend.config import Config as _Cfg
+
+        _vision_model = (getattr(_Cfg, "GLM_VISION_MODEL", "") or "").strip()
+        _vision_api_key = (getattr(_Cfg, "GLM_VISION_API_KEY", "") or "").strip() or api_key
+        _vision_base_raw = (getattr(_Cfg, "GLM_VISION_BASE_URL", "") or "").strip()
+        _vision_base_url = _vision_base_raw or base_url
+    except Exception:
+        _vision_model = ""
+        _vision_api_key = api_key
+        _vision_base_url = base_url
+
     texts: List[str] = []
     for raw, mime in payloads:
-        t = call_zhipu_ocr(raw, mime, api_key, base_url, model=model)
+        t: Optional[str] = None
+        if _vision_model:
+            t = call_zhipu_vision_ocr(
+                raw, mime, _vision_api_key, _vision_base_url, _vision_model
+            )
+        if t is None:
+            t = call_zhipu_ocr(raw, mime, api_key, base_url, model=model)
         if t:
             texts.append(t)
     if not texts:

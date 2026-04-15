@@ -163,6 +163,8 @@ class InventoryConfig:
     LLM_SELECTOR_MODEL: str = os.environ.get("LLM_SELECTOR_MODEL", "").strip()
     LLM_SELECTOR_API_KEY: str = os.environ.get("LLM_SELECTOR_API_KEY", "").strip()
     LLM_SELECTOR_BASE_URL: str = os.environ.get("LLM_SELECTOR_BASE_URL", "").strip()
+    # Fast path: max output tokens per request (gpt-5 uses max_completion_tokens; others max_tokens)
+    LLM_SELECTOR_FAST_OUTPUT_TOKENS: int = int(os.environ.get("LLM_SELECTOR_FAST_OUTPUT_TOKENS", "500"))
     TOOL_RESULT_MAX_CHARS: int = int(os.environ.get("TOOL_RESULT_MAX_CHARS", "8000"))
     LLM_TIMEOUT: int = int(os.environ.get("LLM_TIMEOUT", "60"))
     TOOL_EXEC_TIMEOUT: int = int(os.environ.get("TOOL_EXEC_TIMEOUT", "90"))  # AOL 多 code 时需多次 API 调用，35s 易超时

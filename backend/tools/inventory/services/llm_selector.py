@@ -64,6 +64,47 @@ _SELECTOR_DEFAULT_KNOWLEDGE_CHAR_LIMIT = 1500
 _SELECTOR_DEFAULT_MAX_TOKENS = 3000
 _SELECTOR_MAX_TOKENS_CAP = 3000
 _SELECTOR_REASON_MAX_LEN = 40
+# Fast path caps completion length (small JSON); gpt-5+ requires max_completion_tokens, not max_tokens.
+# Default 500 — was 120; gpt-5-nano can hit length with empty content under tiny caps. Override: LLM_SELECTOR_FAST_OUTPUT_TOKENS.
+_FAST_PATH_OUTPUT_CAP = 500
+
+
+def _is_gpt5_or_reasoning_model(model: str) -> bool:
+    m = (model or "").strip().lower()
+    return m.startswith("gpt-5") or m.startswith(("o1", "o3", "o4"))
+
+
+def _fast_path_limit_kwargs(model: str, output_cap: int = _FAST_PATH_OUTPUT_CAP) -> dict[str, int]:
+    """OpenAI Chat Completions: gpt-5 family rejects max_tokens; use max_completion_tokens."""
+    if _is_gpt5_or_reasoning_model(model):
+        return {"max_completion_tokens": int(output_cap)}
+    return {"max_tokens": int(output_cap)}
+
+
+def _fast_path_sampling_kwargs(model: str) -> dict[str, int]:
+    # gpt-5/o-series fast models may reject non-default temperature; omit to use server default.
+    if _is_gpt5_or_reasoning_model(model):
+        return {}
+    return {"temperature": 0}
+
+
+def _resolve_fast_path_output_cap(config: Any) -> int:
+    """Clamp 32..4000; falls back to _FAST_PATH_OUTPUT_CAP."""
+    raw = _FAST_PATH_OUTPUT_CAP
+    if config is not None:
+        try:
+            raw = int(getattr(config, "LLM_SELECTOR_FAST_OUTPUT_TOKENS", _FAST_PATH_OUTPUT_CAP))
+        except (TypeError, ValueError):
+            raw = _FAST_PATH_OUTPUT_CAP
+    return max(32, min(int(raw), 4000))
+
+
+def _fast_path_retry_output_cap(model: str) -> int:
+    # gpt-5/o-series may spend completion budget on hidden reasoning and return empty content
+    # under tiny caps; allow one bounded retry with a larger budget.
+    if _is_gpt5_or_reasoning_model(model):
+        return 1200
+    return 200
 _SOURCE_PRIORITY = {"共同": 0, "历史报价": 1, "字段匹配": 2}
 
 
@@ -281,7 +322,7 @@ def _fast_path(
 ) -> Optional[dict[str, Any]]:
     """
     Fast selector path for non-thinking models (e.g. gpt-4o-mini).
-    Uses response_format=json_object and max_tokens=120.
+    Uses response_format=json_object and a bounded completion cap (default 500).
     Falls back to _rule_based_fallback on any error.
     """
     if not candidates:
@@ -323,15 +364,17 @@ def _fast_path(
     base_url_raw = getattr(config, "LLM_SELECTOR_BASE_URL", "") if config is not None else ""
     base_url = base_url_raw.strip() or None
     timeout = int(getattr(config, "LLM_SELECTOR_TIMEOUT", 15)) if config is not None else 15
+    fast_out_cap = _resolve_fast_path_output_cap(config)
 
     try:
         client = _get_selector_client(api_key, base_url)
 
         logger.info(
-            "llm_select_best (fast): model=%s n_candidates=%d prompt_chars=%d",
+            "llm_select_best (fast): model=%s n_candidates=%d prompt_chars=%d fast_output_cap=%d",
             selector_model,
             len(candidates),
             len(prompt),
+            fast_out_cap,
         )
 
         resp = client.chat.completions.create(
@@ -340,15 +383,34 @@ def _fast_path(
                 {"role": "system", "content": _SYSTEM_SELECTOR},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0,
-            max_tokens=120,
             timeout=timeout,
             response_format={"type": "json_object"},
+            **_fast_path_sampling_kwargs(selector_model),
+            **_fast_path_limit_kwargs(selector_model, fast_out_cap),
         )
 
-        raw = resp.choices[0].message.content if resp and resp.choices else ""
-        content = (raw or "").strip()
+        content, finish_reason, reasoning_len = _extract_content_from_openai_response(resp)
         if not content:
+            retry_knowledge_hint = _build_knowledge_hint(keywords, knowledge, min(knowledge_limit, 1000))
+            retry_prompt = _build_selector_prompt(keywords, llm_candidates, retry_knowledge_hint)
+            retry_resp = client.chat.completions.create(
+                model=selector_model,
+                messages=[
+                    {"role": "system", "content": _SYSTEM_SELECTOR},
+                    {"role": "user", "content": retry_prompt},
+                ],
+                timeout=timeout,
+                response_format={"type": "json_object"},
+                **_fast_path_sampling_kwargs(selector_model),
+                **_fast_path_limit_kwargs(selector_model, _fast_path_retry_output_cap(selector_model)),
+            )
+            content, finish_reason, reasoning_len = _extract_content_from_openai_response(retry_resp)
+        if not content:
+            logger.warning(
+                "fast path empty content, finish_reason=%s reasoning_content_len=%d",
+                finish_reason,
+                reasoning_len,
+            )
             raise ValueError("fast path: empty content from model")
 
         obj = json.loads(content)
@@ -377,7 +439,7 @@ def llm_select_best(
 
     When LLM_SELECTOR_MODEL is set in config, routes to the fast path
     (_fast_path) which uses a non-thinking model with response_format=json_object
-    and max_tokens=120. Otherwise uses the original glm-4.5-air path unchanged.
+    and a bounded completion cap (default 500, LLM_SELECTOR_FAST_OUTPUT_TOKENS). Otherwise uses the original glm-4.5-air path unchanged.
 
     Args:
         keywords: Product search keywords.
@@ -396,7 +458,17 @@ def llm_select_best(
     selector_model = (getattr(config, "LLM_SELECTOR_MODEL", "") or "").strip() if config is not None else ""
     selector_api_key = (getattr(config, "LLM_SELECTOR_API_KEY", "") or "").strip() if config is not None else ""
     if selector_model and selector_api_key:
-        return _fast_path(keywords, candidates, config, selector_model, knowledge_override)
+        fast_result = _fast_path(keywords, candidates, config, selector_model, knowledge_override)
+        if fast_result is None:
+            return None
+        meta = fast_result.get("_selection_meta", {}) if isinstance(fast_result, dict) else {}
+        if meta.get("from_rule_fallback"):
+            logger.warning(
+                "fast path fell back to rules (reason=%s); trying legacy selector path",
+                meta.get("reason"),
+            )
+        else:
+            return fast_result
     if selector_model and not selector_api_key:
         logger.warning(
             "LLM_SELECTOR_MODEL is set but LLM_SELECTOR_API_KEY is empty; using legacy selector path"
