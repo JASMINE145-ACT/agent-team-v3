@@ -877,6 +877,14 @@ class CoreAgent:
         last_answer = _normalize_user_answer(last_answer)
 
         tool_renders = ctx.get("_tool_renders") or None
+        ocr_for_store = (ctx.get("ocr_text") or "").strip()
+        extra_turn: Optional[Dict[str, Any]] = None
+        if tool_renders or ocr_for_store:
+            extra_turn = {}
+            if tool_renders:
+                extra_turn["tool_renders"] = tool_renders
+            if ocr_for_store:
+                extra_turn["ocr_text"] = ocr_for_store
         if session_id and self._store and (last_answer or tool_renders):
             try:
                 thinking_for_store = "\n".join(thinking_parts).strip() or None
@@ -889,7 +897,7 @@ class CoreAgent:
                     file_path=ctx.get("file_path"),
                     input_tokens=last_usage.get("prompt_tokens") if last_usage else None,
                     output_tokens=last_usage.get("completion_tokens") if last_usage else None,
-                    extra={"tool_renders": tool_renders} if tool_renders else None,
+                    extra=extra_turn,
                     from_user=ctx.get("from_user") or None,
                 )
             except Exception as e:

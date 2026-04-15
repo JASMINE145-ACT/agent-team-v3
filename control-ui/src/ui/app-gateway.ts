@@ -12,6 +12,7 @@ import {
   resetToolStream,
   type AgentEventPayload,
   type CandidatesPreviewItem,
+  type OcrResultCard,
   type ToolRenderItem,
   type ToolRenderPayload,
 } from "./app-tool-stream.ts";
@@ -63,6 +64,7 @@ type GatewayHost = {
   toolRenderSeq: number | null;
   toolRenderItems: ToolRenderItem[];
   candidatePreviews: CandidatesPreviewItem[];
+  ocrResultCards: OcrResultCard[];
   refreshSessionsAfterChat: Set<string>;
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
@@ -157,6 +159,7 @@ export function connectGateway(host: GatewayHost) {
       (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
       resetToolRender(host as unknown as Parameters<typeof resetToolRender>[0]);
+      host.ocrResultCards = [];
       void loadAssistantIdentity(host as unknown as OpenClawApp);
       void loadAgents(host as unknown as OpenClawApp);
       void loadNodes(host as unknown as OpenClawApp, { quiet: true });
@@ -286,6 +289,7 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
         }
         host.resetToolStream();
         host.resetToolRender();
+        host.ocrResultCards = [];
         host.resetChatScroll();
         host.applySettings({
           ...host.settings,
@@ -317,6 +321,20 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
 
   if (evt.event === "cron" && host.tab === "cron") {
     void loadCron(host as unknown as Parameters<typeof loadCron>[0]);
+  }
+
+  if (evt.event === "ocr_result") {
+    const payload = evt.payload as { text?: string; runId?: string; sessionKey?: string } | undefined;
+    const text = (payload?.text ?? "").trim();
+    if (text) {
+      const app = host as unknown as OpenClawApp;
+      app.ocrResultCards = [
+        ...app.ocrResultCards,
+        { id: `ocr-${Date.now()}`, text, createdAt: Date.now() },
+      ];
+      app.requestUpdate();
+    }
+    return;
   }
 
   if (evt.event === "device.pair.requested" || evt.event === "device.pair.resolved") {

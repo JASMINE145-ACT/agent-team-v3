@@ -9,6 +9,8 @@ import {
   extractTextCached,
   extractThinkingCached,
   formatReasoningMarkdown,
+  hasOcrBlock,
+  stripOcrBlock,
 } from "./message-extract.ts";
 import { isToolResultMessage, normalizeRoleForGrouping } from "./message-normalizer.ts";
 import { extractToolCards, renderToolCardSidebar } from "./tool-cards.ts";
@@ -295,7 +297,10 @@ function renderGroupedMessage(
     opts.showReasoning && role === "assistant" ? extractThinkingCached(message) : null;
   const markdownBase = extractedText?.trim() ? extractedText : null;
   const reasoningMarkdown = extractedThinking ? formatReasoningMarkdown(extractedThinking) : null;
-  const markdown = markdownBase;
+  const isUser = normalizeRoleForGrouping(role) === "user";
+  const ocrPresent = Boolean(markdownBase && isUser && hasOcrBlock(markdownBase));
+  const markdown =
+    ocrPresent && markdownBase ? stripOcrBlock(markdownBase) : markdownBase;
   const canCopyMarkdown = role === "assistant" && Boolean(markdown?.trim());
 
   const bubbleClasses = [
@@ -319,6 +324,9 @@ function renderGroupedMessage(
     <div class="${bubbleClasses}">
       ${canCopyMarkdown ? renderCopyAsMarkdownButton(markdown!) : nothing}
       ${renderMessageImages(images)}
+      ${ocrPresent && images.length > 0
+        ? html`<span class="chat-ocr-badge">已识别 ✓</span>`
+        : nothing}
       ${renderAttachedFiles(attachedFiles)}
       ${
         reasoningMarkdown

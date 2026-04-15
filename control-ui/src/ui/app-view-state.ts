@@ -2,6 +2,7 @@ import type { EventLogEntry } from "./app-events.ts";
 import type {
   CandidatesPreviewItem,
   CompactionStatus,
+  OcrResultCard,
   ToolRenderItem,
   ToolRenderPayload,
 } from "./app-tool-stream.ts";
@@ -75,6 +76,7 @@ export type AppViewState = {
   toolRenderSeq: number | null;
   toolRenderItems: ToolRenderItem[];
   candidatePreviews: CandidatesPreviewItem[];
+  ocrResultCards: OcrResultCard[];
   chatAvatarUrl: string | null;
   chatThinkingLevel: string | null;
   chatQueue: ChatQueueItem[];

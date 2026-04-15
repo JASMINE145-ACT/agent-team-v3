@@ -422,3 +422,39 @@ img.chat-avatar {
     transform: rotate(360deg);
   }
 }
+
+/* OCR–chat fusion: badge on user bubble, result card, queue status */
+.chat-ocr-badge {
+  display: inline-block;
+  margin: 4px 0 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: var(--surface-elevated, rgba(0, 0, 0, 0.06));
+  color: var(--text-muted, #555);
+}
+
+.chat-ocr-card {
+  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  padding: 10px 12px;
+  max-width: min(900px, 100%);
+  background: var(--surface, #fff);
+}
+
+.chat-ocr-card__label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.chat-ocr-card__body {
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-x: auto;
+}
+
+.chat-queue__ocr-status {
+  font-size: 13px;
+  color: var(--text-muted, #666);
+}

@@ -169,6 +169,9 @@ export function resetToolRender(host: ToolRenderHost) {
   host.toolRenderSeq = null;
   host.toolRenderItems = [];
   host.candidatePreviews = [];
+  // Intentionally do NOT clear ocrResultCards here: the same function runs when a
+  // chat run ends (final), and OCR cards must remain visible for that turn. Clear
+  // ocrResultCards only when the user starts a new send, reconnects, or switches session.
 }
 
 export type CompactionStatus = {
@@ -243,11 +246,18 @@ export type CandidatesPreviewItem = {
   match_source: string;
 };
 
+export type OcrResultCard = {
+  id: string;
+  text: string;
+  createdAt: number;
+};
+
 export type ToolRenderHost = ToolStreamHost & {
   toolRenderData?: ToolRenderPayload | null;
   toolRenderSeq?: number | null;
   toolRenderItems?: ToolRenderItem[];
   candidatePreviews?: CandidatesPreviewItem[];
+  ocrResultCards?: OcrResultCard[];
 };
 
 function popCandidatePreviewForRun(host: ToolRenderHost, runId: string): void {

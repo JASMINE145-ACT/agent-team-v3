@@ -748,6 +748,7 @@ export function renderApp(state: AppViewState) {
                   state.chatQueue = [];
                   state.resetToolStream();
                   state.resetToolRender();
+                  state.ocrResultCards = [];
                   state.resetChatScroll();
                   state.applySettings({
                     ...state.settings,
@@ -767,6 +768,7 @@ export function renderApp(state: AppViewState) {
                 toolRenderSeq: state.toolRenderSeq,
                 toolRenderItems: state.toolRenderItems,
                 candidatePreviews: state.candidatePreviews,
+                ocrResultCards: state.ocrResultCards,
                 assistantAvatarUrl: chatAvatarUrl,
                 messages: state.chatMessages,
                 toolMessages: state.chatToolMessages,

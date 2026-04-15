@@ -96,6 +96,7 @@ async def query(
         )
         if ocr_err:
             return {"success": False, "error": ocr_err}
+        context["ocr_text"] = ocr_text
         query_text = (query_text or "").strip()
         query_text = f"{query_text}\n\n【以下为上传图片的识别结果】\n{ocr_text}" if query_text else f"【以下为上传图片的识别结果】\n{ocr_text}"
     agent = request.app.state.agent
@@ -179,34 +180,11 @@ async def query_stream(
                 or (a or {}).get("fileId")
             )
         ]
-    if image_attachments_stream:
-        from backend.config import Config
-        from backend.core.glm_ocr import run_ocr_for_attachments
-        if not getattr(Config, "GLM_OCR_ENABLED", False):
-            async def _ocr_not_enabled():
-                yield f'data: {json.dumps({"type": "error", "message": "当前未启用图片识别（GLM-OCR），暂不支持图片输入。"}, ensure_ascii=False)}\n\n'
-            return StreamingResponse(_ocr_not_enabled(), media_type="text/event-stream")
-        max_size = getattr(Config, "MAX_IMAGE_SIZE", 5 * 1024 * 1024)
-        api_key = getattr(Config, "GLM_OCR_API_KEY", None) or Config.OPENAI_API_KEY
-        base_url = getattr(Config, "GLM_OCR_BASE_URL", "") or ""
-        ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-ocr") or "glm-ocr"
-        if not api_key or not base_url:
-            async def _ocr_no_config():
-                yield f'data: {json.dumps({"type": "error", "message": "未配置视觉识图 API Key 或 Base URL。"}, ensure_ascii=False)}\n\n'
-            return StreamingResponse(_ocr_no_config(), media_type="text/event-stream")
-        ocr_text, ocr_err = await asyncio.to_thread(
-            run_ocr_for_attachments, image_attachments_stream, max_size, api_key, base_url, ocr_model
-        )
-        if ocr_err:
-            async def _ocr_failed():
-                yield f'data: {json.dumps({"type": "error", "message": ocr_err}, ensure_ascii=False)}\n\n'
-            return StreamingResponse(_ocr_failed(), media_type="text/event-stream")
-        query_text = (query_text or "").strip()
-        query_text = f"{query_text}\n\n【以下为上传图片的识别结果】\n{ocr_text}" if query_text else f"【以下为上传图片的识别结果】\n{ocr_text}"
-    
+
     agent = request.app.state.agent
 
     async def _gen():
+        nonlocal query_text
         # 首先推送确认消息，让用户知道请求已被接收
         confirmation_data = {
             "type": "confirmation",
@@ -214,6 +192,35 @@ async def query_stream(
             "session_id": session_id
         }
         yield f'data: {json.dumps(confirmation_data, ensure_ascii=False)}\n\n'
+
+        if image_attachments_stream:
+            from backend.config import Config
+            from backend.core.glm_ocr import run_ocr_for_attachments
+
+            if not getattr(Config, "GLM_OCR_ENABLED", False):
+                yield f'data: {json.dumps({"type": "error", "message": "当前未启用图片识别（GLM-OCR），暂不支持图片输入。"}, ensure_ascii=False)}\n\n'
+                return
+            max_size = getattr(Config, "MAX_IMAGE_SIZE", 5 * 1024 * 1024)
+            api_key = getattr(Config, "GLM_OCR_API_KEY", None) or Config.OPENAI_API_KEY
+            base_url = getattr(Config, "GLM_OCR_BASE_URL", "") or ""
+            ocr_model = getattr(Config, "GLM_OCR_MODEL", "glm-ocr") or "glm-ocr"
+            if not api_key or not base_url:
+                yield f'data: {json.dumps({"type": "error", "message": "未配置视觉识图 API Key 或 Base URL。"}, ensure_ascii=False)}\n\n'
+                return
+            ocr_text, ocr_err = await asyncio.to_thread(
+                run_ocr_for_attachments, image_attachments_stream, max_size, api_key, base_url, ocr_model
+            )
+            if ocr_err:
+                yield f'data: {json.dumps({"type": "error", "message": ocr_err}, ensure_ascii=False)}\n\n'
+                return
+            yield f'data: {json.dumps({"type": "ocr_result", "text": ocr_text}, ensure_ascii=False)}\n\n'
+            context["ocr_text"] = ocr_text
+            query_text = (query_text or "").strip()
+            query_text = (
+                f"{query_text}\n\n【以下为上传图片的识别结果】\n{ocr_text}"
+                if query_text
+                else f"【以下为上传图片的识别结果】\n{ocr_text}"
+            )
         
         queue: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()

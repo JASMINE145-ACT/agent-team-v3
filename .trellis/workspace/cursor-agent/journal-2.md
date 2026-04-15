@@ -1,3 +1,16 @@
+## Session 31: 2026-04-15 — OCR 卡片与历史回放修复
+
+**Date**: 2026-04-15
+
+### Summary
+
+- **根因**：`resetToolRender()` 在每次 `chat` 流 **结束（final）** 时也会被调用，顺带清空了 `ocrResultCards`，导致「图片识别结果」卡片在助手回复完成后消失；`save_turn` 将 `query` 截断为 **200 字**，长 OCR 注入被截断；`chat.history` 只返回纯文本用户句，无 OCR 卡片回放。
+- **修复**：`resetToolRender` 不再清空 `ocrResultCards`；仅在 **新发送**、**重连**、**切会话** 时清空；`context["ocr_text"]` 写入并随 `turn.extra` 持久化；`handle_chat_history` 展开 `__openclaw` OCR 虚拟消息并剥离用户气泡中的 OCR 块；`query` 截断放宽至 32k；前端 `buildChatItems` 识别历史 OCR 并与实时卡片 **去重**。
+
+### Status
+
+[OK] **Completed**（缩略图在刷新历史后仍依赖后续「持久化图片」能力，当前仅保证 OCR 卡片与无 OCR 正文气泡）
+
 ## Session 15: 2026-04-08 — Weekly Sales Report Foundation (Inline Execution)
 
 **Date**: 2026-04-08
@@ -66,6 +79,26 @@ Implemented and validated two config-gated upgrades: (1) inventory `llm_selector
 
 - Run one live OCR check using a real screenshot containing text (e.g., `3/4寸`) to verify extraction quality, not only endpoint availability.
 - If desired, commit and push the GLM vision OCR code changes as a separate logical commit.
+
+## Session 30: 2026-04-15 — OCR–Chat fusion (SSE + UI)
+
+**Date**: 2026-04-15
+**Task**: ocr-chat-integration (plan + spec)
+
+### Summary
+
+- **Backend:** `routes_chat.query_stream` runs OCR inside `_gen()` after confirmation SSE, yields `{"type":"ocr_result","text":...}` then injects marker into `query_text`. Gateway `chat.py` pushes WebSocket event `ocr_result` with payload text after OCR success.
+- **Frontend:** `hasOcrBlock` / `stripOcrBlock`, user bubble badge「已识别 ✓」, queue「识别中…」, `ocrResultCards` state + gateway handler + chat thread OCR card; `resetToolRender` clears OCR cards.
+- **Prompt:** `CHAT_SKILL_PROMPT_*` includes 图片识别 rules (`skills.py`).
+
+### Testing
+
+- [OK] `python -c` import `routes_chat`, `CHAT_SKILL_PROMPT_DOC`
+- Vitest: project uses browser mode; `message-extract.test.ts` added (run in CI/local when browser runner available).
+
+### Status
+
+[OK] **Completed** (manual UI verify recommended)
 
 ## Session 19: 2026-04-09 — Weekly invoice report view end-to-end (inline)
 

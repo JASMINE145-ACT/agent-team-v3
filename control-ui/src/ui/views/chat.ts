@@ -1,4 +1,5 @@
 import { html, nothing } from "lit";
+import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { ref } from "lit/directives/ref.js";
 import { repeat } from "lit/directives/repeat.js";
 import {
@@ -10,10 +11,12 @@ import {
 import { extractTextCached } from "../chat/message-extract.ts";
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
 import { icons } from "../icons.ts";
+import { toSanitizedMarkdownHtml } from "../markdown.ts";
 import { detectTextDirection } from "../text-direction.ts";
 import {
   RENDERED_MARKER,
   type CandidatesPreviewItem,
+  type OcrResultCard,
   type ToolRenderItem,
   type ToolRenderPayload,
 } from "../app-tool-stream.ts";
@@ -44,6 +47,8 @@ export type ChatProps = {
   toolRenderItems?: ToolRenderItem[];
   /** Live SSE: fuzzy candidates before LLM selection (match_quotation single path) */
   candidatePreviews?: CandidatesPreviewItem[];
+  /** Gateway/SSE: OCR text cards (image recognition) */
+  ocrResultCards?: OcrResultCard[];
   messages: unknown[];
   toolMessages: unknown[];
   stream: string | null;
@@ -409,6 +414,22 @@ export function renderChat(props: ChatProps) {
             return renderCandidatesPreviewCard(item.preview, assistantIdentity);
           }
 
+          if (item.kind === "ocr-result") {
+            return html`
+              <div class="chat-group assistant">
+                ${renderAvatar("assistant", assistantIdentity)}
+                <div class="chat-group-messages">
+                  <div class="chat-ocr-card" role="region" aria-label="OCR">
+                    <div class="chat-ocr-card__label">📄 图片识别结果</div>
+                    <div class="chat-ocr-card__body">
+                      ${unsafeHTML(toSanitizedMarkdownHtml(item.card.text))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+
           if (item.kind === "group") {
             return renderMessageGroup(item, {
               onOpenSidebar: props.onOpenSidebar,
@@ -527,12 +548,9 @@ export function renderChat(props: ChatProps) {
                     <div class="chat-queue__item">
                       <div class="chat-queue__text">
                         ${
-                          item.text ||
-                          (item.attachments?.length
-                            ? t("chat.ui.queue.imageItem", {
-                                count: String(item.attachments.length),
-                              })
-                            : "")
+                          item.attachments?.length
+                            ? html`<span class="chat-queue__ocr-status">🔍 识别中…</span>`
+                            : item.text || ""
                         }
                       </div>
                       <button
@@ -813,6 +831,7 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
     history.length > 0
       ? (normalizeMessage(history[history.length - 1]).timestamp ?? 0)
       : 0;
+  const historyOcrTexts = new Set<string>();
   const markerIndexList: number[] = [];
   for (let i = historyStart; i < history.length; i++) {
     const msg = history[i];
@@ -900,6 +919,23 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       continue;
     }
 
+    if (marker && marker.kind === "ocr_result" && typeof marker.text === "string") {
+      const ocrText = marker.text.trim();
+      if (ocrText) {
+        historyOcrTexts.add(ocrText);
+        items.push({
+          kind: "ocr-result",
+          key: `history-ocr:${i}:${String(normalized.timestamp ?? 0)}`,
+          card: {
+            id: `history-ocr-${i}-${String(normalized.timestamp ?? 0)}`,
+            text: ocrText,
+            createdAt: typeof normalized.timestamp === "number" ? normalized.timestamp : Date.now(),
+          },
+        });
+      }
+      continue;
+    }
+
     if (!props.showThinking && normalized.role.toLowerCase() === "toolresult") {
       continue;
     }
@@ -956,6 +992,15 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       key: `candidates-preview:${previews[i].id}`,
       preview: previews[i],
     });
+  }
+
+  const ocrCards = Array.isArray(props.ocrResultCards) ? props.ocrResultCards : [];
+  for (const card of ocrCards) {
+    const body = (card.text ?? "").trim();
+    if (!body || historyOcrTexts.has(body)) {
+      continue;
+    }
+    items.push({ kind: "ocr-result", key: card.id, card });
   }
 
   // Live fallback: cards received before history refresh (no marker in history yet).

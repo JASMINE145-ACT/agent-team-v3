@@ -407,6 +407,12 @@ ALL_SKILL_PROMPT_RULES = "\n\n".join([
 # 保持向后兼容的 ALL_SKILL_PROMPT（默认等于 DOC 版）
 ALL_SKILL_PROMPT = ALL_SKILL_PROMPT_DOC
 
+_IMAGE_OCR_CHAT_SECTION = """## 图片识别
+用户消息中出现【以下为上传图片的识别结果】时，识别内容已通过卡片单独展示给用户，无需重复列出。
+- 消息含用户意图（如"查库存"、"报价"、"帮我找"）→ 直接执行，忽略上方 OCR 文字的格式
+- 消息无用户文字（只有识别结果）→ 用一句话询问"您想对以上内容做什么？"
+- 禁止将 OCR 原始文字原样回显"""
+
 # Chat 用 Skill Prompt（DOC 版：说明文档式，RULES 版：Decision Rules 风格）
 CHAT_SKILL_PROMPT_DOC = "\n\n".join([
     GLOBAL_HARD_CONSTRAINTS,
@@ -414,6 +420,7 @@ CHAT_SKILL_PROMPT_DOC = "\n\n".join([
     SKILL_EXCEL_CHAT_DOC,
     SKILL_CLARIFY_DOC,
     SKILL_KNOWLEDGE_DOC,
+    _IMAGE_OCR_CHAT_SECTION,
 ])
 
 CHAT_SKILL_PROMPT_RULES = "\n\n".join([
@@ -422,6 +429,7 @@ CHAT_SKILL_PROMPT_RULES = "\n\n".join([
     SKILL_EXCEL_CHAT_RULES,
     SKILL_CLARIFY_RULES,
     SKILL_KNOWLEDGE_RULES,
+    _IMAGE_OCR_CHAT_SECTION,
 ])
 
 # 默认导出的 CHAT_SKILL_PROMPT 保持向后兼容：等于 DOC 版

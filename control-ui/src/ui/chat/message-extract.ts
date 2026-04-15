@@ -130,3 +130,24 @@ export function formatReasoningMarkdown(text: string): string {
     .map((line) => `_${line}_`);
   return lines.length ? ["_Reasoning:_", ...lines].join("\n") : "";
 }
+
+// OCR block detection & stripping
+const OCR_MARKER = "【以下为上传图片的识别结果】";
+
+/** Returns true if the message text contains an OCR-injected block. */
+export function hasOcrBlock(text: string): boolean {
+  return text.includes(OCR_MARKER);
+}
+
+/**
+ * Returns the user's original text with the OCR block removed.
+ * Trims trailing whitespace. Returns the original string unchanged
+ * if no OCR marker is found.
+ */
+export function stripOcrBlock(text: string): string {
+  const idx = text.indexOf(OCR_MARKER);
+  if (idx === -1) {
+    return text;
+  }
+  return text.slice(0, idx).trim();
+}

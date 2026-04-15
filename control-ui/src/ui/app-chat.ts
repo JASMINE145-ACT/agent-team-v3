@@ -108,6 +108,7 @@ async function sendChatMessageNow(
   // New user turn starts: clear transient tool_render cache from previous runs
   // to avoid replaying old cards in the next conversation turn.
   resetToolRender(host as unknown as Parameters<typeof resetToolRender>[0]);
+  (host as unknown as OpenClawApp).ocrResultCards = [];
   const runId = await sendChatMessage(
     host as unknown as OpenClawApp,
     message,

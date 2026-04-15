@@ -374,6 +374,32 @@ def _is_inch_token(token: str) -> bool:
     )
 
 
+def _should_apply_inch_exact_priority(
+    query_size_tokens: set[str],
+    query_inch_tokens: set[str],
+) -> bool:
+    """
+    「英寸精确命中优先」剪切：仅当查询里的英寸与 DN 数字在标准对照上一致时才启用。
+
+    若用户混写互斥的公称径与英寸（例如 DN20 对应 3/4\"，却写了 1/2\"≈DN16），
+    则不做剪切，否则仅写 dn20、库内无字面 1/2\" 的正确行会被误杀，而带 3/4\"x1/2\" 的管件会留下。
+    """
+    if not query_inch_tokens:
+        return False
+    dn_numbers: set[str] = set()
+    for t in query_size_tokens:
+        tl = (t or "").lower().strip()
+        if tl.startswith("dn") and len(tl) > 2 and tl[2:].isdigit():
+            dn_numbers.add(tl[2:])
+    if not dn_numbers:
+        return True
+    for inch_t in query_inch_tokens:
+        mm = INCH_TO_MM.get(inch_t)
+        if mm is not None and mm not in dn_numbers:
+            return False
+    return True
+
+
 def _split_tokens(text: str) -> List[str]:
     text = _normalize(text)
     tokens: List[str] = []
@@ -616,7 +642,12 @@ def search_fuzzy(
 
         # 英寸优先：若查询里显式给了英寸，且存在英寸精确命中的候选，
         # 则只保留英寸精确命中，避免被 dn 等价扩展引入跨体系误匹配。
-        if query_inch_tokens and any(inch_hits > 0 for _, _, inch_hits in iter_rows):
+        # （当 DN 与英寸互斥时跳过，见 _should_apply_inch_exact_priority）
+        if (
+            _should_apply_inch_exact_priority(query_size_tokens, query_inch_tokens)
+            and query_inch_tokens
+            and any(inch_hits > 0 for _, _, inch_hits in iter_rows)
+        ):
             iter_rows = [r for r in iter_rows if r[2] > 0]
 
         for row_dict, score, _inch_hits in iter_rows:

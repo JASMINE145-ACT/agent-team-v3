@@ -57,6 +57,7 @@ function makeHost(): ToolRenderHost {
     toolRenderSeq: null,
     toolRenderItems: [],
     candidatePreviews: [],
+    ocrResultCards: [],
   };
 }
 

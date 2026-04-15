@@ -154,8 +154,9 @@ class SessionStore:
         from_user: Optional[str] = None,
     ) -> None:
         session = self.load(session_id)
+        # 保留足够长度以便历史记录能识别 OCR 标记并还原用户原句（旧版 200 字截断会截掉标记）
         turn = Turn(
-            query=query[:200],
+            query=query[:32000] if len(query) > 32000 else query,
             agent=agent or "",
             answer=(answer or ""),
             ts=time.time(),

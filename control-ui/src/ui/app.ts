@@ -61,6 +61,7 @@ import {
   type ToolStreamEntry,
   type CompactionStatus,
   type CandidatesPreviewItem,
+  type OcrResultCard,
   type ToolRenderItem,
   type ToolRenderPayload,
 } from "./app-tool-stream.ts";
@@ -488,6 +489,7 @@ export class OpenClawApp extends LitElement {
   @state() toolRenderSeq: number | null = null;
   @state() toolRenderItems: ToolRenderItem[] = [];
   @state() candidatePreviews: CandidatesPreviewItem[] = [];
+  @state() ocrResultCards: OcrResultCard[] = [];
   refreshSessionsAfterChat = new Set<string>();
   basePath = "";
   private popStateHandler = () =>

@@ -16,6 +16,17 @@ from backend.server.gateway.run_store import register as run_register, unregiste
 
 logger = logging.getLogger(__name__)
 
+_OCR_HISTORY_MARKER = "【以下为上传图片的识别结果】"
+
+
+def _user_query_text_for_history(raw_query: str) -> str:
+    """Strip injected OCR block from persisted query so the user bubble stays minimal."""
+    q = (raw_query or "").strip()
+    if _OCR_HISTORY_MARKER not in q:
+        return q
+    idx = q.find(_OCR_HISTORY_MARKER)
+    return q[:idx].strip() if idx >= 0 else q
+
 
 def _generate_title_via_llm(user_query: str, assistant_answer: str) -> Optional[str]:
     """同步调用 LLM 生成 5–10 字会话标题。失败返回 None。"""
@@ -64,11 +75,20 @@ def handle_chat_history(params: dict) -> dict:
     turns = session.turns[-(limit // 2) :] if limit else session.turns
     for idx, t in enumerate(turns):
         ts_ms = int(t.ts * 1000)
+        display_query = _user_query_text_for_history(t.query)
         messages.append({
             "role": "user",
-            "content": [{"type": "text", "text": t.query}],
+            "content": [{"type": "text", "text": display_query}],
             "timestamp": ts_ms,
         })
+        ocr_hist = ((getattr(t, "extra", None) or {}).get("ocr_text") or "").strip()
+        if ocr_hist:
+            messages.append({
+                "role": "assistant",
+                "content": [{"type": "text", "text": ""}],
+                "timestamp": ts_ms,
+                "__openclaw": {"kind": "ocr_result", "text": ocr_hist},
+            })
         # Expand persisted tool_render cards as standalone virtual assistant messages
         tool_renders = (getattr(t, "extra", None) or {}).get("tool_renders") or []
         for seq, render in enumerate(tool_renders):
@@ -180,6 +200,16 @@ async def handle_chat_send(
                 "payload": {"runId": run_id, "sessionKey": session_key, "state": "error", "errorMessage": ocr_err},
             })
             return
+        await send_event({
+            "type": "event",
+            "event": "ocr_result",
+            "payload": {
+                "runId": run_id,
+                "sessionKey": session_key,
+                "text": ocr_text,
+            },
+        })
+        context["ocr_text"] = ocr_text
         user_input = (user_input or "").strip()
         user_input = f"{user_input}\n\n【以下为上传图片的识别结果】\n{ocr_text}" if user_input else f"【以下为上传图片的识别结果】\n{ocr_text}"
 
