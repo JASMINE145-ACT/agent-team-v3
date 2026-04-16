@@ -186,7 +186,7 @@ export class GatewayBrowserClient {
         token: authToken ?? null,
         nonce,
       });
-      const signature = await signDevicePayload(deviceIdentity.privateKey, payload);
+      const signature = await signDevicePayload(deviceIdentity.privateKey, JSON.stringify(payload));
       device = {
         id: deviceIdentity.deviceId,
         publicKey: deviceIdentity.publicKey,

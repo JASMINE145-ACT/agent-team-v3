@@ -5,6 +5,7 @@ export const GATEWAY_CLIENT_MODES = {
 } as const;
 export const GATEWAY_CLIENT_NAMES = {
   CONTROL_UI: "control-ui",
+  OPENCLAW_CONTROL_UI: "openclaw-control-ui",
   NODE: "node",
 } as const;
 export type GatewayClientMode = (typeof GATEWAY_CLIENT_MODES)[keyof typeof GATEWAY_CLIENT_MODES];

@@ -58,10 +58,12 @@ def run_report_task(task_key: str = "sales_weekly_basic", trigger_type: str = "m
                         summary_json=%s,
                         report_json=%s,
                         report_md=%s,
-                        analysis_status='pending'
+                        analysis_status='pending',
+                        week_start=%s,
+                        week_end=%s
                     WHERE id=%s
                     """,
-                    (Json(summary), Json(payload.to_dict()), report_md, record_id),
+                    (Json(summary), Json(payload.to_dict()), report_md, week_start, week_end, record_id),
                 )
         db_url_for_thread = get_database_url()
         threading.Thread(

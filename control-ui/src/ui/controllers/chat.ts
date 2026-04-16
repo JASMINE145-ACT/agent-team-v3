@@ -96,7 +96,7 @@ export async function uploadChatFile(
       throw new Error(text || `Upload failed: ${res.status}`);
     }
     const payload = (await res.json()) as { success?: boolean; data?: { file_path?: string; file_name?: string; file_id?: string; summary_meta?: ChatUploadedFile["summaryMeta"] } };
-    const data = payload?.data ?? payload;
+    const data = (payload?.data ?? payload) as { file_path?: string; file_name?: string; file_id?: string; summary_meta?: ChatUploadedFile["summaryMeta"] } | undefined;
     if (!data || typeof data.file_path !== "string") {
       return null;
     }

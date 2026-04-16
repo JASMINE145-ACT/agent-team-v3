@@ -2448,6 +2448,20 @@
   margin: 0;
 }
 
+.admin-warn-bar {
+  background: #fffbe6;
+  border: 1px solid #faad14;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.admin-warn-bar ul {
+  margin: 4px 0 8px 16px;
+  padding: 0;
+}
+
 /* Work quotation — trace timeline (readable steps + raw JSON) */
 .work-trace {
   border: 1px solid var(--border);

@@ -3,6 +3,7 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 
 import { t } from "../../i18n/index.ts";
 import { toSanitizedMarkdownHtml } from "../markdown.ts";
+import "../report-chart.ts";
 import type { ReportRecord, ReportTask, ReportTaskConfig } from "../types.ts";
 
 function rp(amount: number): string {
@@ -99,6 +100,7 @@ function renderDataTab(params: ReportsTabParams) {
 
       ${daily.length > 0
         ? html`
+            <report-chart type="daily" .data=${daily}></report-chart>
             <div>
               <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-secondary);">
                 ${t("agents.reports.tableDaily")}
@@ -129,6 +131,7 @@ function renderDataTab(params: ReportsTabParams) {
 
       ${customers.length > 0
         ? html`
+            <report-chart type="customers" .data=${customers}></report-chart>
             <div>
               <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-secondary);">
                 ${t("agents.reports.tableCustomers")}

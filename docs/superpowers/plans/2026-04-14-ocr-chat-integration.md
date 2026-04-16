@@ -16,7 +16,7 @@
 |------|---------|------|
 | `control-ui/src/ui/chat/message-extract.ts` | Modify | 新增 `hasOcrBlock` / `stripOcrBlock` 纯函数 |
 | `control-ui/src/ui/chat/grouped-render.ts` | Modify | 渲染时过滤 OCR 文字 + 插入"已识别 ✓"徽章 |
-| `control-ui/src/ui/app-tool-stream.ts` | Modify | 新增 `OcrResultCard` 类型，`resetToolRender` 清空 `ocrResultCards` |
+| `control-ui/src/ui/app-tool-stream.ts` | Modify | 新增 `OcrResultCard` 类型；`resetToolRender` **不**清空 `ocrResultCards`（新发送时在 `app-chat.ts` 清空，卡片保留至本回合结束） |
 | `control-ui/src/ui/types/chat-types.ts` | Modify | `ChatItem` 联合类型新增 `ocr-result` kind |
 | `control-ui/src/ui/app-view-state.ts` | Modify | `AppViewState` 新增 `ocrResultCards: OcrResultCard[]` |
 | `control-ui/src/ui/app.ts` | Modify | 新增 `@state() ocrResultCards` |
@@ -33,13 +33,13 @@
 **Files:**
 - Modify: `control-ui/src/ui/chat/message-extract.ts`
 
-- [ ] **Step 1: 阅读现有文件**
+- [x] **Step 1: 阅读现有文件**
 
 Run: `cat control-ui/src/ui/chat/message-extract.ts`（或用 Read 工具）
 
 确认现有导出：`extractText`, `extractTextCached`，文件末尾追加即可。
 
-- [ ] **Step 2: 追加两个纯函数**
+- [x] **Step 2: 追加两个纯函数**
 
 在文件末尾追加：
 
@@ -64,7 +64,7 @@ export function stripOcrBlock(text: string): string {
 }
 ```
 
-- [ ] **Step 3: 在浏览器控制台或 Node REPL 手工验证（无测试框架时）**
+- [x] **Step 3: 在浏览器控制台或 Node REPL 手工验证（无测试框架时）**
 
 如果项目有 Vitest / Jest，创建测试文件 `control-ui/src/ui/chat/message-extract.test.ts`：
 
@@ -105,12 +105,12 @@ describe("stripOcrBlock", () => {
 Run: `cd control-ui && npx vitest run src/ui/chat/message-extract.test.ts`  
 Expected: all tests PASS (if no test runner skip this step, verify manually in Step 4)
 
-- [ ] **Step 4: 确认 TypeScript 编译无错误**
+- [x] **Step 4: 确认 TypeScript 编译无错误**
 
 Run: `cd control-ui && npx tsc --noEmit`  
 Expected: 0 errors
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add control-ui/src/ui/chat/message-extract.ts
@@ -125,7 +125,7 @@ git commit -m "feat: add hasOcrBlock/stripOcrBlock pure functions to message-ext
 **Files:**
 - Modify: `control-ui/src/ui/chat/grouped-render.ts`
 
-- [ ] **Step 1: 阅读文件，定位渲染入口**
+- [x] **Step 1: 阅读文件，定位渲染入口**
 
 Read `control-ui/src/ui/chat/grouped-render.ts`。
 
@@ -134,7 +134,7 @@ Read `control-ui/src/ui/chat/grouped-render.ts`。
 - `renderMessageImages()` 调用的位置
 - 向 Markdown 渲染传入 text 的位置
 
-- [ ] **Step 2: 添加 import**
+- [x] **Step 2: 添加 import**
 
 在文件顶部 import 区域追加（确保与现有 import 风格一致）：
 
@@ -142,7 +142,7 @@ Read `control-ui/src/ui/chat/grouped-render.ts`。
 import { hasOcrBlock, stripOcrBlock } from "./message-extract";
 ```
 
-- [ ] **Step 3: 修改 `renderMessageContent()` 中的 user role 分支**
+- [x] **Step 3: 修改 `renderMessageContent()` 中的 user role 分支**
 
 在 user message 的文字渲染处，将原来直接使用 `text` 替换为过滤后的版本，并添加徽章：
 
@@ -171,12 +171,12 @@ const displayText = ocrPresent ? stripOcrBlock(text) : text;
 2. 把 `displayText` 传给 Markdown 渲染（替换原来的 `text`）
 3. 在图片之后，Markdown 之前，条件渲染徽章
 
-- [ ] **Step 4: 确认 TypeScript 编译**
+- [x] **Step 4: 确认 TypeScript 编译**
 
 Run: `cd control-ui && npx tsc --noEmit`  
 Expected: 0 errors
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add control-ui/src/ui/chat/grouped-render.ts
@@ -190,13 +190,13 @@ git commit -m "feat: filter OCR block from user bubble and add 已识别✓ badg
 **Files:**
 - Modify: `control-ui/src/ui/views/chat.ts`
 
-- [ ] **Step 1: 找到队列项渲染代码**
+- [x] **Step 1: 找到队列项渲染代码**
 
 在 `chat.ts` 中搜索 `ChatQueueItem` 或 queue 渲染部分（`item.text` 或 `attachments`）。
 
 队列项结构：`{ text?: string; attachments?: ChatAttachment[] }`
 
-- [ ] **Step 2: 修改队列项文字显示**
+- [x] **Step 2: 修改队列项文字显示**
 
 找到渲染 queue item 文字的地方，改为：
 
@@ -208,12 +208,12 @@ item.attachments?.length
   : item.text || ""
 ```
 
-- [ ] **Step 3: 确认 TypeScript 编译**
+- [x] **Step 3: 确认 TypeScript 编译**
 
 Run: `cd control-ui && npx tsc --noEmit`  
 Expected: 0 errors
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add control-ui/src/ui/views/chat.ts
@@ -230,9 +230,9 @@ git commit -m "feat: show 识别中… spinner on queue items with image attachm
 - Modify: `control-ui/src/ui/app-view-state.ts`
 - Modify: `control-ui/src/ui/app.ts`
 
-- [ ] **Step 1: 在 `app-tool-stream.ts` 添加 `OcrResultCard` 类型并更新 `resetToolRender`**
+- [x] **Step 1: 在 `app-tool-stream.ts` 添加 `OcrResultCard` 类型；`resetToolRender` 行为说明**
 
-阅读 `app-tool-stream.ts`，找到 `resetToolRender` 函数（约 line 167）和 `@state() candidatePreviews` 附近。
+阅读 `app-tool-stream.ts`，找到 `resetToolRender` 函数（约 line 167）和类型定义区域。
 
 在现有类型定义区域（靠近 `CandidatesPreviewItem` 等）添加：
 
@@ -244,13 +244,9 @@ export type OcrResultCard = {
 };
 ```
 
-在 `resetToolRender()` 函数体中，与 `host.candidatePreviews = []` 同一位置追加：
+**实现说明（与初版 plan 差异）**：`resetToolRender()` **不**清空 `ocrResultCards`（避免回合结束时卡片被抹掉）；清空发生在用户**新发送**（`app-chat.ts`）、**重连 hello**（`app-gateway.ts`）、**/new 会话** 等时机。`resetToolRender` 内保留注释说明即可。
 
-```typescript
-host.ocrResultCards = [];
-```
-
-- [ ] **Step 2: 在 `chat-types.ts` 扩展 `ChatItem` 联合类型**
+- [x] **Step 2: 在 `chat-types.ts` 扩展 `ChatItem` 联合类型**
 
 阅读 `control-ui/src/ui/types/chat-types.ts`，找到 `ChatItem` 类型定义。
 
@@ -262,7 +258,7 @@ host.ocrResultCards = [];
 
 确保 `OcrResultCard` 从 `app-tool-stream.ts` 导入（或将类型移到 `chat-types.ts`，保持与项目现有模式一致）。
 
-- [ ] **Step 3: 在 `app-view-state.ts` 添加 `ocrResultCards` 字段**
+- [x] **Step 3: 在 `app-view-state.ts` 添加 `ocrResultCards` 字段**
 
 阅读 `app-view-state.ts`，找到 `AppViewState` 接口/类型（含 `candidatePreviews` 的那行）。
 
@@ -278,7 +274,7 @@ ocrResultCards: OcrResultCard[];
 ocrResultCards: [],
 ```
 
-- [ ] **Step 4: 在 `app.ts` 添加 `@state()` 装饰器字段**
+- [x] **Step 4: 在 `app.ts` 添加 `@state()` 装饰器字段**
 
 阅读 `app.ts`，找到 `@state() candidatePreviews` 所在位置（约 line 487-490）。
 
@@ -290,12 +286,12 @@ ocrResultCards: [],
 
 确认 `OcrResultCard` 已从正确路径导入。
 
-- [ ] **Step 5: 确认 TypeScript 编译**
+- [x] **Step 5: 确认 TypeScript 编译**
 
 Run: `cd control-ui && npx tsc --noEmit`  
 Expected: 0 errors（此步骤后 `app-gateway.ts` 和 `chat.ts` 的后续修改可能报错，若有先记录，Task 5 会修复）
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add control-ui/src/ui/app-tool-stream.ts \
@@ -313,7 +309,7 @@ git commit -m "feat: add OcrResultCard type, ChatItem kind, AppViewState field a
 - Modify: `control-ui/src/ui/app-gateway.ts`
 - Modify: `control-ui/src/ui/views/chat.ts`
 
-- [ ] **Step 1: 在 `app-gateway.ts` 中处理 `ocr_result` 事件**
+- [x] **Step 1: 在 `app-gateway.ts` 中处理 `ocr_result` 事件**
 
 阅读 `app-gateway.ts`，找到 `handleGatewayEventUnsafe()` 函数（约 line 223）中的事件分发 switch/if 链（`evt.event` 的判断）。
 
@@ -352,7 +348,7 @@ if (eventType === "ocr_result") {
 
 根据实际代码结构选择正确的分支（可能两者都需要）。
 
-- [ ] **Step 2: 在 `views/chat.ts` 中更新 `ChatProps`**
+- [x] **Step 2: 在 `views/chat.ts` 中更新 `ChatProps`**
 
 找到 `ChatProps` 接口（或等效的 props 定义），添加：
 
@@ -360,7 +356,7 @@ if (eventType === "ocr_result") {
 ocrResultCards?: OcrResultCard[];
 ```
 
-- [ ] **Step 3: 在 `buildChatItems()` 中插入 OCR 卡片**
+- [x] **Step 3: 在 `buildChatItems()` 中插入 OCR 卡片**
 
 阅读 `buildChatItems()`（约 line 703），找到 `candidatePreviews` 插入逻辑（约 line 952-959，位于 stream/reading-indicator 之前）。
 
@@ -373,7 +369,7 @@ for (const card of props.ocrResultCards ?? []) {
 }
 ```
 
-- [ ] **Step 4: 渲染 `ocr-result` kind**
+- [x] **Step 4: 渲染 `ocr-result` kind**
 
 在渲染函数（`renderChatItem()` 或等效函数）中，添加 `ocr-result` 分支：
 
@@ -392,7 +388,7 @@ if (item.kind === "ocr-result") {
 
 确认 `toSanitizedMarkdownHtml` 和 `unsafeHTML` 已在文件中导入（参照现有 `candidates-preview` 的渲染方式）。
 
-- [ ] **Step 5: 在调用 `buildChatItems()` / `<chat-view>` 的地方传入 `ocrResultCards`**
+- [x] **Step 5: 在调用 `buildChatItems()` / `<chat-view>` 的地方传入 `ocrResultCards`**
 
 找到调用 `buildChatItems(props)` 或 `<chat-view .ocrResultCards=...>` 的地方，传入 `this.ocrResultCards`：
 
@@ -401,12 +397,12 @@ if (item.kind === "ocr-result") {
 ocrResultCards: this.ocrResultCards,
 ```
 
-- [ ] **Step 6: 确认 TypeScript 编译**
+- [x] **Step 6: 确认 TypeScript 编译**
 
 Run: `cd control-ui && npx tsc --noEmit`  
 Expected: 0 errors
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add control-ui/src/ui/app-gateway.ts \
@@ -422,12 +418,12 @@ git commit -m "feat: handle ocr_result gateway event and render OCR card in chat
 - Modify: `backend/server/gateway/handlers/chat.py`
 - Modify: `backend/server/api/routes_chat.py`
 
-- [ ] **Step 1: 阅读 `gateway/handlers/chat.py` 中的 OCR 逻辑**
+- [x] **Step 1: 阅读 `gateway/handlers/chat.py` 中的 OCR 逻辑**
 
 阅读文件，找到 `handle_chat_send()` 函数（约 line 113）。
 定位 OCR 代码块（约 line 148-184）和 `send_event` 已有的调用方式。
 
-- [ ] **Step 2: 在 `chat.py` OCR 成功后添加 `send_event` 推送**
+- [x] **Step 2: 在 `chat.py` OCR 成功后添加 `send_event` 推送**
 
 在 `user_input` 的 OCR 注入赋值之后（原 line 184 附近），找到 `ocr_text` 变量赋值完成的位置，添加：
 
@@ -446,7 +442,7 @@ await send_event({
 
 确认 `run_id`, `session_key`, `ocr_text` 在此作用域内均已定义。
 
-- [ ] **Step 3: 阅读 `routes_chat.py` — 定位 OCR 代码块和 `_gen()` 边界**
+- [x] **Step 3: 阅读 `routes_chat.py` — 定位 OCR 代码块和 `_gen()` 边界**
 
 阅读 `backend/server/api/routes_chat.py`。
 
@@ -456,7 +452,7 @@ await send_event({
 - `_gen()` 内部 confirmation yield 的位置
 - `_gen()` 内部调用 LLM 之前的位置
 
-- [ ] **Step 4: 将 OCR 逻辑移入 `_gen()` 内部**
+- [x] **Step 4: 将 OCR 逻辑移入 `_gen()` 内部**
 
 **删除**：`_gen()` 之前的整个 OCR 代码块（约 line 182-205）
 
@@ -486,14 +482,14 @@ if image_attachments_stream:
 - 检查这些变量是否在 `_gen()` 外层函数中定义，若是则闭包自动捕获，无需额外传参
 - 原来在 `_gen()` 之前的 API Key 未配置等错误处理也应保留（可提前到外层进行参数验证，不影响 `_gen()` 内部逻辑）
 
-- [ ] **Step 5: 验证后端启动无错误**
+- [x] **Step 5: 验证后端启动无错误**
 
 Run: `cd "backend" && python -c "from server.api.routes_chat import router; print('OK')"`  
 或启动 dev server 确认无 import 错误。
 
 Expected: 无 syntax error / import error
 
-- [ ] **Step 6: 手工测试（如果有本地环境）**
+- [x] **Step 6: 手工测试（如果有本地环境）**
 
 1. 启动后端
 2. 前端发送带图片的消息
@@ -503,7 +499,7 @@ Expected: 无 syntax error / import error
    - 聊天线程中出现"📄 图片识别结果"卡片
    - "已识别 ✓"徽章出现在图片旁
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/server/gateway/handlers/chat.py \
@@ -518,13 +514,13 @@ git commit -m "feat: move OCR into _gen() for SSE push, add ocr_result event in 
 **Files:**
 - Modify: `backend/plugins/jagent/skills.py`
 
-- [ ] **Step 1: 阅读文件，找到 `CHAT_SKILL_PROMPT_DOC` 组装位置**
+- [x] **Step 1: 阅读文件，找到 `CHAT_SKILL_PROMPT_DOC` 组装位置**
 
 阅读 `backend/plugins/jagent/skills.py`，找到 `CHAT_SKILL_PROMPT_DOC`（约 line 411）。
 
 确认现有 section 的格式（`## SectionName\n...`），以便保持一致。
 
-- [ ] **Step 2: 追加图片识别规则 section**
+- [x] **Step 2: 追加图片识别规则 section**
 
 在 `CHAT_SKILL_PROMPT_DOC` 字符串的适当位置（建议在文件末尾的 section 中，或紧接现有图片/工具相关规则之后）添加：
 
@@ -539,12 +535,12 @@ git commit -m "feat: move OCR into _gen() for SSE push, add ocr_result event in 
 """
 ```
 
-- [ ] **Step 3: 验证 Python import 无错误**
+- [x] **Step 3: 验证 Python import 无错误**
 
 Run: `python -c "from backend.plugins.jagent.skills import CHAT_SKILL_PROMPT_DOC; print(len(CHAT_SKILL_PROMPT_DOC), 'chars')"`  
 Expected: 打印字符数，无 SyntaxError
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/plugins/jagent/skills.py
@@ -565,7 +561,7 @@ git commit -m "feat: add OCR image recognition behavior rules to jagent prompt"
 | LLM 不重复列出 OCR 内容 | Task 7: `skills.py` prompt 规则 |
 | "已识别 ✓"徽章 | Task 2: `grouped-render.ts` |
 | `OcrResultCard` 类型 | Task 4: 类型基础设施 |
-| `resetToolRender` 清空 `ocrResultCards` | Task 4: `app-tool-stream.ts` |
+| `ocrResultCards` 清空时机 | Task 4 + `app-chat.ts`：新发送/重连/新会话清空；`resetToolRender` 不清空 |
 | Gateway WebSocket 通道支持 | Task 6: `handlers/chat.py` |
 | Routes SSE 通道支持（`_gen()` 内部） | Task 6: `routes_chat.py` |
 | 纯函数 `hasOcrBlock` / `stripOcrBlock` | Task 1: `message-extract.ts` |
@@ -579,7 +575,7 @@ git commit -m "feat: add OCR image recognition behavior rules to jagent prompt"
 - `OcrResultCard` 在 Task 4 定义，Task 5 使用 — 类型名一致
 - `kind: "ocr-result"` 在 Task 4 (`chat-types.ts`) 定义，Task 5 (`buildChatItems`/渲染) 使用 — 字符串一致
 - `hasOcrBlock` / `stripOcrBlock` 在 Task 1 导出，Task 2 导入 — 函数名一致
-- `ocrResultCards` 在 Task 4 (`AppViewState`, `@state()`) 定义，Task 5 传入 `ChatProps`，Task 4 `resetToolRender` 清空 — 字段名一致
+- `ocrResultCards` 在 Task 4 (`AppViewState`, `@state()`) 定义，Task 5 传入 `ChatProps`；清空在新发送（`app-chat.ts`）等处，非 `resetToolRender` — 字段名一致
 
 ---
 

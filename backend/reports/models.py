@@ -100,7 +100,9 @@ _DDL = [
         summary_json JSONB NULL,
         report_json JSONB NULL,
         analysis_md TEXT NULL,
-        analysis_status TEXT NOT NULL DEFAULT 'pending'
+        analysis_status TEXT NOT NULL DEFAULT 'pending',
+        week_start DATE NULL,
+        week_end DATE NULL
     );
     """,
     """
@@ -137,6 +139,8 @@ def ensure_tables() -> None:
             cur.execute(
                 "ALTER TABLE report_records ADD COLUMN IF NOT EXISTS analysis_status TEXT NOT NULL DEFAULT 'pending';"
             )
+            cur.execute("ALTER TABLE report_records ADD COLUMN IF NOT EXISTS week_start DATE NULL;")
+            cur.execute("ALTER TABLE report_records ADD COLUMN IF NOT EXISTS week_end DATE NULL;")
     finally:
         conn.close()
 

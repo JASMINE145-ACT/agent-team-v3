@@ -1,5 +1,5 @@
 /** Stub: 设备认证存储类型与规范化 */
-export type DeviceAuthEntry = { token?: string; role?: string; scopes?: string[]; issuedAtMs?: number };
+export type DeviceAuthEntry = { token?: string; role?: string; scopes?: string[]; issuedAtMs?: number; updatedAtMs?: number };
 export type DeviceAuthStore = { version: number; deviceId: string; tokens: Record<string, DeviceAuthEntry> };
 
 export function normalizeDeviceAuthRole(role: string | undefined | null): string {

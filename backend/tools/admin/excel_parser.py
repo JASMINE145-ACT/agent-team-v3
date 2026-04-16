@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -101,3 +102,189 @@ def parse_product_mapping(content: bytes) -> list[dict]:
     wb.close()
     logger.info("parse_product_mapping: %d rows", len(rows))
     return rows
+
+
+def _sanitize_col_name(name: str) -> str:
+    """Normalize column names to safe identifiers for dynamic SQL tables."""
+    clean = name.replace("\x00", "").replace('"', "").strip()
+    clean = re.sub(r"[\s\-().;,/\\]+", "_", clean)
+    clean = re.sub(r"_+", "_", clean).strip("_")
+    return clean or "col"
+
+
+def _make_unique_names(raw_names: list[str]) -> tuple[list[str], list[str]]:
+    warnings: list[str] = []
+    seen: dict[str, int] = {}
+    used: set[str] = set()
+    result: list[str] = []
+    for i, name in enumerate(raw_names, start=1):
+        n = (name or "").strip()
+        if not n:
+            n = f"col_{i}"
+            warnings.append(f'第 {i} 列空列头，已自动命名为 "{n}"')
+        seen[n] = seen.get(n, 0) + 1
+        if seen[n] > 1:
+            candidate_index = seen[n]
+            new_n = f"{n}_{candidate_index}"
+            while new_n in used:
+                candidate_index += 1
+                new_n = f"{n}_{candidate_index}"
+            warnings.append(f'列头 "{n}" 重复，第 {i} 列重命名为 "{new_n}"')
+            n = new_n
+            seen[n] = seen.get(n, 0) + 1
+        if n in used:
+            candidate_index = 2
+            new_n = f"{n}_{candidate_index}"
+            while new_n in used:
+                candidate_index += 1
+                new_n = f"{n}_{candidate_index}"
+            warnings.append(f'列头 "{n}" 重复，第 {i} 列重命名为 "{new_n}"')
+            n = new_n
+        result.append(n)
+        used.add(n)
+    return result, warnings
+
+
+def _infer_type(values: list[Any]) -> tuple[str, list[str]]:
+    non_empty = [v for v in values if v is not None and str(v).strip() != ""]
+    if not non_empty:
+        return "TEXT", []
+    numeric_count = 0
+    for v in non_empty:
+        try:
+            float(str(v).replace(",", ""))
+            numeric_count += 1
+        except (ValueError, TypeError):
+            continue
+    ratio = numeric_count / len(non_empty)
+    if ratio >= 0.9:
+        return "NUMERIC", []
+    if 0 < ratio < 0.9:
+        return "TEXT", [f"类型混乱（{numeric_count}/{len(non_empty)} 可解析为数字），已降级为 TEXT"]
+    return "TEXT", []
+
+
+def _parse_rows_xlsx(content: bytes) -> tuple[list[str], list[list[Any]]]:
+    try:
+        import openpyxl
+    except ImportError as e:
+        raise RuntimeError("openpyxl 未安装") from e
+
+    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    ws = wb.active or wb[wb.sheetnames[0]]
+    all_rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    if not all_rows:
+        return [], []
+    headers = [str(v) if v is not None else "" for v in all_rows[0]]
+    data = [list(row) for row in all_rows[1:]]
+    return headers, data
+
+
+def _parse_rows_csv(content: bytes) -> tuple[list[str], list[list[str]]]:
+    import csv as csv_mod
+
+    text = content.decode("utf-8-sig", errors="replace")
+    sample = text[:4096]
+    try:
+        dialect = csv_mod.Sniffer().sniff(sample, delimiters=",;\t|")
+    except csv_mod.Error:
+        dialect = csv_mod.excel
+
+    reader = csv_mod.reader(io.StringIO(text), dialect)
+    all_rows = list(reader)
+    if not all_rows:
+        return [], []
+    headers = all_rows[0]
+    data = [row for row in all_rows[1:] if any(v.strip() for v in row)]
+    return headers, data
+
+
+def parse_generic(content: bytes, filename: str) -> dict:
+    """
+    Parse arbitrary Excel/CSV and return detected schema + aligned rows.
+    """
+    errors: list[str] = []
+    global_warnings: list[str] = []
+
+    try:
+        ext = (filename or "").rsplit(".", 1)[-1].lower()
+        if ext == "xlsx":
+            raw_headers, raw_rows = _parse_rows_xlsx(content)
+        elif ext == "xls":
+            return {
+                "columns": [],
+                "rows": [],
+                "warnings": [],
+                "errors": ["不支持 .xls 格式，请另存为 .xlsx 后重新上传"],
+            }
+        else:
+            raw_headers, raw_rows = _parse_rows_csv(content)
+    except Exception as e:
+        return {"columns": [], "rows": [], "warnings": [], "errors": [f"文件解析失败: {e}"]}
+
+    if len(raw_headers) > 100:
+        errors.append(f"列数超过 100（当前 {len(raw_headers)} 列），请拆分文件后重新上传")
+        return {"columns": [], "rows": [], "warnings": [], "errors": errors}
+
+    data_rows = [r for r in raw_rows if any(v is not None and str(v).strip() != "" for v in r)]
+    if not data_rows:
+        errors.append("文件没有数据行（仅有表头或文件为空）")
+        return {"columns": [], "rows": [], "warnings": [], "errors": errors}
+
+    ncols = len(raw_headers)
+    aligned: list[list[Any]] = []
+    for row in data_rows:
+        if len(row) < ncols:
+            aligned.append(list(row) + [None] * (ncols - len(row)))
+        else:
+            aligned.append(list(row[:ncols]))
+
+    unique_names, name_warnings = _make_unique_names(raw_headers)
+    global_warnings.extend(name_warnings)
+
+    col_defs: list[dict[str, Any]] = []
+    used_sanitized: set[str] = set()
+    scan_limit = min(200, len(aligned))
+    for ci, col_name in enumerate(unique_names):
+        col_values = [aligned[ri][ci] for ri in range(scan_limit)]
+        col_type, type_warnings = _infer_type(col_values)
+        col_warnings: list[str] = list(type_warnings)
+
+        non_empty = sum(1 for v in col_values if v is not None and str(v).strip() != "")
+        if scan_limit > 0 and non_empty / scan_limit < 0.2:
+            warning = f'列 "{col_name}" 超过 80% 的空值'
+            col_warnings.append(warning)
+            global_warnings.append(warning)
+
+        sanitized = _sanitize_col_name(col_name)
+        if sanitized in used_sanitized:
+            suffix = 2
+            candidate = f"{sanitized}_{suffix}"
+            while candidate in used_sanitized:
+                suffix += 1
+                candidate = f"{sanitized}_{suffix}"
+            global_warnings.append(f'列 "{col_name}" 清洗后重名，已重命名为 "{candidate}"')
+            sanitized = candidate
+        used_sanitized.add(sanitized)
+
+        col_defs.append(
+            {
+                "name": sanitized,
+                "type": col_type,
+                "original_name": raw_headers[ci],
+                "warnings": col_warnings,
+            }
+        )
+
+    for col in col_defs:
+        for warning in col["warnings"]:
+            if warning not in global_warnings:
+                global_warnings.append(warning)
+
+    return {
+        "columns": col_defs,
+        "rows": aligned,
+        "warnings": global_warnings,
+        "errors": [],
+    }

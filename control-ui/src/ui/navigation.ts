@@ -26,7 +26,8 @@ export type Tab =
   | "config"
   | "debug"
   | "logs"
-  | "admin-data";
+  | "admin-data"
+  | "usage";
 
 const TAB_PATHS: Record<Tab, string> = {
   agents: "/agents",
@@ -44,6 +45,7 @@ const TAB_PATHS: Record<Tab, string> = {
   debug: "/debug",
   logs: "/logs",
   "admin-data": "/admin-data",
+  usage: "/usage",
 };
 
 const PATH_TO_TAB = new Map(Object.entries(TAB_PATHS).map(([tab, path]) => [path, tab as Tab]));

@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 ANALYSIS_MODEL = "claude-haiku-4-5-20251001"
 
 
-def fetch_prev_week_payload(db_url: str, task_key: str, current_record_id: int) -> Optional[ReportPayload]:
-    """返回同 task_key 中排在当前记录之前的最新成功记录的 ReportPayload，无则返回 None。"""
+def fetch_prev_week_payload(db_url: str, task_key: str, current_week_start: str) -> Optional[ReportPayload]:
+    """Return the most recent successful payload whose week_start is older than current."""
     conn = psycopg2.connect(db_url)
     try:
         with conn.cursor() as cur:
@@ -26,12 +26,12 @@ def fetch_prev_week_payload(db_url: str, task_key: str, current_record_id: int) 
                 SELECT report_json FROM report_records
                 WHERE task_key = %s
                   AND status = 'success'
-                  AND id != %s
+                  AND week_start < %s
                   AND report_json IS NOT NULL
-                ORDER BY started_at DESC
+                ORDER BY week_start DESC
                 LIMIT 1
                 """,
-                (task_key, current_record_id),
+                (task_key, current_week_start),
             )
             row = cur.fetchone()
         if not row or not row[0]:
@@ -79,10 +79,10 @@ def build_analysis_prompt(current: ReportPayload, prev: Optional[ReportPayload])
 
 
 def _message_text(message: Any) -> str:
-    block = message.content[0]
-    if hasattr(block, "text"):
-        return str(block.text)
-    return str(block)
+    for block in message.content:
+        if hasattr(block, "text"):
+            return str(block.text)
+    return ""
 
 
 def call_llm_for_analysis(prompt: str) -> str:
@@ -125,7 +125,7 @@ def run_llm_analysis(db_url: str, record_id: int, task_key: str, current_payload
     _set_analysis_status(db_url, record_id, "running")
 
     try:
-        prev_payload = fetch_prev_week_payload(db_url, task_key, record_id)
+        prev_payload = fetch_prev_week_payload(db_url, task_key, current_payload.week_start)
         prompt = build_analysis_prompt(current_payload, prev_payload)
         analysis_md = call_llm_for_analysis(prompt)
         _set_analysis_status(db_url, record_id, "done", analysis_md)

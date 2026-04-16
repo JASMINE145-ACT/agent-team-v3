@@ -56,17 +56,25 @@ import {
 } from "./controllers/skills.ts";
 import {
   addMappingRow,
+  addLibraryRow,
   addPriceRow,
   adminLogin,
   adminLogout,
+  deleteLibraryRow,
   deleteMappingRow,
   deletePriceRow,
+  dropLibrary,
+  loadLibraries,
+  loadLibraryData,
   loadPriceLibrary,
   loadProductMapping,
+  patchLibraryRow,
   patchMappingItem,
   patchPriceItem,
+  saveLibraryRow,
   saveMappingRow,
   savePriceRow,
+  uploadLibrary,
   uploadPriceLibrary,
   uploadProductMapping,
 } from "./controllers/admin-data.ts";
@@ -747,7 +755,7 @@ export function renderApp(state: AppViewState) {
                   state.chatRunId = null;
                   state.chatQueue = [];
                   state.resetToolStream();
-                  state.resetToolRender();
+                  (state as unknown as { resetToolRender: () => void }).resetToolRender();
                   state.ocrResultCards = [];
                   state.resetChatScroll();
                   state.applySettings({
@@ -927,6 +935,37 @@ export function renderApp(state: AppViewState) {
                   await uploadProductMapping(state as unknown as AdminDataHost, file);
                 },
                 onMappingAddRow: () => addMappingRow(state as unknown as AdminDataHost),
+                onLibraryTab: () => {
+                  state.adminData = {
+                    ...state.adminData,
+                    activeSubTab: "library",
+                    activeLibraryId: null,
+                  };
+                  void loadLibraries(state as unknown as AdminDataHost);
+                },
+                onLibraryUpload: (file, name) => uploadLibrary(state as unknown as AdminDataHost, file, name),
+                onLibraryView: (id) => loadLibraryData(state as unknown as AdminDataHost, id),
+                onLibraryBack: () => {
+                  state.adminData = { ...state.adminData, activeLibraryId: null, libraryData: [] };
+                },
+                onLibraryQueryInput: (q) => {
+                  state.adminData = { ...state.adminData, libraryDataQuery: q };
+                },
+                onLibraryQueryApply: (libId) => loadLibraryData(state as unknown as AdminDataHost, libId),
+                onLibraryRefresh: (libId) => loadLibraryData(state as unknown as AdminDataHost, libId),
+                onLibraryFieldChange: (index, key, value) =>
+                  patchLibraryRow(state as unknown as AdminDataHost, index, key, value),
+                onLibrarySave: (libId, index) => {
+                  const row = state.adminData.libraryData[index];
+                  if (row) return saveLibraryRow(state as unknown as AdminDataHost, libId, row);
+                },
+                onLibraryDeleteRow: (libId, rowId) =>
+                  deleteLibraryRow(state as unknown as AdminDataHost, libId, rowId),
+                onLibraryAddRow: (libId) => addLibraryRow(state as unknown as AdminDataHost, libId),
+                onLibraryDrop: (libId) => dropLibrary(state as unknown as AdminDataHost, libId),
+                onLibraryWarningsDismiss: () => {
+                  state.adminData = { ...state.adminData, libraryUploadWarnings: [] };
+                },
               })
             : nothing
         }

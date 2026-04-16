@@ -33,7 +33,7 @@ export type ToolDisplay = {
   detail?: string;
 };
 
-const TOOL_DISPLAY_CONFIG = rawConfig as ToolDisplayConfig;
+const TOOL_DISPLAY_CONFIG = rawConfig as unknown as ToolDisplayConfig;
 const FALLBACK = TOOL_DISPLAY_CONFIG.fallback ?? { icon: "puzzle" };
 const TOOL_MAP = TOOL_DISPLAY_CONFIG.tools ?? {};
 

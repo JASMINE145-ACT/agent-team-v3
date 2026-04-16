@@ -271,33 +271,37 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
       }
       // /new 或 /reset 后后端返回 newSessionKey，切到新会话并刷新
       if (state === "final" && payload?.newSessionKey) {
-        host.sessionKey = payload.newSessionKey;
-        host.chatMessage = "";
-        host.chatAttachments = [];
-        host.chatUploadedFile = null;
-        host.chatStream = null;
-        host.chatStreamStartedAt = null;
-        host.chatRunId = null;
-        host.chatQueue = [];
-        host.chatMessages = [];
-        host.lastError = null;
-        host.chatThinkingLevel = null;
-        host.compactionStatus = null;
-        if (host.compactionClearTimer != null) {
-          clearTimeout(host.compactionClearTimer);
-          host.compactionClearTimer = null;
+        const app = host as unknown as OpenClawApp;
+        app.sessionKey = payload.newSessionKey;
+        app.chatMessage = "";
+        app.chatAttachments = [];
+        app.chatUploadedFile = null;
+        app.chatStream = null;
+        app.chatStreamStartedAt = null;
+        app.chatRunId = null;
+        app.chatQueue = [];
+        app.chatMessages = [];
+        app.lastError = null;
+        app.chatThinkingLevel = null;
+        app.compactionStatus = null;
+        {
+          const timerHost = app as unknown as { compactionClearTimer?: number | null };
+          if (timerHost.compactionClearTimer != null) {
+            clearTimeout(timerHost.compactionClearTimer);
+            timerHost.compactionClearTimer = null;
+          }
         }
-        host.resetToolStream();
-        host.resetToolRender();
-        host.ocrResultCards = [];
-        host.resetChatScroll();
-        host.applySettings({
-          ...host.settings,
+        app.resetToolStream();
+        app.resetToolRender();
+        app.ocrResultCards = [];
+        app.resetChatScroll();
+        app.applySettings({
+          ...app.settings,
           sessionKey: payload.newSessionKey,
           lastActiveSessionKey: payload.newSessionKey,
         });
-        void host.loadAssistantIdentity();
-        void loadChatHistory(host as unknown as OpenClawApp);
+        void app.loadAssistantIdentity();
+        void loadChatHistory(app);
         didLoadHistoryForNewSession = true;
       }
     }

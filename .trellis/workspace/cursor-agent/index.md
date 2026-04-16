@@ -6,27 +6,37 @@
 
 ## Current Status
 
-| Item | Status |
-|------|--------|
-| Active File | `journal-2.md` |
-| Total Sessions | 29 |
-| Last Active | 2026-04-14 |
+<!-- @@@auto:current-status -->
+- **Active File**: `journal-2.md`
+- **Total Sessions**: 36
+- **Last Active**: 2026-04-16
+<!-- @@@/auto:current-status -->
 
 ---
 
 ## Active Documents
 
+<!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
+| `journal-2.md` | ~1005 | Active |
 | `journal-1.md` | ~230 | Archived |
-| `journal-2.md` | ~720 | Active |
+<!-- @@@/auto:active-documents -->
 
 ---
 
 ## Session History
 
-| # | Date | Title |
-|---|------|-------|
+<!-- @@@auto:session-history -->
+| # | Date | Title | Commits |
+|---|------|-------|---------|
+| 36 | 2026-04-16 | [2026-04-16] backend/reports, gateway/protocol, server/api +5 | `a6ac708` |
+| 35 | 2026-04-15 | Session 2026-04-15 | `a6ac708` |
+| 34 | 2026-04-16 | Weekly Report + 数据管理模块闭环 + control-ui TS 清绿 |
+| 33 | 2026-04-16 | 数据管理模块两次增量修复（可见性 + 自定义库上传） |
+| 32 | 2026-04-15 | Tool-Defer 当前 P0/Stub 排查 |
+| 31 | 2026-04-15 | OCR 卡片与历史回放修复 |
+| 30 | 2026-04-15 | OCR–Chat fusion (SSE + UI) |
 | 29 | 2026-04-14 | LLM selector fast path + GLM vision OCR |
 | 28 | 2026-04-13 | 周报分析无限轮询修复（startup 重置 running + soft poll + LLM timeout） |
 | 27 | 2026-04-12 | Render 部署 / WebSocket 与 render.yaml DEBUG |
@@ -41,10 +51,11 @@
 | 7 | 2026-04-01 | Tool-call stall fix + reasoning visibility fix |
 | 6 | 2026-04-01 | LLM four-role policy (MiniMax / GLM-4.5-air / gpt-4o-mini / glm-ocr) |
 | 5 | 2026-04-01 | Auto select_wanding_match + MiniMax-M2.7 switch |
-| 1 | 2026-03-29 | Two-Step LLM Selector |
-| 2 | 2026-03-29 | Chinese/English Size Spec Fix |
-| 3 | 2026-03-29 | Create Frontend Spec Documentation |
-| 4 | 2026-03-30 | Doom-loop Detection + Step Snapshots |
+| 1 | 2026-03-29 | Two-Step LLM Selector | - |
+| 2 | 2026-03-29 | Chinese/English Size Spec Fix | - |
+| 3 | 2026-03-29 | Create Frontend Spec Documentation | - |
+| 4 | 2026-03-30 | Doom-loop Detection + Step Snapshots | - |
+<!-- @@@/auto:session-history -->
 
 ---
 
