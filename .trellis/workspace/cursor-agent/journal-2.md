@@ -1,3 +1,29 @@
+## Session 38: 2026-04-17 — Admin 自定义库 table_name 修复与展示重命名 API
+
+**Date**: 2026-04-17
+
+### Summary
+
+- 修复 `data_libraries.table_name` 与物理表不一致导致的 `relation "dl_*" does not exist`：`_make_table_slug` 在「去符号后 slug 为空」时不再生成 `dl_{id}_lib_`；新增 `resolve_library_meta`、`try_repair_library_table_name(meta=…)`、`_is_undefined_table_error`（PostgreSQL `42P01` 异常链 + 文案兜底）；读库失败时仍可一次性自动修复并重试。
+- 自定义库相关路由在读写删、删库前统一走 `resolve_library_meta`，避免仅读过列表就写入时仍指向错误物理表名。
+- 新增 `PUT /api/admin/libraries/{lib_id}`，仅更新展示字段 `name`，不修改物理 `table_name`。
+
+### Main Changes
+
+- `backend/tools/admin/repository.py`：slug 修复、`resolve_library_meta`、repair 与 `fetch_library_data` 的 `lib_id` 重试、`pgcode` 识别。
+- `backend/server/api/routes_admin.py`：`PUT /libraries/{id}`；`GET/POST/PUT/DELETE` 库数据与 `DELETE /libraries/{id}` 使用 `resolve_library_meta`。
+- `backend/tools/admin/tests/test_library_slug.py`、`test_undefined_table_error.py`；`tests/test_admin_libraries_routes.py` 扩展（含 mock 路径修正）。
+
+### Verification Gate
+
+- `py -3 -m pytest backend/tools/admin/tests/test_library_slug.py backend/tools/admin/tests/test_undefined_table_error.py tests/test_admin_libraries_routes.py -q` → **12 passed**
+
+### Status
+
+[OK] **Completed**
+
+---
+
 ## Session 34: 2026-04-16 — Weekly Report 修复 + 数据管理模块闭环 + control-ui 全局 TS 清绿
 
 **Date**: 2026-04-16
@@ -991,6 +1017,43 @@ Changed files (24 total):
 | Hash | Message |
 |------|---------|
 | `a6ac708` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 37: [2026-04-16] Agent Team version3/tests, server/api, tools/admin
+
+**Date**: 2026-04-16
+**Task**: [2026-04-16] Agent Team version3/tests, server/api, tools/admin
+
+### Summary
+
+Auto-recorded by trellis-journal hook after Code Review + Test verification.
+
+Changed files (3 total):
+- `Agent Team version3/backend/server/api/routes_admin.py`
+- `Agent Team version3/backend/tools/admin/repository.py`
+- `Agent Team version3/tests/test_admin_libraries_routes.py`
+
+### Main Changes
+
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `09e40dd` | (see git log) |
 
 ### Testing
 

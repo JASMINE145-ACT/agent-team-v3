@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 36
-- **Last Active**: 2026-04-16
+- **Total Sessions**: 38
+- **Last Active**: 2026-04-17
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1005 | Active |
+| `journal-2.md` | ~1120 | Active |
 | `journal-1.md` | ~230 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits |
 |---|------|-------|---------|
+| 38 | 2026-04-17 | Admin 自定义库 table_name 修复 + PUT 展示重命名 | `9d58958` |
+| 37 | 2026-04-16 | [2026-04-16] Agent Team version3/tests, server/api, tools/admin | `09e40dd` |
 | 36 | 2026-04-16 | [2026-04-16] backend/reports, gateway/protocol, server/api +5 | `a6ac708` |
 | 35 | 2026-04-15 | Session 2026-04-15 | `a6ac708` |
 | 34 | 2026-04-16 | Weekly Report + 数据管理模块闭环 + control-ui TS 清绿 |
