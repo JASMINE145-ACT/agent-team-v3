@@ -56,8 +56,35 @@ def test_upload_library_returns_warnings(monkeypatch):
 
 def test_get_library_data_404_when_missing(monkeypatch):
     _setup_admin_auth(monkeypatch)
-    monkeypatch.setattr("backend.server.api.routes_admin.repository.get_library_meta", lambda lib_id: None)
+    monkeypatch.setattr("backend.tools.admin.repository.get_library_meta", lambda lib_id: None)
     client = TestClient(app)
     resp = client.get("/api/admin/libraries/999/data", headers={"X-Admin-Token": "ok"})
     assert resp.status_code == 404
     assert "库不存在" in resp.text
+
+
+def test_update_library_display_name_success(monkeypatch):
+    _setup_admin_auth(monkeypatch)
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.update_library_display_name",
+        lambda lib_id, name: True,
+    )
+    client = TestClient(app)
+    resp = client.put(
+        "/api/admin/libraries/1",
+        headers={"X-Admin-Token": "ok", "Content-Type": "application/json"},
+        json={"name": "新库名"},
+    )
+    assert resp.status_code == 200
+    assert resp.json().get("ok") is True
+
+
+def test_update_library_display_name_empty_400(monkeypatch):
+    _setup_admin_auth(monkeypatch)
+    client = TestClient(app)
+    resp = client.put(
+        "/api/admin/libraries/1",
+        headers={"X-Admin-Token": "ok", "Content-Type": "application/json"},
+        json={"name": "  "},
+    )
+    assert resp.status_code == 400

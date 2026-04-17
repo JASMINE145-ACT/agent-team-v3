@@ -242,6 +242,26 @@ async def list_libraries(_: None = Depends(get_admin_dep)):
     return {"items": repository.list_libraries()}
 
 
+@router.put("/libraries/{lib_id}")
+async def update_library_display_name(
+    lib_id: int,
+    body: dict,
+    _: None = Depends(get_admin_dep),
+):
+    """仅更新展示名称，不修改物理表名 table_name。"""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="请求体必须为 JSON 对象")
+    raw = body.get("name")
+    if raw is None or not str(raw).strip():
+        raise HTTPException(status_code=400, detail="库名不能为空")
+    ok = repository.update_library_display_name(lib_id, str(raw).strip())
+    if ok is None:
+        raise HTTPException(status_code=503, detail="数据库不可用")
+    if not ok:
+        raise HTTPException(status_code=404, detail="库不存在")
+    return {"ok": True}
+
+
 @router.get("/libraries/{lib_id}/data")
 async def get_library_data(
     lib_id: int,
@@ -250,11 +270,16 @@ async def get_library_data(
     page_size: int = Query(default=100, ge=1, le=1000),
     _: None = Depends(get_admin_dep),
 ):
-    meta = repository.get_library_meta(lib_id)
+    meta = repository.resolve_library_meta(lib_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="库不存在")
     return repository.fetch_library_data(
-        meta["table_name"], meta["columns"], q=q, page=page, page_size=page_size
+        meta["table_name"],
+        meta["columns"],
+        q=q,
+        page=page,
+        page_size=page_size,
+        lib_id=lib_id,
     )
 
 
@@ -266,7 +291,7 @@ async def create_library_row(
 ):
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="请求体必须为 JSON 对象")
-    meta = repository.get_library_meta(lib_id)
+    meta = repository.resolve_library_meta(lib_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="库不存在")
     row_id = repository.insert_library_row(meta["table_name"], meta["columns"], body)
@@ -284,7 +309,7 @@ async def update_library_data_row(
 ):
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="请求体必须为 JSON 对象")
-    meta = repository.get_library_meta(lib_id)
+    meta = repository.resolve_library_meta(lib_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="库不存在")
     ok = repository.update_library_row(meta["table_name"], meta["columns"], row_id, body)
@@ -301,7 +326,7 @@ async def delete_library_data_row(
     row_id: int,
     _: None = Depends(get_admin_dep),
 ):
-    meta = repository.get_library_meta(lib_id)
+    meta = repository.resolve_library_meta(lib_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="库不存在")
     ok = repository.delete_library_row(meta["table_name"], row_id)
@@ -314,7 +339,7 @@ async def delete_library_data_row(
 
 @router.delete("/libraries/{lib_id}")
 async def drop_library(lib_id: int, _: None = Depends(get_admin_dep)):
-    meta = repository.get_library_meta(lib_id)
+    meta = repository.resolve_library_meta(lib_id)
     if meta is None:
         raise HTTPException(status_code=404, detail="库不存在")
     ok = repository.drop_library(lib_id, meta["table_name"])

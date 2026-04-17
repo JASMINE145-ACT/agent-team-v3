@@ -403,12 +403,39 @@ def replace_all_product_mapping(rows: list[dict]) -> int:
         return 0
 
 
+def _is_undefined_table_error(exc: BaseException) -> bool:
+    """True when PostgreSQL reports undefined_table (42P01), including wrapped SQLAlchemy/driver errors."""
+    cur: Optional[BaseException] = exc
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        pgcode = getattr(cur, "pgcode", None)
+        if pgcode == "42P01":
+            return True
+        nxt = getattr(cur, "orig", None)
+        if nxt is None:
+            nxt = getattr(cur, "__cause__", None)
+        cur = nxt if isinstance(nxt, BaseException) else None
+    # Fallback for drivers/locales that omit pgcode on the outer exception
+    msg = str(exc).lower()
+    if "does not exist" in msg:
+        return True
+    if "undefinedtable" in msg.replace(" ", ""):
+        return True
+    return False
+
+
 def _make_table_slug(name: str) -> str:
+    """Derive a stable SQL identifier fragment from display name (ASCII word chars only)."""
     slug = re.sub(r"[^\w]", "_", name, flags=re.ASCII)
     slug = re.sub(r"_+", "_", slug).strip("_").lower()
-    if not slug or slug[0].isdigit():
+    # Empty slug must not become "lib_" + "" (would yield dl_{id}_lib_ and confuse metadata vs. older tables).
+    if not slug:
+        slug = "lib"
+    elif slug[0].isdigit():
         slug = "lib_" + slug
-    return slug[:32] or "lib"
+    slug = (slug[:32]).rstrip("_") or "lib"
+    return slug
 
 
 def _sql_col(name: str) -> str:
@@ -509,6 +536,84 @@ def create_library_and_insert(name: str, columns: list[dict], rows: list[list]) 
         return None
 
 
+def update_library_display_name(lib_id: int, name: str) -> Optional[bool]:
+    """Update only the human-readable name; physical table_name is unchanged."""
+    engine = _get_engine()
+    if engine is None:
+        return None
+    nm = (name or "").strip()
+    if not nm:
+        return False
+    try:
+        with engine.begin() as conn:
+            result = conn.execute(
+                text("UPDATE data_libraries SET name=:name, updated_at=NOW() WHERE id=:id"),
+                {"name": nm, "id": lib_id},
+            )
+            return result.rowcount > 0
+    except Exception as e:
+        logger.warning("update_library_display_name 失败: %s", e)
+        return None
+
+
+def try_repair_library_table_name(lib_id: int, meta: Optional[dict] = None) -> Optional[str]:
+    """If metadata points at a missing table but exactly one dl_{id}_* exists, fix data_libraries.table_name."""
+    if meta is None:
+        meta = get_library_meta(lib_id)
+    if meta is None:
+        return None
+    engine = _get_engine()
+    if engine is None:
+        return None
+    current = (meta.get("table_name") or "").strip()
+    prefix = f"dl_{lib_id}_"
+    try:
+        with engine.begin() as conn:
+            exists = conn.execute(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = :tn)"
+                ),
+                {"tn": current},
+            ).scalar()
+            if exists:
+                return None
+            rows = conn.execute(
+                text(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                    "AND tablename LIKE :prefix ORDER BY tablename"
+                ),
+                {"prefix": prefix + "%"},
+            ).fetchall()
+            if len(rows) != 1:
+                logger.warning(
+                    "try_repair_library_table_name: id=%s 无法自动修复（匹配表数量=%s）",
+                    lib_id,
+                    len(rows),
+                )
+                return None
+            fixed = rows[0][0]
+            conn.execute(
+                text("UPDATE data_libraries SET table_name=:tn, updated_at=NOW() WHERE id=:id"),
+                {"tn": fixed, "id": lib_id},
+            )
+            logger.info("已修复库 %s 的 table_name: %s -> %s", lib_id, current, fixed)
+            return str(fixed)
+    except Exception as e:
+        logger.warning("try_repair_library_table_name 失败: %s", e)
+        return None
+
+
+def resolve_library_meta(lib_id: int) -> Optional[dict]:
+    """Load library row from data_libraries and repair stale table_name when uniquely resolvable."""
+    meta = get_library_meta(lib_id)
+    if meta is None:
+        return None
+    fixed = try_repair_library_table_name(lib_id, meta=meta)
+    if fixed:
+        return get_library_meta(lib_id)
+    return meta
+
+
 def get_library_meta(lib_id: int) -> Optional[dict]:
     engine = _get_engine()
     if engine is None:
@@ -530,37 +635,55 @@ def get_library_meta(lib_id: int) -> Optional[dict]:
         return None
 
 
-def fetch_library_data(table_name: str, columns: list[dict], q: str = "", page: int = 1, page_size: int = 100) -> dict:
+def fetch_library_data(
+    table_name: str,
+    columns: list[dict],
+    q: str = "",
+    page: int = 1,
+    page_size: int = 100,
+    *,
+    lib_id: Optional[int] = None,
+) -> dict:
     engine = _get_engine()
     if engine is None:
         return {"items": [], "total": 0}
     offset = (page - 1) * page_size
     q = (q or "").strip()
     text_cols = [c["name"] for c in columns if c["type"] == "TEXT"]
-    try:
-        safe_table = _safe_table_name(table_name)
-        with engine.connect() as conn:
-            if q and text_cols:
-                conditions = " OR ".join(f'{_sql_col(c)} ILIKE :q' for c in text_cols)
-                where = f"WHERE {conditions}"
-                total = conn.execute(
-                    text(f"SELECT COUNT(*) FROM {safe_table} {where}"),
-                    {"q": f"%{q}%"},
-                ).scalar() or 0
-                rows = conn.execute(
-                    text(f"SELECT * FROM {safe_table} {where} ORDER BY id LIMIT :lim OFFSET :off"),
-                    {"q": f"%{q}%", "lim": page_size, "off": offset},
-                ).mappings().all()
-            else:
-                total = conn.execute(text(f"SELECT COUNT(*) FROM {safe_table}")).scalar() or 0
-                rows = conn.execute(
-                    text(f"SELECT * FROM {safe_table} ORDER BY id LIMIT :lim OFFSET :off"),
-                    {"lim": page_size, "off": offset},
-                ).mappings().all()
-        return {"items": [dict(r) for r in rows], "total": int(total)}
-    except Exception as e:
-        logger.warning("fetch_library_data 失败: %s", e)
-        return {"items": [], "total": 0}
+    tn = (table_name or "").strip()
+    for attempt in range(2):
+        try:
+            safe_table = _safe_table_name(tn)
+            with engine.connect() as conn:
+                if q and text_cols:
+                    conditions = " OR ".join(f'{_sql_col(c)} ILIKE :q' for c in text_cols)
+                    where = f"WHERE {conditions}"
+                    total = conn.execute(
+                        text(f"SELECT COUNT(*) FROM {safe_table} {where}"),
+                        {"q": f"%{q}%"},
+                    ).scalar() or 0
+                    rows = conn.execute(
+                        text(f"SELECT * FROM {safe_table} {where} ORDER BY id LIMIT :lim OFFSET :off"),
+                        {"q": f"%{q}%", "lim": page_size, "off": offset},
+                    ).mappings().all()
+                else:
+                    total = conn.execute(text(f"SELECT COUNT(*) FROM {safe_table}")).scalar() or 0
+                    rows = conn.execute(
+                        text(f"SELECT * FROM {safe_table} ORDER BY id LIMIT :lim OFFSET :off"),
+                        {"lim": page_size, "off": offset},
+                    ).mappings().all()
+            return {"items": [dict(r) for r in rows], "total": int(total)}
+        except Exception as e:
+            missing_rel = _is_undefined_table_error(e)
+            if attempt == 0 and lib_id is not None and missing_rel:
+                fixed = try_repair_library_table_name(lib_id)
+                if fixed:
+                    tn = fixed
+                    continue
+            logger.warning("fetch_library_data 失败: %s", e)
+            return {"items": [], "total": 0}
+    logger.warning("fetch_library_data 失败: 重试后仍失败")
+    return {"items": [], "total": 0}
 
 
 def insert_library_row(table_name: str, columns: list[dict], data: dict) -> Optional[int]:
