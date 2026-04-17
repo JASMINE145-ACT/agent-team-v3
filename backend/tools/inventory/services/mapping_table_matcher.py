@@ -41,6 +41,73 @@ def invalidate_mapping_cache() -> None:
     logger.info("mapping_table_matcher: cache cleared")
 
 
+def _find_col_mapping(columns: list[dict], *keywords: str) -> str | None:
+    """同 wanding_fuzzy_matcher._find_col，为映射表独立定义避免循环 import。"""
+    for col in columns:
+        name = (col.get("name") or "").lower()
+        if all(kw.lower() in name for kw in keywords):
+            return col["name"]
+    return None
+
+
+def _try_load_from_mapping_custom_library() -> Optional[pd.DataFrame]:
+    """product_mapping 固定表为空时，从名含"整理产品"/"映射"的自定义库加载。"""
+    try:
+        from backend.tools.admin import repository
+        from backend.tools.inventory.config import config
+
+        libs = repository.list_libraries()
+        patterns = config.MAPPING_LIB_NAME_PATTERNS
+        matched = [lib for lib in libs if any(p in (lib.get("name") or "") for p in patterns)]
+        if not matched:
+            return None
+        lib = max(matched, key=lambda x: x["id"])
+        table_name = lib.get("table_name") or ""
+        columns = lib.get("columns") or []
+        if not table_name or not columns:
+            return None
+
+        col_inquiry = _find_col_mapping(columns, config.MAPPING_COL_INQUIRY_KW)
+        col_spec = _find_col_mapping(columns, config.MAPPING_COL_SPEC_KW)
+        col_code = _find_col_mapping(columns, config.MAPPING_COL_CODE_KW)
+        col_quotation = _find_col_mapping(columns, config.MAPPING_COL_QUOTATION_KW)
+
+        if not col_code:
+            logger.warning("自定义映射表找不到产品编号列 (keywords=%s)", config.MAPPING_COL_CODE_KW)
+            return None
+
+        rows = repository.fetch_all_library_rows(table_name)
+        if not rows:
+            return None
+
+        records: List[dict] = []
+        for r in rows:
+            field_name = str(r.get(col_inquiry) or "" if col_inquiry else "").strip()
+            spec = str(r.get(col_spec) or "" if col_spec else "").strip()
+            code = str(r.get(col_code) or "").strip()
+            matched_name = str(r.get(col_quotation) or "" if col_quotation else "").strip()
+            if not code:
+                continue
+            search_text = f"{field_name} {spec}".strip() if spec else field_name
+            records.append({"search_text": search_text, "code": code, "matched_name": matched_name})
+
+        if not records:
+            return None
+        df = pd.DataFrame(records)
+        df["norm_text"] = df["search_text"].apply(_normalize)
+        df["spec_tokens"] = df["search_text"].apply(
+            lambda t: frozenset(tok for tok in _split_tokens(t) if re.search(r"\d", tok))
+        )
+        logger.info(
+            "mapping_table_matcher: loaded %d rows from custom library '%s'",
+            len(df), lib.get("name"),
+        )
+        return df
+    except Exception as e:
+        logger.warning("_try_load_from_mapping_custom_library 失败: %s", e)
+        return None
+
+
 def _try_load_mapping_from_db() -> Optional[pd.DataFrame]:
     """从 Neon 构建映射表 DataFrame；无数据则返回 None。"""
     try:
@@ -48,7 +115,7 @@ def _try_load_mapping_from_db() -> Optional[pd.DataFrame]:
 
         rows = get_product_mapping_rows()
         if not rows:
-            return None
+            return _try_load_from_mapping_custom_library()
         records: List[dict] = []
         for r in rows:
             field_name = str(r.get("inquiry_name") or "").strip()
@@ -82,11 +149,8 @@ def load_mapping_df(path: str | Path) -> pd.DataFrame:
     """
     global _MAPPING_DF_CACHE, _MAPPING_DF_PATH
     path_str = str(path)
-    if _MAPPING_DF_CACHE is not None and _MAPPING_DF_PATH == path_str:
-        return _MAPPING_DF_CACHE
 
     with _MAPPING_CACHE_LOCK:
-        # double-checked locking
         if _MAPPING_DF_CACHE is not None and _MAPPING_DF_PATH == path_str:
             return _MAPPING_DF_CACHE
 

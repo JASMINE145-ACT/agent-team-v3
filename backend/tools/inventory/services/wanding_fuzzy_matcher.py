@@ -756,6 +756,84 @@ def _level_to_db_price_field(level: str) -> Optional[str]:
     return None
 
 
+def _find_col(columns: list[dict], *keywords: str) -> str | None:
+    """从 columns JSON 找第一个 name（lower）同时包含所有 keyword（lower）的列。"""
+    for col in columns:
+        name = (col.get("name") or "").lower()
+        if all(kw.lower() in name for kw in keywords):
+            return col["name"]
+    return None
+
+
+def _try_load_from_custom_library(level: str) -> Optional[pd.DataFrame]:
+    """当 price_library 固定表为空时，从名含"万鼎"/"价格库"的自定义库拉数据。"""
+    try:
+        from backend.tools.admin import repository
+        from backend.tools.inventory.config import config
+
+        libs = repository.list_libraries()
+        patterns = config.PRICE_LIB_NAME_PATTERNS
+        matched = [lib for lib in libs if any(p in (lib.get("name") or "") for p in patterns)]
+        if not matched:
+            return None
+
+        lib = max(matched, key=lambda x: x["id"])
+        table_name = lib.get("table_name") or ""
+        columns = lib.get("columns") or []
+        if not table_name or not columns:
+            return None
+
+        col_material = _find_col(columns, config.PRICE_LIB_COL_MATERIAL_KW)
+        col_desc = _find_col(columns, config.PRICE_LIB_COL_DESC_KW)
+        field = _level_to_db_price_field(level)
+        level_kw_map = {
+            "price_a": config.PRICE_LIB_COL_PRICE_A_KW,
+            "price_b": config.PRICE_LIB_COL_PRICE_B_KW,
+            "price_c": config.PRICE_LIB_COL_PRICE_C_KW,
+            "price_d": config.PRICE_LIB_COL_PRICE_D_KW,
+        }
+        price_kw = level_kw_map.get(field or "")
+        col_price = _find_col(columns, *price_kw) if price_kw else None
+
+        if not col_desc:
+            logger.warning("自定义价格库找不到描述列 (keywords=%s)", config.PRICE_LIB_COL_DESC_KW)
+            return None
+
+        rows = repository.fetch_all_library_rows(table_name)
+        if not rows:
+            return None
+
+        records = []
+        for r in rows:
+            material = str(r.get(col_material) or "" if col_material else "").strip()
+            desc = str(r.get(col_desc) or "").strip()
+            if not desc:
+                continue
+            up_f = 0.0
+            if col_price:
+                try:
+                    up_f = float(r.get(col_price) or 0)
+                except (TypeError, ValueError):
+                    up_f = 0.0
+            records.append({"Material": material, "Describrition": desc, "unit_price": up_f})
+
+        if not records:
+            return None
+        df = pd.DataFrame(records)
+        df["norm_text"] = df["Describrition"].apply(_normalize)
+        df["spec_tokens"] = df["Describrition"].apply(
+            lambda t: frozenset(tok for tok in _split_tokens(t) if re.search(r"\d", tok))
+        )
+        logger.info(
+            "wanding_fuzzy_matcher: loaded %d rows from custom library '%s' (level=%s)",
+            len(df), lib.get("name"), level,
+        )
+        return df
+    except Exception as e:
+        logger.warning("_try_load_from_custom_library 失败: %s", e)
+        return None
+
+
 def _try_load_from_db(level: str) -> Optional[pd.DataFrame]:
     """从 Neon admin 缓存行构建 DataFrame；无数据或不可用则返回 None（fallback xlsx）。"""
     try:
@@ -763,7 +841,7 @@ def _try_load_from_db(level: str) -> Optional[pd.DataFrame]:
 
         rows = get_price_library_rows()
         if not rows:
-            return None
+            return _try_load_from_custom_library(level)
         field = _level_to_db_price_field(level)
         if field is None:
             return None
@@ -804,8 +882,6 @@ def _get_cached_df(path, customer_level: str) -> pd.DataFrame:
     """线程安全地获取 DataFrame。优先 Neon（有数据时），否则读本地 xlsx。"""
     level = _normalize_price_level(customer_level)
     cache_key = f"{path}:{level}"
-    if cache_key in _df_cache:
-        return _df_cache[cache_key]
     with _df_cache_lock:
         if cache_key not in _df_cache:
             df_db = _try_load_from_db(level)
@@ -813,7 +889,7 @@ def _get_cached_df(path, customer_level: str) -> pd.DataFrame:
                 _df_cache[cache_key] = df_db
             else:
                 _df_cache[cache_key] = load_wanding_df(path, customer_level=level)
-    return _df_cache[cache_key]
+        return _df_cache[cache_key]
 
 
 # --------- 利润率查询（按 code / 完整名称 + 价格）---------

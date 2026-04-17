@@ -46,13 +46,13 @@ def test_basic_xlsx_numeric_detection() -> None:
     assert len(result["rows"]) == 3
 
 
-def test_empty_header_gets_renamed() -> None:
+def test_empty_header_gets_filtered() -> None:
     content = _make_xlsx([["名称", "", "价格"], ["A", "x", 10]])
     result = parse_generic(content, "test.xlsx")
     assert result["errors"] == []
     col_names = [c["name"] for c in result["columns"]]
-    assert "col_2" in col_names
-    assert any("空列头" in w for w in result["warnings"])
+    assert col_names == ["名称", "价格"]
+    assert len(result["rows"][0]) == 2
 
 
 def test_duplicate_header_gets_suffix() -> None:
@@ -134,3 +134,32 @@ def test_mixed_type_column_becomes_text() -> None:
     assert result["columns"][0]["type"] == "TEXT"
     merged_warnings = result["columns"][0]["warnings"] + result["warnings"]
     assert any("类型混乱" in w for w in merged_warnings)
+
+
+def test_empty_header_columns_are_filtered() -> None:
+    """parse_generic 应过滤列头为 None/空字符串的列，不产生 col_N 列名。"""
+    content = _make_xlsx(
+        [
+            ["名称", "价格", None],
+            ["产品A", 10.0, "ignored"],
+            ["产品B", 20.0, "ignored"],
+        ]
+    )
+    result = parse_generic(content, "test.xlsx")
+    col_names = [c["name"] for c in result["columns"]]
+    assert len(col_names) == 2, f"期望 2 列，实际: {col_names}"
+    assert all("col_" not in n for n in col_names), f"不应含 col_N: {col_names}"
+    assert len(result["rows"]) == 2
+    assert len(result["rows"][0]) == 2
+
+
+def test_all_empty_headers_returns_error() -> None:
+    content = _make_xlsx(
+        [
+            [None, "", "   "],
+            ["A", "B", "C"],
+        ]
+    )
+    result = parse_generic(content, "test.xlsx")
+    assert result["errors"]
+    assert "所有列头均为空" in result["errors"][0]

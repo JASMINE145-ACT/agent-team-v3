@@ -320,6 +320,23 @@ def fetch_all_product_mapping() -> list[dict]:
         return []
 
 
+def fetch_all_library_rows(table_name: str) -> list[dict]:
+    """全量拉取自定义库表数据（供 Matcher 缓存用）。table_name 必须为 dl_{id}_xxx 格式。"""
+    engine = _get_engine()
+    if engine is None:
+        return []
+    try:
+        safe_table = _safe_table_name(table_name)
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(f"SELECT * FROM {safe_table} ORDER BY id")
+            ).mappings().all()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning("fetch_all_library_rows 失败 (table=%s): %s", table_name, e)
+        return []
+
+
 def insert_mapping_row(inquiry_name: str, spec: str, product_code: str, quotation_name: str) -> Optional[int]:
     engine = _get_engine()
     if engine is None:

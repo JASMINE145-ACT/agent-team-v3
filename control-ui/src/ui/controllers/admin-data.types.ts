@@ -1,21 +1,3 @@
-export type PriceRow = {
-  id?: number;
-  material: string;
-  description: string;
-  price_a: number | null;
-  price_b: number | null;
-  price_c: number | null;
-  price_d: number | null;
-};
-
-export type MappingRow = {
-  id?: number;
-  inquiry_name: string;
-  spec: string;
-  product_code: string;
-  quotation_name: string;
-};
-
 export type LibraryColumnDef = {
   name: string;
   type: "TEXT" | "NUMERIC";
@@ -38,23 +20,7 @@ export type AdminDataState = {
   token: string | null;
   loginError: string | null;
   loginLoading: boolean;
-  activeSubTab: "price" | "mapping" | "library";
-  priceItems: PriceRow[];
-  priceTotal: number;
-  pricePage: number;
-  pricePageSize: number;
-  priceQuery: string;
-  priceLoading: boolean;
-  priceError: string | null;
-  priceUploading: boolean;
-  mappingItems: MappingRow[];
-  mappingTotal: number;
-  mappingPage: number;
-  mappingPageSize: number;
-  mappingQuery: string;
-  mappingLoading: boolean;
-  mappingError: string | null;
-  mappingUploading: boolean;
+  activeSubTab: "library";
   libraries: LibraryMeta[];
   librariesLoading: boolean;
   librariesError: string | null;

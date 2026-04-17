@@ -169,6 +169,21 @@ class InventoryConfig:
     LLM_TIMEOUT: int = int(os.environ.get("LLM_TIMEOUT", "60"))
     TOOL_EXEC_TIMEOUT: int = int(os.environ.get("TOOL_EXEC_TIMEOUT", "90"))  # AOL 多 code 时需多次 API 调用，35s 易超时
     INVENTORY_DEMO_MODE: bool = os.environ.get("INVENTORY_DEMO_MODE", "").strip().lower() in ("1", "true", "yes")  # 演示模式：src 不可用时返回模拟库存
+    # ── 自定义库列名关键词（用于 _find_col；均可通过环境变量覆盖）──────────────
+    # 万鼎价格库列
+    PRICE_LIB_NAME_PATTERNS: tuple = ("万鼎", "价格库")
+    PRICE_LIB_COL_MATERIAL_KW: str = os.environ.get("PRICE_LIB_COL_MATERIAL_KW", "Material")
+    PRICE_LIB_COL_DESC_KW: str = os.environ.get("PRICE_LIB_COL_DESC_KW", "Describrition")
+    PRICE_LIB_COL_PRICE_A_KW: tuple = ("A级别", "报单价格")
+    PRICE_LIB_COL_PRICE_B_KW: tuple = ("B级别", "报单价格")
+    PRICE_LIB_COL_PRICE_C_KW: tuple = ("C级别", "报单价格")
+    PRICE_LIB_COL_PRICE_D_KW: tuple = ("D级别", "报单价格")
+    # 映射表列
+    MAPPING_LIB_NAME_PATTERNS: tuple = ("整理产品", "映射")
+    MAPPING_COL_INQUIRY_KW: str = os.environ.get("MAPPING_COL_INQUIRY_KW", "询价货物名称")
+    MAPPING_COL_SPEC_KW: str = os.environ.get("MAPPING_COL_SPEC_KW", "询价规格型号")
+    MAPPING_COL_CODE_KW: str = os.environ.get("MAPPING_COL_CODE_KW", "产品编号")
+    MAPPING_COL_QUOTATION_KW: str = os.environ.get("MAPPING_COL_QUOTATION_KW", "报价名称")
 
     # Work/询价：选型质量与并发配置
     # - WORK_SINGLE_CAND_USE_LLM: len(candidates)==1 时是否仍走一次 LLM 选型以兜底（默认 0=否）

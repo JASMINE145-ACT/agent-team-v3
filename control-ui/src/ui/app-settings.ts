@@ -33,7 +33,7 @@ import {
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadSkills } from "./controllers/skills.ts";
-import { loadPriceLibrary, loadProductMapping } from "./controllers/admin-data.ts";
+import { loadLibraries } from "./controllers/admin-data.ts";
 import type { AdminDataHost } from "./controllers/admin-data.types.ts";
 import { loadReports } from "./controllers/reports.ts";
 import {
@@ -274,8 +274,7 @@ export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "admin-data") {
     const h = host as unknown as AdminDataHost;
     if (h.adminData.token) {
-      await loadPriceLibrary(h);
-      await loadProductMapping(h);
+      await loadLibraries(h);
     }
   }
 }

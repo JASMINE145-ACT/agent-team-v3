@@ -232,6 +232,20 @@ def parse_generic(content: bytes, filename: str) -> dict:
         errors.append("文件没有数据行（仅有表头或文件为空）")
         return {"columns": [], "rows": [], "warnings": [], "errors": errors}
 
+    # 过滤掉原始列头为空/None 的列，避免生成 col_N 占位列
+    non_empty_col_indices = [i for i, h in enumerate(raw_headers) if h and h.strip()]
+    if len(non_empty_col_indices) < len(raw_headers):
+        dropped_count = len(raw_headers) - len(non_empty_col_indices)
+        raw_headers = [raw_headers[i] for i in non_empty_col_indices]
+        data_rows = [
+            [row[i] if i < len(row) else None for i in non_empty_col_indices]
+            for row in data_rows
+        ]
+        global_warnings.append(f"已过滤 {dropped_count} 个空列头列")
+    if not raw_headers:
+        errors.append("所有列头均为空，无法导入")
+        return {"columns": [], "rows": [], "warnings": global_warnings, "errors": errors}
+
     ncols = len(raw_headers)
     aligned: list[list[Any]] = []
     for row in data_rows:

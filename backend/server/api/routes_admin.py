@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -15,8 +16,11 @@ from backend.tools.admin.excel_parser import (
     parse_product_mapping,
 )
 from backend.config import Config
+from backend.tools.inventory.services.mapping_table_matcher import invalidate_mapping_cache
+from backend.tools.inventory.services.wanding_fuzzy_matcher import invalidate_wanding_cache
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
 
 _MAX_UPLOAD_BYTES = max(1, int(Config.MAX_UPLOAD_MB)) * 1024 * 1024
 _READ_CHUNK = 64 * 1024
@@ -99,6 +103,7 @@ async def create_price_row(body: PriceRow, _: None = Depends(get_admin_dep)):
     if row_id is None:
         raise HTTPException(status_code=503, detail="DB 不可用")
     admin_cache.invalidate_price_library()
+    invalidate_wanding_cache()
     return {"id": row_id}
 
 
@@ -112,6 +117,7 @@ async def update_price_row(row_id: int, body: PriceRow, _: None = Depends(get_ad
     if not ok:
         raise HTTPException(status_code=404, detail="记录不存在")
     admin_cache.invalidate_price_library()
+    invalidate_wanding_cache()
     return {"ok": True}
 
 
@@ -123,6 +129,7 @@ async def delete_price_row(row_id: int, _: None = Depends(get_admin_dep)):
     if not ok:
         raise HTTPException(status_code=404, detail="记录不存在")
     admin_cache.invalidate_price_library()
+    invalidate_wanding_cache()
     return {"ok": True}
 
 
@@ -138,6 +145,7 @@ async def upload_price_library(
         raise HTTPException(status_code=400, detail=f"Excel 解析失败: {e}") from e
     count = repository.replace_all_price_library(rows)
     admin_cache.invalidate_price_library()
+    invalidate_wanding_cache()
     return {"imported": count}
 
 
@@ -166,6 +174,7 @@ async def create_mapping_row(body: MappingRow, _: None = Depends(get_admin_dep))
     if row_id is None:
         raise HTTPException(status_code=503, detail="DB 不可用")
     admin_cache.invalidate_product_mapping()
+    invalidate_mapping_cache()
     return {"id": row_id}
 
 
@@ -179,6 +188,7 @@ async def update_mapping_row(row_id: int, body: MappingRow, _: None = Depends(ge
     if not ok:
         raise HTTPException(status_code=404, detail="记录不存在")
     admin_cache.invalidate_product_mapping()
+    invalidate_mapping_cache()
     return {"ok": True}
 
 
@@ -190,6 +200,7 @@ async def delete_mapping_row(row_id: int, _: None = Depends(get_admin_dep)):
     if not ok:
         raise HTTPException(status_code=404, detail="记录不存在")
     admin_cache.invalidate_product_mapping()
+    invalidate_mapping_cache()
     return {"ok": True}
 
 
@@ -205,6 +216,7 @@ async def upload_product_mapping(
         raise HTTPException(status_code=400, detail=f"Excel 解析失败: {e}") from e
     count = repository.replace_all_product_mapping(rows)
     admin_cache.invalidate_product_mapping()
+    invalidate_mapping_cache()
     return {"imported": count}
 
 
@@ -228,6 +240,14 @@ async def upload_library(
     )
     if lib_id is None:
         raise HTTPException(status_code=503, detail="数据库不可用或建表失败")
+    # 上传新自定义库后，使 wanding/mapping 的 df_cache 失效，下次查询重新加载
+    try:
+        admin_cache.invalidate_price_library()
+        admin_cache.invalidate_product_mapping()
+        invalidate_wanding_cache()
+        invalidate_mapping_cache()
+    except Exception as e:
+        logger.warning("upload_library: 缓存失效失败: %s", e)
     return {
         "id": lib_id,
         "name": lib_name,
@@ -297,6 +317,13 @@ async def create_library_row(
     row_id = repository.insert_library_row(meta["table_name"], meta["columns"], body)
     if row_id is None:
         raise HTTPException(status_code=503, detail="数据库不可用")
+    try:
+        admin_cache.invalidate_price_library()
+        admin_cache.invalidate_product_mapping()
+        invalidate_wanding_cache()
+        invalidate_mapping_cache()
+    except Exception as e:
+        logger.warning("create_library_row: 缓存失效失败: %s", e)
     return {"id": row_id}
 
 
@@ -317,6 +344,13 @@ async def update_library_data_row(
         raise HTTPException(status_code=503, detail="数据库不可用")
     if not ok:
         raise HTTPException(status_code=404, detail="行不存在")
+    try:
+        admin_cache.invalidate_price_library()
+        admin_cache.invalidate_product_mapping()
+        invalidate_wanding_cache()
+        invalidate_mapping_cache()
+    except Exception as e:
+        logger.warning("update_library_data_row: 缓存失效失败: %s", e)
     return {"ok": True}
 
 
@@ -334,6 +368,13 @@ async def delete_library_data_row(
         raise HTTPException(status_code=503, detail="数据库不可用")
     if not ok:
         raise HTTPException(status_code=404, detail="行不存在")
+    try:
+        admin_cache.invalidate_price_library()
+        admin_cache.invalidate_product_mapping()
+        invalidate_wanding_cache()
+        invalidate_mapping_cache()
+    except Exception as e:
+        logger.warning("delete_library_data_row: 缓存失效失败: %s", e)
     return {"ok": True}
 
 
@@ -345,4 +386,11 @@ async def drop_library(lib_id: int, _: None = Depends(get_admin_dep)):
     ok = repository.drop_library(lib_id, meta["table_name"])
     if ok is None:
         raise HTTPException(status_code=503, detail="数据库不可用")
+    try:
+        admin_cache.invalidate_price_library()
+        admin_cache.invalidate_product_mapping()
+        invalidate_wanding_cache()
+        invalidate_mapping_cache()
+    except Exception as e:
+        logger.warning("drop_library: 缓存失效失败: %s", e)
     return {"ok": True}
