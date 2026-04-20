@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 38
-- **Last Active**: 2026-04-17
+- **Total Sessions**: 49
+- **Last Active**: 2026-04-19
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1120 | Active |
+| `journal-2.md` | ~1388 | Active |
 | `journal-1.md` | ~230 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits |
 |---|------|-------|---------|
+| 49 | 2026-04-19 | CCB history compression study (Ralph iteration 10) | - |
+| 39 | 2026-04-16 | [2026-04-16] admin/tests, control-ui/assets, inventory/services +6 | `680aba9` |
 | 38 | 2026-04-17 | Admin 自定义库 table_name 修复 + PUT 展示重命名 | `9d58958` |
 | 37 | 2026-04-16 | [2026-04-16] Agent Team version3/tests, server/api, tools/admin | `09e40dd` |
 | 36 | 2026-04-16 | [2026-04-16] backend/reports, gateway/protocol, server/api +5 | `a6ac708` |

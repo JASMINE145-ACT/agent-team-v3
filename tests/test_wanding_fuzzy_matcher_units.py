@@ -39,6 +39,18 @@ def test_expand_unit_tokens_fraction_inch_maps_to_dn20():
     assert "dn20" in expanded
 
 
+def test_expand_unit_tokens_de_numeric_maps_to_dn_mm_and_inch():
+    expanded = matcher._expand_unit_tokens("de50")
+    assert "dn50" in expanded
+    assert "50" in expanded
+    assert '2"' in expanded
+
+
+def test_expand_unit_tokens_de_nonnumeric_does_not_over_expand():
+    expanded = matcher._expand_unit_tokens("deabc")
+    assert expanded == {"deabc"}
+
+
 def test_search_fuzzy_prefers_exact_inch_over_dn_equivalent():
     df = pd.DataFrame(
         [

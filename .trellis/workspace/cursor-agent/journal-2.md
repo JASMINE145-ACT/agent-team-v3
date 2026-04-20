@@ -1,3 +1,325 @@
+## Session 49: 2026-04-19 — CCB history compression study (Ralph iteration 10)
+
+**Date**: 2026-04-19
+
+### Summary
+
+- 完成 Step 5 第 10 轮最终收官，补齐“最终阅读入口 + 版本演进日志 + 终局结论”。
+- 首轮 review 发现两处导航一致性问题（标题迭代号与复盘章节列表过期），修复后复审通过。
+
+### Main Changes
+
+- `学习案例/claude-code-best/claude学习/contextCollapse_historyCompressionStrategy.md`
+  - 新增 §33：最终阅读入口（按场景给出阅读顺序）
+  - 新增 §34：Iteration 1–10 版本演进日志
+  - 新增 §35：Iteration 10 交付视角结论
+  - 修订：
+    - 导航标题更新为 `导航（Iteration 10 终稿）`
+    - 复盘路径补齐 `§29/§32/§35`
+    - 章节分组索引新增 `§30–§32`、`§33–§35`
+- `.cursor/ralph/scratchpad.md`
+  - 追加「已完成（迭代 10）」记录（与 `max_iterations: 10` 对齐）
+
+### Verification Gate
+
+- Code-review agent: **PASS**（复审后）
+  - 初审发现 2 项一致性问题；修复后 PASS。
+- Test-agent: **PASS**
+  - `python -m pytest "Agent Team version3/tests/test_smoke.py" -q --tb=no` -> `4 passed`。
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 48: 2026-04-19 — CCB history compression study (Ralph iteration 9)
+
+**Date**: 2026-04-19
+
+### Summary
+
+- 完成 Step 5 第 9 轮增量，补齐“单页速查版”与排障现场 FAQ，进一步降低文档使用门槛。
+- 目标是把已有长文收敛为可快速决策的现场卡片。
+
+### Main Changes
+
+- `学习案例/claude-code-best/claude学习/contextCollapse_historyCompressionStrategy.md`
+  - 新增 §30：单页速查版（顺序、互斥、分流、最小诊断与指标）
+  - 新增 §31：一句话 FAQ（排障现场常见问答）
+  - 新增 §32：Iteration 9 速查视角小结
+- `.cursor/ralph/scratchpad.md`
+  - 追加「已完成（迭代 9）」记录
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：`§30–§32` 与前文和源码契约一致，无新增冲突。
+- Test-agent: **PASS**
+  - `python -m pytest "Agent Team version3/tests/test_smoke.py" -q --tb=no` -> `4 passed`。
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 47: 2026-04-19 — CCB history compression study (Ralph iteration 8)
+
+**Date**: 2026-04-19
+
+### Summary
+
+- 完成 Step 5 第 8 轮增量，文档做“导航化收口”，补齐快速阅读路径、章节分组与终稿使用建议。
+- 首轮 review 提示索引覆盖遗漏（未纳入 `§27–§29`），已修复后复审通过。
+
+### Main Changes
+
+- `学习案例/claude-code-best/claude学习/contextCollapse_historyCompressionStrategy.md`
+  - 新增“导航（Iteration 8 收口）”
+  - 新增 §27：终稿使用建议（按角色）
+  - 新增 §28：文档边界与后续扩展
+  - 新增 §29：Iteration 8 收口结论
+  - 修订：章节分组索引补齐 `收口与交付 | §27–§29`
+- `.cursor/ralph/scratchpad.md`
+  - 追加「已完成（迭代 8）」记录
+
+### Verification Gate
+
+- Code-review agent: **PASS**（复审后）
+  - 初审发现 1 项索引遗漏；修复后 PASS。
+- Test-agent: **PASS**
+  - `python -m pytest "Agent Team version3/tests/test_smoke.py" -q --tb=no` -> `4 passed`。
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 46: 2026-04-19 — CCB history compression study (Ralph iteration 7)
+
+**Date**: 2026-04-19
+
+### Summary
+
+- 完成 Step 5 第 7 轮增量，补齐“案例 -> 源码分支 -> 指标”对照层。
+- 目标是把前序案例库从经验总结升级为可直接定位代码与验证指标的排障索引。
+
+### Main Changes
+
+- `学习案例/claude-code-best/claude学习/contextCollapse_historyCompressionStrategy.md`
+  - 新增 §24：案例-源码分支对照表
+  - 新增 §25：案例-指标对照表
+  - 新增 §26：Iteration 7 对照化结论
+- `.cursor/ralph/scratchpad.md`
+  - 追加「已完成（迭代 7）」记录
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：§24–§26 与 `query.ts` / `autoCompact.ts` / `microCompact.ts` / `toolResultStorage.ts` 契约一致。
+- Test-agent: **PASS**
+  - `python -m pytest "Agent Team version3/tests/test_smoke.py" -q --tb=no` -> `4 passed`。
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 45: 2026-04-19 — CCB history compression study (Ralph iteration 6)
+
+**Date**: 2026-04-19
+
+### Summary
+
+- 完成 Step 5 第 6 轮增量，补齐“实战案例库”与“复盘模板”，把压缩策略从理论/参数层推进到案例化落地层。
+- 本轮重点是把常见失败模式映射成统一的「现象 -> 判定 -> 修复 -> 验证」闭环。
+
+### Main Changes
+
+- `学习案例/claude-code-best/claude学习/contextCollapse_historyCompressionStrategy.md`
+  - 新增 §21：实战案例库（4 个典型案例）
+  - 新增 §22：案例复盘模板（6 行记录法）
+  - 新增 §23：Iteration 6 案例化结论
+- `.cursor/ralph/scratchpad.md`
+  - 追加「已完成（迭代 6）」记录
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：`§21-§23` 与 `query.ts` / `autoCompact.ts` 契约一致，和前序章节口径连贯。
+- Test-agent: **PASS**
+  - `python -m pytest "Agent Team version3/tests/test_smoke.py" -q --tb=no` -> `4 passed`。
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 44: 2026-04-19 — CCB history compression study (Ralph iteration 5)
+
+**Date**: 2026-04-19
+
+### Summary
+
+- 完成 Step 5 第 5 轮增量，围绕 `context collapse` 策略补充“反例/误配”与“快速排障路径”。
+- 文档从“机制 + 调参”继续推进到“反模式识别 + 故障定位”层面。
+
+### Main Changes
+
+- `学习案例/claude-code-best/claude学习/contextCollapse_historyCompressionStrategy.md`
+  - 新增 §18：反例与误配清单（常见参数组合误解与短路场景）
+  - 新增 §19：10分钟排障路径（主导层判定 -> gate判定 -> 错误分流 -> 终局指标）
+  - 新增 §20：Iteration 5 反模式结论
+- `.cursor/ralph/scratchpad.md`
+  - 追加「已完成（迭代 5）」记录
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：新增内容与 `query.ts` / `autoCompact.ts` 的 preempt 与恢复链契约一致。
+- Test-agent: **PASS**
+  - `python -m pytest "Agent Team version3/tests/test_smoke.py" -q --tb=no` -> `4 passed`。
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 43: 2026-04-19 — CCB history compression study (Ralph iteration 4)
+
+**Date**: 2026-04-19
+
+### Summary
+
+- 完成 Step 5 第 4 轮增量，补齐面向落地的“调参实战手册”与“观测指标建议”。
+- 文档从“机制/参数”进一步推进到“目标导向策略包 + 验证指标”。
+
+### Main Changes
+
+- `学习案例/claude-code-best/claude学习/contextCollapse_historyCompressionStrategy.md`
+  - 新增 §15：调参实战手册（保细节 / 省成本 / 稳恢复 三类目标）
+  - 新增 §16：观测指标建议（压缩层命中率、恢复路径分布、会话质量指标）
+  - 新增 §17：Iteration 4 可操作结论
+- `.cursor/ralph/scratchpad.md`
+  - 追加「已完成（迭代 4）」记录
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：新增内容与 `query.ts` / `autoCompact.ts` / `microCompact.ts` / `toolResultStorage.ts` 契约一致。
+- Test-agent: **PASS**
+  - `python -m pytest "Agent Team version3/tests/test_smoke.py" -q --tb=no` -> `4 passed`。
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 42: 2026-04-19 — CCB history compression study (Ralph iteration 3)
+
+**Date**: 2026-04-19
+
+### Summary
+
+- 完成 Step 5 第 3 轮增量，文档从“流程分析”升级到“参数化控制面板”，补齐 history compression 的可调参数与优先级冲突处理。
+- 首轮 review 给出两项重要修正后已完成收敛：补 reactive-only 开关项、明确 413 与 media 恢复链差异。
+
+### Main Changes
+
+- `学习案例/claude-code-best/claude学习/contextCollapse_historyCompressionStrategy.md`
+  - 新增 §12：参数面板（env/user config/feature 对压缩行为的作用）
+  - 新增 §13：覆盖优先级与冲突处理
+  - 新增 §14：Iteration 3 参数化结论
+  - review 修订：
+    - 新增 `tengu_cobalt_raccoon`（reactive-only 抑制 proactive autocompact）
+    - 将恢复链拆分为
+      - `413`: `recoverFromOverflow -> reactiveCompact`
+      - `media`: 直接 `reactiveCompact`
+- `.cursor/ralph/scratchpad.md`
+  - 追加「已完成（迭代 3）」并记录 review 修订点。
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 初审提出 2 项重要问题；修订后复审 PASS。
+- Test-agent: **PASS**
+  - `python -m pytest "Agent Team version3/tests/test_smoke.py" -q --tb=no` -> `4 passed`。
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 41: 2026-04-19 — CCB history compression study (Ralph iteration 2)
+
+**Date**: 2026-04-19
+
+### Summary
+
+- 基于 Step 5 第 2 轮迭代，继续深化 `context collapse` 研究文档，补齐「触发矩阵 + 决策树 + 工程化准则」。
+- 将结果写回 Ralph scratchpad，记录 iteration 2 完成状态。
+
+### Main Changes
+
+- `学习案例/claude-code-best/claude学习/contextCollapse_historyCompressionStrategy.md`
+  - 新增 §8：触发矩阵（budget/snip/microcompact/contextCollapse/autocompact/reactive compact 分工）
+  - 新增 §9：运行时决策树（含 withheld 413 / media 错误分流）
+  - 新增 §10：工程化启发（分层成本、恢复触发、缓存稳定性协同）
+  - 新增 §11：Iteration 2 结论句
+- `.cursor/ralph/scratchpad.md`
+  - 追加「已完成（迭代 2）」进度说明
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：新增内容与 `query.ts` / `autoCompact.ts` / `toolResultStorage.ts` 契约一致。
+- Test-agent: **PASS**
+  - `python -m pytest "Agent Team version3/tests/test_smoke.py" -q --tb=no` -> `4 passed`。
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 40: 2026-04-19 — CCB context collapse/history compression study
+
+**Date**: 2026-04-19
+
+### Summary
+
+- 在 `学习案例/claude-code-best` 范围完成 Step 5 调研，新增 `contextCollapse_historyCompressionStrategy.md`，梳理 `queryLoop` 中 history compression 分层策略与 `contextCollapse` 的角色。
+- 启动新一轮 Ralph Loop：重置 `.cursor/ralph/scratchpad.md` 为 `iteration: 1`、`max_iterations: 10`，任务聚焦 `context collapse` 与 `history compression strategy`。
+
+### Main Changes
+
+- `学习案例/claude-code-best/claude学习/contextCollapse_historyCompressionStrategy.md`（新建）：
+  - 归纳 `query.ts` 压缩流水线顺序：`applyToolResultBudget` -> `snip` -> `microcompact` -> `contextCollapse` -> `autocompact` -> `callModel`。
+  - 解释 `autoCompact.ts` 中「`contextCollapse` 启用时抑制 `autocompact`」的互斥设计原因。
+  - 解释 withheld 413 恢复链：`recoverFromOverflow` 优先，`reactiveCompact` 兜底。
+- `.cursor/ralph/scratchpad.md`（更新）：
+  - 记录新 loop frontmatter 与本轮研究提示词。
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：文档与源码行为一致（流水线顺序、collapse/autocompact 互斥、413 恢复顺序）。
+- Test-agent: **PASS**
+  - `python -m pytest "Agent Team version3/tests/test_smoke.py" -q --tb=no` -> `4 passed`。
+
+### Status
+
+[OK] **Completed**
+
+---
+
 ## Session 38: 2026-04-17 — Admin 自定义库 table_name 修复与展示重命名 API
 
 **Date**: 2026-04-17
@@ -1054,6 +1376,53 @@ Changed files (3 total):
 | Hash | Message |
 |------|---------|
 | `09e40dd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 39: [2026-04-16] admin/tests, control-ui/assets, inventory/services +6
+
+**Date**: 2026-04-16
+**Task**: [2026-04-16] admin/tests, control-ui/assets, inventory/services +6
+
+### Summary
+
+Auto-recorded by trellis-journal hook after Code Review + Test verification.
+
+Changed files (13 total):
+- `Agent Team version3/backend/server/api/routes_admin.py`
+- `Agent Team version3/backend/tools/admin/excel_parser.py`
+- `Agent Team version3/backend/tools/admin/repository.py`
+- `Agent Team version3/backend/tools/admin/tests/test_generic_parser.py`
+- `Agent Team version3/backend/tools/inventory/config.py`
+- `Agent Team version3/backend/tools/inventory/services/mapping_table_matcher.py`
+- `Agent Team version3/backend/tools/inventory/services/wanding_fuzzy_matcher.py`
+- `Agent Team version3/control-ui/src/ui/app-render.ts`
+- `Agent Team version3/control-ui/src/ui/app-settings.ts`
+- `Agent Team version3/control-ui/src/ui/controllers/admin-data.ts`
+- `Agent Team version3/control-ui/src/ui/controllers/admin-data.types.ts`
+- `Agent Team version3/control-ui/src/ui/views/admin-data.ts`
+- `Agent Team version3/dist/control-ui/assets/index-BRF11MFX.js`
+
+### Main Changes
+
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `680aba9` | (see git log) |
 
 ### Testing
 

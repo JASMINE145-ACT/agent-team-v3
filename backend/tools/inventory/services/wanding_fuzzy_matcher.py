@@ -310,6 +310,18 @@ def _normalize(s: str) -> str:
     return s.strip()
 
 
+def _normalize_chinese_number_order(s: str) -> str:
+    """
+    Keep legacy token normalization behavior for tests and callers:
+    reorder "50三通" -> "三通50" while preserving more specific phrases.
+    """
+    text = s or ""
+    m = re.fullmatch(r"(\d+)([\u4e00-\u9fff]{2})", text)
+    if m:
+        return f"{m.group(2)}{m.group(1)}"
+    return text
+
+
 def _get_synonym_words(word: str) -> frozenset:
     return _SYNONYM_TO_GROUP.get(word, frozenset({word}))
 
@@ -320,6 +332,16 @@ def _expand_unit_tokens(token: str, material: Optional[str] = None) -> set:
     if re.fullmatch(r"\d+(?:-\d+)?/\d+", token):
         token = token + '"'
         eqs.add(token)
+    # 行业场景下将 DE 视为 DN 的等价写法（如 DE50≈DN50）
+    if token.startswith("de"):
+        num = token[2:]
+        if not num.isdigit():
+            return eqs
+        if num in MM_TO_INCH:
+            eqs.add(MM_TO_INCH[num])
+        eqs.add(num)
+        eqs.add("dn" + num)
+        return eqs
     if token.startswith("dn"):
         num = token[2:]
         if num in MM_TO_INCH:
