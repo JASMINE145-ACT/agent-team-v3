@@ -1435,3 +1435,102 @@ Changed files (13 total):
 ### Next Steps
 
 - None - task complete
+
+
+## Session 50: 2026-04-20 — 万鼎业务知识 Neon 主存储（KnowledgeBackend + llm_selector 降级链）
+
+**Date**: 2026-04-20  
+**Spec / Plan**: `docs/superpowers/specs/2026-04-20-business-knowledge-neon-design.md`, `docs/superpowers/plans/2026-04-20-business-knowledge-neon.md`
+
+### Summary
+
+- **目标**：业务知识主存从本地 MD 迁到 Neon（`business_knowledge` 表，固定 key `wanding_selector`）；本地文件与内嵌常量作 fallback；Control UI 的 `GET/PUT /api/business-knowledge` 契约不变。
+- **新增**：`backend/agent/knowledge_backend.py`（psycopg2 连接池、`get`/`put`/`close`）；`backend/agent/tests/test_knowledge_backend.py`（mock 单测 + llm_selector 注入测；有 `DATABASE_URL`/`NEON_DATABASE_URL` 时跑集成测）。
+- **修改**：`llm_selector` — `set_knowledge_backend` / `shutdown_knowledge_backend`、`_get_knowledge_path`、三层 `_load_business_knowledge`（Neon → 文件 → 内嵌）；`routes_oos` — GET 优先 Neon，PUT 写 Neon 且 Neon 失败仍写本地再可能 500；`app.py` 启动注入、shutdown 释放池。
+- **环境变量**：`DATABASE_URL` 或 `NEON_DATABASE_URL`（与仓库其余 Neon 用法一致）。
+
+### Testing
+
+- [OK] `python -m pytest backend/agent/tests/test_knowledge_backend.py -v` — **10 passed**, **1 skipped**（无 DB URL 时跳过集成测）
+
+### Follow-ups / 已知
+
+- **数据管理「自定义库」空白（`relation "dl_*_lib_*" does not exist`）**：`data_libraries` 元数据指向的物理表在 Neon 上不存在，且 `pg_tables` 下无 `dl_{id}_%` 匹配时 `try_repair_library_table_name` 无法自动修复 → 列表 0 行。需在同一 `DATABASE_URL` 上恢复表、或重新上传建表、或手工修正 `data_libraries.table_name`。**与业务知识表 `business_knowledge` 无关**。
+
+### Status
+
+[OK] **Completed**（计划内代码与自动化测）；数据管理空白为独立运维/元数据问题。
+
+
+## Session 51: 修复 Neon 库表查询：表名/列名/排序字段全面修正
+
+**Date**: 2026-04-20
+**Task**: 修复 Neon 库表查询：表名/列名/排序字段全面修正
+
+### Summary
+
+repository.py 查询修复：data_libraries table_name + 两张主表列名/排序字段
+
+### Main Changes
+
+### 问题 1：data_libraries 表名错误
+
+`data_libraries` 存的是旧 slug（`dl_2_lib_` / `dl_3_lib_2`），实际 Neon 表名是中文。
+
+```sql
+UPDATE data_libraries SET table_name='万鼎价格库_管材与国标管件_标准格式' WHERE id=2;
+UPDATE data_libraries SET table_name='整理产品(2)' WHERE id=3;
+```
+
+### 问题 2：表名含中文字符未加双引号
+
+PostgreSQL 对非 ASCII 标识符要求双引号包裹，否则报错 `UndefinedTable` / `UndefinedFunction`。
+
+修复：新增 `_quote_sql_identifier(name)` → 返回 `"name"`（双引号内嵌引号转义），所有表名列名均走此函数。
+
+### 问题 3：列名和实际数据库不匹配
+
+`fetch_all_price_library` 写的 `material` 等列名与 Neon 实际列名不符。
+
+实际列名对照（万鼎价格库）：
+- `Material` / `Describrition` / `（二级代理）A级别_报单价格` 等
+
+实际列名对照（整理产品）：
+- `Nama_Permintaan_Barang_询价货物名称`
+- `Spesifikasi_dan_Model_Permintaan_Barang_询价规格型号`
+- `Product_number_产品编号`
+- `Nama_Penawaran_Barang_报价名称`
+
+### 问题 4：ORDER BY 用了不存在的 id 列
+
+两个表均无 `id` 列，价格库用 `NO`，产品表用 `Product_number_产品编号`。
+
+### 修改文件
+
+- `backend/tools/admin/repository.py`
+  - 新增 `_quote_sql_identifier()` 函数
+  - 修正 `fetch_all_price_library()` 列名 + 排序字段
+  - 修正 `fetch_all_product_mapping()` 列名 + 排序字段
+  - `_safe_table_name()` 改造：ASCII 名称走原逻辑，中文/特殊字符走 `_quote_sql_identifier()`
+
+### 验证结果
+
+- `fetch_all_price_library()` → 4988 行 ✅
+- `fetch_all_product_mapping()` → 1005 行 ✅
+
+
+### Git Commits
+
+(No commits - planning session)
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

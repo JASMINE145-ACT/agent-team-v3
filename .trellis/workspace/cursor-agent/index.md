@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 49
-- **Last Active**: 2026-04-19
+- **Total Sessions**: 51
+- **Last Active**: 2026-04-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1388 | Active |
+| `journal-2.md` | ~1536 | Active |
 | `journal-1.md` | ~230 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits |
 |---|------|-------|---------|
+| 51 | 2026-04-20 | 修复 Neon 库表查询：表名/列名/排序字段全面修正 | - |
+| 50 | 2026-04-20 | 万鼎业务知识 Neon 主存储（KnowledgeBackend + llm_selector 降级链） | - |
 | 49 | 2026-04-19 | CCB history compression study (Ralph iteration 10) | - |
 | 39 | 2026-04-16 | [2026-04-16] admin/tests, control-ui/assets, inventory/services +6 | `680aba9` |
 | 38 | 2026-04-17 | Admin 自定义库 table_name 修复 + PUT 展示重命名 | `9d58958` |
