@@ -133,6 +133,7 @@ python run_backend.py
   DATABASE_URL=postgresql://user:pass@ep-xxx-pooler.region.neon.tech/neondb?sslmode=require
   ```
   （等号两侧无空格；若报错可去掉 URL 中的 `&channel_binding=require`，只保留 `?sslmode=require`。）
+- **Python 版本（Render）**：2026-02-11 起新建 Web 服务默认 **Python 3.14**，`pandas` 等可能无预编译轮子导致 `pip install` 从源码构建失败。请在 Environment 设置 **`PYTHON_VERSION=3.11.11`**（或与仓库根目录 **`.python-version`** 一致），或使用本仓库的 `render.yaml`（已含该变量）。
 - **启动命令**必须用 **`uvicorn backend.server.api.app:app --host 0.0.0.0 --port $PORT`** 或 **`python run_backend.py`**，**不要用 `start.py`**（`start.py` 会清空 `DATABASE_URL`，仅适合本地开发）。
 - 配置正确时，后端日志会出现 `Connected to Postgres successfully (OOS/Shortage)`，看板会显示云端已有数据；未配置或连接失败时会回退到本地 SQLite，实例重启后无货/缺货数据会丢。
 

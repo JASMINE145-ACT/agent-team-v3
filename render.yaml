@@ -1,6 +1,9 @@
 # Render Web Service 配置（可选）
 # 若在 Dashboard 已配置，可忽略本文件。用于 Blueprint 或一键部署时指定启动方式。
 # 重要：启动命令必须是「前台常驻进程」，不能是 start.py（start.py 会 spawn 子进程后自己退出，Render 会判为部署失败、Port scan timeout）。
+#
+# Python 版本：2026-02-11 起 Render 新建服务默认 Python 3.14；pandas/numpy 等尚无稳定 cp314 轮子时会源码编译失败。
+# 务必固定 3.11.x（与仓库 .python-version 一致），勿依赖平台默认。
 services:
   - type: web
     name: agent-team-v3
@@ -10,5 +13,7 @@ services:
     # 生产勿开 DEBUG：run_backend.py 中 DEBUG=true 会启用 uvicorn reload，在 Render 上易导致进程异常/不稳定。
     # 需要 /api/debug/* 时在 Dashboard 临时设 DEBUG=true 并观察日志，调试完改回 false。
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.11"
       - key: DEBUG
         value: "false"
