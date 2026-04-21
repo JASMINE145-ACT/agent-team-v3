@@ -691,6 +691,14 @@ def fetch_library_data(
     q = (q or "").strip()
     text_cols = [c["name"] for c in columns if c["type"] == "TEXT"]
     tn = (table_name or "").strip()
+
+    # Determine ORDER BY column: 万鼎价格库用NO，产品表用Product_number，其他用id（如果有）
+    order_col = _quote_sql_identifier("id")
+    if "万鼎价格库" in tn:
+        order_col = _quote_sql_identifier("NO")
+    elif "整理产品" in tn:
+        order_col = _quote_sql_identifier("Product_number_产品编号")
+
     for attempt in range(2):
         try:
             safe_table = _safe_table_name(tn)
@@ -703,13 +711,13 @@ def fetch_library_data(
                         {"q": f"%{q}%"},
                     ).scalar() or 0
                     rows = conn.execute(
-                        text(f"SELECT * FROM {safe_table} {where} ORDER BY id LIMIT :lim OFFSET :off"),
+                        text(f"SELECT * FROM {safe_table} {where} ORDER BY {order_col} LIMIT :lim OFFSET :off"),
                         {"q": f"%{q}%", "lim": page_size, "off": offset},
                     ).mappings().all()
                 else:
                     total = conn.execute(text(f"SELECT COUNT(*) FROM {safe_table}")).scalar() or 0
                     rows = conn.execute(
-                        text(f"SELECT * FROM {safe_table} ORDER BY id LIMIT :lim OFFSET :off"),
+                        text(f"SELECT * FROM {safe_table} ORDER BY {order_col} LIMIT :lim OFFSET :off"),
                         {"lim": page_size, "off": offset},
                     ).mappings().all()
             return {"items": [dict(r) for r in rows], "total": int(total)}
