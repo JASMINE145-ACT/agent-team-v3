@@ -38,13 +38,45 @@ def test_prompt_with_prev_week_includes_prev_dates():
     prev = _make_payload("2026-03-31", "2026-04-06", 4_000_000, 8)
     prompt = build_analysis_prompt(current, prev)
     assert "2026-03-31" in prompt
-    assert "4000000" in prompt
+    assert "4,000,000" in prompt
 
 
 def test_prompt_without_prev_skips_comparison():
     current = _make_payload("2026-04-07", "2026-04-13", 5_000_000, 10)
     prompt = build_analysis_prompt(current, None)
     assert "暂无上周数据" in prompt
+    assert "5000000" in prompt
+
+
+def test_prompt_includes_structured_comparison():
+    """有上周数据时，prompt 应包含结构化数字对比（金额/订单数环比）。"""
+    current = _make_payload("2026-04-07", "2026-04-13", 5_000_000, 10)
+    prev = _make_payload("2026-03-31", "2026-04-06", 4_000_000, 8)
+    prompt = build_analysis_prompt(current, prev)
+    # 本周数据
+    assert "5,000,000" in prompt
+    # 上周数据
+    assert "4,000,000" in prompt
+    # 明确标注上周时间范围
+    assert "2026-03-31" in prompt
+    assert "2026-04-06" in prompt
+    # 包含涨跌幅（结构化指令中应出现 +1,000,000 或类似对比）
+    assert "+1,000,000" in prompt or ("4,000,000" in prompt and "5,000,000" in prompt)
+    # Top 客户摘要 helper 调用
+    assert "ACME" in prompt
+
+
+def test_prompt_includes_problem_suggestion_section():
+    """prompt 应包含第 3 部分：问题与建议。"""
+    current = _make_payload("2026-04-07", "2026-04-13", 5_000_000, 10)
+    prompt = build_analysis_prompt(current, None)
+    assert "问题与建议" in prompt
+
+
+def test_prompt_forbids_hallucination_instruction():
+    current = _make_payload("2026-04-07", "2026-04-13", 5_000_000, 10)
+    prompt = build_analysis_prompt(current, None)
+    assert "禁止编造" in prompt
 
 
 def test_prompt_forbids_hallucination_instruction():

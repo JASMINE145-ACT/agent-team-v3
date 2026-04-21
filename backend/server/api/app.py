@@ -198,6 +198,22 @@ async def _warmup(agent=None) -> None:
 @app.on_event("startup")
 async def startup_event():
     Config.validate()
+    # 初始化 KnowledgeBackend（Neon 业务知识主存储）
+    try:
+        import os
+
+        _db_url = (os.getenv("DATABASE_URL") or os.getenv("NEON_DATABASE_URL") or "").strip()
+        if _db_url:
+            from backend.agent.knowledge_backend import KnowledgeBackend
+            from backend.tools.inventory.services.llm_selector import set_knowledge_backend
+
+            _kb = KnowledgeBackend(_db_url)
+            set_knowledge_backend(_kb)
+            logger.info("KnowledgeBackend 初始化成功（Neon 模式）")
+        else:
+            logger.info("DATABASE_URL / NEON_DATABASE_URL 均未配置，业务知识使用本地文件模式")
+    except Exception as e:
+        logger.warning("KnowledgeBackend 初始化失败，降级本地文件模式: %s", e)
     try:
         from backend.tools.admin.repository import setup_tables
 
@@ -264,6 +280,12 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    try:
+        from backend.tools.inventory.services.llm_selector import shutdown_knowledge_backend
+
+        shutdown_knowledge_backend()
+    except Exception as e:
+        logger.debug("KnowledgeBackend shutdown 跳过: %s", e)
     try:
         stop_report_service()
     except Exception as e:

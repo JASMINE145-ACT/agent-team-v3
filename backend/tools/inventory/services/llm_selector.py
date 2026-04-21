@@ -21,6 +21,43 @@ logger = logging.getLogger(__name__)
 # cache format: {"path": str, "mtime": float | None, "content": str}
 _business_knowledge_cache: dict[str, Any] = {}
 
+# KnowledgeBackend singleton — injected at startup via set_knowledge_backend()
+_kb_singleton: Any = None
+
+
+def set_knowledge_backend(kb: Any) -> None:
+    """Inject KnowledgeBackend instance (or None to disable). Called at app startup."""
+    global _kb_singleton
+    _kb_singleton = kb
+
+
+def shutdown_knowledge_backend() -> None:
+    """Close pool if present and clear singleton (e.g. app shutdown)."""
+    global _kb_singleton
+    kb = _kb_singleton
+    _kb_singleton = None
+    if kb is None:
+        return
+    close = getattr(kb, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception as e:
+            logger.warning("shutdown_knowledge_backend: %s", e)
+
+
+def _get_knowledge_path() -> Path:
+    """Return configured business knowledge file path."""
+    try:
+        from backend.tools.inventory.config import config
+
+        path_str = getattr(config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
+        if path_str:
+            return Path(path_str)
+    except Exception:
+        pass
+    return Path("")
+
 # Module-level singleton for the fast-path OpenAI client (avoids TCP reconnect per call).
 _selector_client: Any = None
 
@@ -109,49 +146,56 @@ _SOURCE_PRIORITY = {"共同": 0, "历史报价": 1, "字段匹配": 2}
 
 
 def _load_business_knowledge() -> str:
-    """Load business knowledge from configured path with mtime cache."""
+    """Load business knowledge with 3-tier fallback: Neon → local file → embedded."""
     global _business_knowledge_cache
+
+    # --- Tier 1: Neon KnowledgeBackend ---
+    if _kb_singleton is not None:
+        try:
+            content = _kb_singleton.get("wanding_selector")
+            if content and content.strip():
+                logger.debug("business knowledge loaded from Neon")
+                return content.strip()
+            logger.debug("business knowledge: Neon returned empty/None, falling back to file")
+        except Exception as e:
+            logger.warning("business knowledge: Neon get failed (%s), falling back to file", e)
+
+    # --- Tier 2: local file (with mtime cache) ---
     try:
-        from backend.tools.inventory.config import config
-
-        path_str = getattr(config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
-        if not path_str:
-            return _BUSINESS_KNOWLEDGE
-
-        p = Path(path_str)
-        mtime: Optional[float] = None
-        if p.exists():
+        p = _get_knowledge_path()
+        if p and p.exists():
             try:
-                mtime = p.stat().st_mtime
+                mtime: Optional[float] = p.stat().st_mtime
             except OSError:
                 mtime = None
 
+            path_str = str(p)
             if (
                 _business_knowledge_cache.get("path") == path_str
                 and _business_knowledge_cache.get("mtime") == mtime
             ):
-                return _business_knowledge_cache.get("content", _BUSINESS_KNOWLEDGE)
+                cached = _business_knowledge_cache.get("content", "")
+                if cached:
+                    return cached
 
             content = p.read_text(encoding="utf-8").strip()
-            if not content:
-                content = _BUSINESS_KNOWLEDGE
-            _business_knowledge_cache = {"path": path_str, "mtime": mtime, "content": content}
-            return content
+            if content:
+                _business_knowledge_cache = {"path": path_str, "mtime": mtime, "content": content}
+                logger.debug("business knowledge loaded from file: %s", path_str)
+                return content
 
-        # file not exists: bootstrap with embedded knowledge
-        try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(_BUSINESS_KNOWLEDGE, encoding="utf-8")
+        # File doesn't exist — bootstrap from embedded
+        if p and p.name:
             try:
-                mtime = p.stat().st_mtime
-            except OSError:
-                mtime = None
-            _business_knowledge_cache = {"path": path_str, "mtime": mtime, "content": _BUSINESS_KNOWLEDGE}
-        except Exception as e:
-            logger.debug("bootstrap business knowledge file failed: %s", e)
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(_BUSINESS_KNOWLEDGE, encoding="utf-8")
+            except Exception as e:
+                logger.debug("bootstrap business knowledge file failed: %s", e)
     except Exception as e:
-        logger.debug("load business knowledge failed, use embedded: %s", e)
+        logger.debug("load business knowledge from file failed, use embedded: %s", e)
 
+    # --- Tier 3: embedded default ---
+    logger.debug("business knowledge loaded from embedded default")
     return _BUSINESS_KNOWLEDGE
 
 

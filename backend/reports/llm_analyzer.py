@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import anthropic
 import psycopg2
@@ -50,25 +50,71 @@ def fetch_prev_week_payload(db_url: str, task_key: str, current_week_start: str)
         conn.close()
 
 
+def _daily_summary(daily_stats: List[DayStats]) -> str:
+    """返回每日汇总的简短摘要字符串。"""
+    if not daily_stats:
+        return "无数据"
+    return "; ".join(
+        f"{d.date}: {d.order_count}单/Rp{d.sales_amount:,.0f}"
+        for d in daily_stats
+    )
+
+
+def _top_customers_summary(top_customers: List[CustomerStat]) -> str:
+    """返回 Top5 客户的摘要字符串。"""
+    if not top_customers:
+        return "无数据"
+    return "; ".join(
+        f"{c.customer_name}({c.order_count}单/Rp{c.sales_amount:,.0f})"
+        for c in top_customers[:5]
+    )
+
+
 def build_analysis_prompt(current: ReportPayload, prev: Optional[ReportPayload]) -> str:
     """构建 LLM 分析 prompt，所有数字来自原始 JSON，防止幻觉。"""
     current_json = json.dumps(current.to_dict(), ensure_ascii=False, indent=2)
 
     if prev:
+        # ── 结构化对比摘要 ─────────────────────────────
+        amount_delta = current.total_sales_amount - prev.total_sales_amount
+        amount_pct = (
+            (amount_delta / prev.total_sales_amount * 100)
+            if prev.total_sales_amount
+            else 0
+        )
+        count_delta = current.total_order_count - prev.total_order_count
+        count_pct = (
+            (count_delta / prev.total_order_count * 100)
+            if prev.total_order_count
+            else 0
+        )
+
         prev_section = (
             f"\n【上周数据（{prev.week_start} ~ {prev.week_end}）】\n"
-            + json.dumps(prev.to_dict(), ensure_ascii=False, indent=2)
+            f"- 销售额：Rp {prev.total_sales_amount:,.0f}\n"
+            f"- 订单数：{prev.total_order_count} 张\n"
+            f"- 每日明细：{_daily_summary(prev.daily_stats)}\n"
+            f"- Top 客户：{_top_customers_summary(prev.top_customers)}\n"
         )
-        compare_instruction = "2. 环比对比：总额、订单数、Top 客户变化（带具体数字和涨跌幅）"
+        compare_instruction = (
+            "2. 环比对比（必填，基于上方【上周数据】计算）：\n"
+            f"   - 销售额：本周 Rp {current.total_sales_amount:,.0f}，上周 Rp {prev.total_sales_amount:,.0f}，"
+            f"环比 {'+' if amount_delta >= 0 else ''}{amount_delta:,.0f} ({'+' if amount_pct >= 0 else ''}{amount_pct:.1f}%)\n"
+            f"   - 订单数：本周 {current.total_order_count} 张，上周 {prev.total_order_count} 张，"
+            f"环比 {'+' if count_delta >= 0 else ''}{count_delta} 张 ({'+' if count_pct >= 0 else ''}{count_pct:.1f}%)\n"
+            "   - 趋势分析：指出本周哪几天明显高于/低于上周，推测原因\n"
+            "   - Top 客户变化：本周新进/跌出 Top10 的客户名称及金额\n"
+        )
     else:
-        prev_section = "\n【上周数据】：暂无上周数据（本次为首次生成），跳过环比。"
+        prev_section = "\n【上周数据】：暂无上周数据，跳过环比对比"
         compare_instruction = "2. 环比对比：暂无上周数据，跳过此部分"
 
     return (
         "你是销售分析师。以下是本周的销售原始数据（JSON 格式，数字绝对准确）。\n"
         "请输出 Markdown 分析报告，包含：\n"
         "1. 本周趋势：最强/最弱日，整体走势，简要原因推测\n"
-        f"{compare_instruction}\n\n"
+        f"{compare_instruction}\n"
+        "3. 问题与建议：数据异常或模式异常时给出提示\n\n"
         "严格规则：\n"
         "- 所有数字必须来自原始 JSON，禁止编造或估算\n"
         "- 输出纯 Markdown，不要 JSON 或代码块包裹\n\n"

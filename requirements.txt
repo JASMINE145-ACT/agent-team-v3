@@ -20,6 +20,10 @@ jsonschema>=4.17.0
 # 环境与工具
 python-dotenv>=1.0.0
 
+# 文件转换（MarkItDown Skill）
+markitdown>=0.1.0
+tabulate>=0.9.0
+
 # 报价单 / 无货 / 询价填充（来自 quotation_tracker、quote_tools）
 # Vercel 包体积限制 249MB：用 pandas 2.x + numpy 1.x 减小体积
 openpyxl>=3.1.0

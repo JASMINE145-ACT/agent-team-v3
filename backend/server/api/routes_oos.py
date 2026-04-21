@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _get_kb():
+    """Return the KnowledgeBackend singleton (may be None)."""
+    import backend.tools.inventory.services.llm_selector as _sel
+
+    return getattr(_sel, "_kb_singleton", None)
+
+
 def _get_business_knowledge_path() -> Path:
     path = getattr(inv_config, "WANDING_BUSINESS_KNOWLEDGE_PATH", None)
     if not path:
@@ -147,8 +154,17 @@ async def oos_add(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 
 @router.get("/api/business-knowledge")
 async def get_business_knowledge() -> Dict[str, Any]:
-    """读取 wanding_business_knowledge.md 内容，供 Control UI 业务知识页展示与编辑。"""
+    """读取业务知识内容：优先 Neon，失败时降级本地文件。"""
     try:
+        kb = _get_kb()
+        if kb is not None:
+            try:
+                neon_content = kb.get("wanding_selector")
+                if neon_content and neon_content.strip():
+                    return {"success": True, "data": {"content": neon_content.strip()}}
+            except Exception as e:
+                logger.warning("business-knowledge GET: Neon failed (%s), falling back to file", e)
+
         p = _get_business_knowledge_path()
         if not p.exists():
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -162,15 +178,35 @@ async def get_business_knowledge() -> Dict[str, Any]:
 
 @router.put("/api/business-knowledge")
 async def put_business_knowledge(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """保存 wanding_business_knowledge.md 内容；保存后会使 LLM selector 缓存失效。"""
+    """保存业务知识：写入 Neon（主）+ 本地文件（双保险）。"""
     try:
         content = body.get("content")
         if content is None:
             raise HTTPException(status_code=400, detail="请提供 content 字段")
-        p = _get_business_knowledge_path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content if isinstance(content, str) else str(content), encoding="utf-8")
+        if not isinstance(content, str):
+            content = str(content)
+
+        kb = _get_kb()
+        neon_err: Exception | None = None
+        if kb is not None:
+            try:
+                kb.put("wanding_selector", content)
+            except Exception as e:
+                neon_err = e
+                logger.error("business-knowledge PUT: Neon failed: %s", e)
+
+        try:
+            p = _get_business_knowledge_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+        except Exception as e:
+            logger.warning("business-knowledge PUT: local file write failed: %s", e)
+
         invalidate_business_knowledge_cache()
+
+        if neon_err is not None:
+            raise HTTPException(status_code=500, detail=str(neon_err))
+
         return {"success": True, "data": {}}
     except HTTPException:
         raise

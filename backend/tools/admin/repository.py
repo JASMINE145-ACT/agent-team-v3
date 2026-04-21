@@ -154,8 +154,14 @@ def fetch_all_price_library() -> list[dict]:
         with engine.connect() as conn:
             rows = conn.execute(
                 text(
-                    "SELECT material, description, price_a, price_b, price_c, price_d "
-                    "FROM price_library ORDER BY id"
+                    "SELECT "
+                    f"{_quote_sql_identifier('Material')} AS material, "
+                    f"{_quote_sql_identifier('Describrition')} AS description, "
+                    f"{_quote_sql_identifier('（二级代理）A级别_报单价格')} AS price_a, "
+                    f"{_quote_sql_identifier('（一级代理）B级别_报单价格')} AS price_b, "
+                    f"{_quote_sql_identifier('（聚万大客户）C级别报单价格')} AS price_c, "
+                    f"{_quote_sql_identifier('（青山大客户）D级别_报单价格')} AS price_d "
+                    f"FROM {_quote_sql_identifier('万鼎价格库_管材与国标管件_标准格式')} ORDER BY {_quote_sql_identifier('NO')}"
                 )
             ).mappings().all()
             return [dict(r) for r in rows]
@@ -275,24 +281,24 @@ def fetch_product_mapping(q: str = "", page: int = 1, page_size: int = 100) -> d
                 like = f"%{q}%"
                 total = conn.execute(
                     text(
-                        "SELECT COUNT(*) FROM product_mapping WHERE inquiry_name ILIKE :q "
+                        "SELECT COUNT(*) FROM 整理产品(2) WHERE inquiry_name ILIKE :q "
                         "OR product_code ILIKE :q OR quotation_name ILIKE :q OR spec ILIKE :q"
                     ),
                     {"q": like},
                 ).scalar() or 0
                 rows = conn.execute(
                     text(
-                        "SELECT id, inquiry_name, spec, product_code, quotation_name FROM product_mapping "
+                        "SELECT id, inquiry_name, spec, product_code, quotation_name FROM 整理产品(2) "
                         "WHERE inquiry_name ILIKE :q OR product_code ILIKE :q OR quotation_name ILIKE :q OR spec ILIKE :q "
                         "ORDER BY id LIMIT :limit OFFSET :offset"
                     ),
                     {"q": like, "limit": page_size, "offset": offset},
                 ).mappings().all()
             else:
-                total = conn.execute(text("SELECT COUNT(*) FROM product_mapping")).scalar() or 0
+                total = conn.execute(text("SELECT COUNT(*) FROM 整理产品(2)")).scalar() or 0
                 rows = conn.execute(
                     text(
-                        "SELECT id, inquiry_name, spec, product_code, quotation_name FROM product_mapping "
+                        "SELECT id, inquiry_name, spec, product_code, quotation_name FROM 整理产品(2) "
                         "ORDER BY id LIMIT :limit OFFSET :offset"
                     ),
                     {"limit": page_size, "offset": offset},
@@ -311,7 +317,12 @@ def fetch_all_product_mapping() -> list[dict]:
         with engine.connect() as conn:
             rows = conn.execute(
                 text(
-                    "SELECT inquiry_name, spec, product_code, quotation_name FROM product_mapping ORDER BY id"
+                    "SELECT "
+                    f"{_quote_sql_identifier('Nama_Permintaan_Barang_询价货物名称')} AS inquiry_name, "
+                    f"{_quote_sql_identifier('Spesifikasi_dan_Model_Permintaan_Barang_询价规格型号')} AS spec, "
+                    f"{_quote_sql_identifier('Product_number_产品编号')} AS product_code, "
+                    f"{_quote_sql_identifier('Nama_Penawaran_Barang_报价名称')} AS quotation_name "
+                    f"FROM {_quote_sql_identifier('整理产品(2)')} ORDER BY {_quote_sql_identifier('Product_number_产品编号')}"
                 )
             ).mappings().all()
             return [dict(r) for r in rows]
@@ -459,11 +470,23 @@ def _sql_col(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _quote_sql_identifier(name: str) -> str:
+    """Return name double-quoted for use as a SQL identifier (table/column name).
+
+    Handles any Unicode characters, parentheses, spaces, etc.
+    Embedded double-quotes are escaped by doubling them.
+    """
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _safe_table_name(table_name: str) -> str:
     tn = (table_name or "").strip()
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tn):
-        raise ValueError("invalid table name")
-    return tn
+    if not tn:
+        raise ValueError("empty table name")
+    # ASCII-safe names (dl_{id}_slug pattern) are used bare; everything else quoted.
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tn):
+        return tn
+    return _quote_sql_identifier(tn)
 
 
 def list_libraries() -> list[dict]:
