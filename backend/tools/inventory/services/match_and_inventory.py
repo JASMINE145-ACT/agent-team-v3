@@ -14,8 +14,8 @@ from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# 候选来源优先级：共同 > 历史报价 > 字段匹配
-_SOURCE_PRIORITY = {"共同": 0, "历史报价": 1, "字段匹配": 2}
+# 候选来源优先级：共同 > 历史报价 > 字段匹配 / 英文字段匹配（同级）
+_SOURCE_PRIORITY = {"共同": 0, "历史报价": 1, "字段匹配": 2, "英文字段匹配": 2}
 
 _table_agent = None
 _table_agent_lock = threading.Lock()
@@ -312,3 +312,22 @@ def match_price_and_get_inventory(
     if selection_meta:
         result["_selection_meta"] = selection_meta
     return result
+
+
+def match_quotation_english(
+    keywords: str,
+    customer_level: str = "B",
+    price_library_path: Optional[str] = None,
+) -> List[dict[str, Any]]:
+    """
+    英文询价匹配：仅走 Describrition_English CONTAINS，跳过中文历史路与中文 token 匹配。
+    返回格式与 match_quotation_union 一致：[{code, matched_name, unit_price, source}, ...]，
+    并可能含 description_english 供 LLM 参考。
+    """
+    from backend.tools.inventory.services.wanding_fuzzy_matcher import match_english_candidates
+
+    return match_english_candidates(
+        keywords,
+        customer_level=customer_level,
+        price_library_path=price_library_path,
+    )

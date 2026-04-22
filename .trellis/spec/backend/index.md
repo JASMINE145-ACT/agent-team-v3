@@ -18,8 +18,12 @@ The backend is organized into `core/` (pure infrastructure) and `tools/` (busine
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | ✅ Filled |
 | [Error Handling](./error-handling.md) | Tool error categories, result shapes, rework flow | ✅ Filled |
 | [Quality Guidelines](./quality-guidelines.md) | Required shapes, forbidden patterns, logging, testing | ✅ Filled |
-| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
-| [Database Guidelines](./database-guidelines.md) | Session persistence, JSON file storage | To fill |
+| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | ✅ Filled |
+| [Database Guidelines](./database-guidelines.md) | Session persistence, JSON file storage, Neon table schemas | ✅ Filled |
+| [Skills System](./skills-system.md) | skills.py architecture, routing rules, customer level mapping | ✅ Filled |
+| [Config Reference](./config-reference.md) | All environment variables grouped by domain | ✅ Filled |
+| [Tools Catalog](./tools-catalog.md) | All tools with schemas, return shapes, access patterns | ✅ Filled |
+| [API Routes + Gateway](./api-routes.md) | All REST endpoints + WebSocket gateway methods + SSE events | ✅ Filled |
 
 ---
 

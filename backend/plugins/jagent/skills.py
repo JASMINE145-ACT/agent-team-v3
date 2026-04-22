@@ -14,8 +14,8 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **get_inventory_by_code(code)**：已知 10 位物料编号时直接查库存。
 - **get_inventory_by_code_batch(codes)**：当用户要求对**多个**编号（如整张表、或 5 个以上编号）查库存时，**必须**使用本工具，一次传入多个物料编号 codes；禁止对每个产品单独多次调用 get_inventory_by_code。单次最多 50 条，更多请分批调用；结果在 data.items 中与输入 1:1 对齐（含 input_index、code、item_status、item）。
 - **modify_inventory(code, action, quantity, memo?)**：**锁定可售**（action=lock，占位）或**增补/归零**（action=supplement）。需物料编号（code）；建议先 get_inventory_by_code 确认。supplement 时 quantity>0 为增补，quantity=0 为将用户仓/可售归零。仅当用户明确说「锁定/预留」「增补/入库/加库存」或「改回 0/归零」时使用。需 INVENTORY_MODIFY_ENABLED=1 才真实写 ACCURATE。
-- **match_quotation(keywords, customer_level?)**：**询价/查 code 时优先用本工具**。同时查报价历史与万鼎字段匹配，结果取并集，每条候选带 **source**（历史报价/字段匹配/共同）。返回格式含 candidates、match_source，单条时含 chosen。这样「直接50mm」等既能命中历史也能命中万鼎时，会显示 共同 或 历史报价。可选参数 `show_all_candidates=true`：跳过 LLM 选型，直接返回所有候选列表（用户说「全部list/所有候选/我想自己选」时使用）。
-- **match_quotation_batch(keywords_list, customer_level?)**：多产品价格查询专用。一次传入多个关键词，逐项返回匹配结果与渲染卡片；同一批次产品禁止再逐个调用 match_quotation，避免重复卡片与重复选型。**单次最多 20 条**；产品总数 >20 时必须分多次调用（如 45 个产品 → 第1次 1~20，第2次 21~40，第3次 41~45），每次调用完成后再发起下一次，不得一次传入超过 20 个关键词。
+- **match_quotation(keywords, customer_level?)**：**询价/查 code 时优先用本工具**。同时查报价历史与万鼎字段匹配，结果取并集，每条候选带 **source**（历史报价/字段匹配/共同）。返回格式含 candidates、match_source，单条时含 chosen。这样「直接50mm」等既能命中历史也能命中万鼎时，会显示 共同 或 历史报价。可选参数 `show_all_candidates=true`：跳过 LLM 选型，直接返回所有候选列表（用户说「全部list/所有候选/我想自己选」时使用）。可选参数 `lang="en"`：当 keywords 全为英文（无汉字）时传入，走 Describrition_English 字段匹配路径，适用于用户以英文描述产品时的询价。
+- **match_quotation_batch(keywords_list, customer_level?, lang?)**：多产品价格查询专用。一次传入多个关键词，逐项返回匹配结果与渲染卡片；同一批次产品禁止再逐个调用 match_quotation，避免重复卡片与重复选型。**单次最多 20 条**；产品总数 >20 时必须分多次调用（如 45 个产品 → 第1次 1~20，第2次 21~40，第3次 41~45），每次调用完成后再发起下一次，不得一次传入超过 20 个关键词。若每条 keywords 均为英文无汉字，可传 `lang="en"`（与单条 match_quotation 一致）。
 - **select_wanding_match(keywords, candidates)**：LLM 选型。needs_selection 且用户要「选一个」时调用；传入 match_source（来自上一步 observation）。
 - **get_profit_by_price(code?, product_name?, price)**：报价员已知道「万鼎商品编号或完整产品名 + 实际成交价/报单价」时，用本工具在万鼎价格库中锁定对应行与最接近的价格档位，返回该档位的利润率以及所有档位的价格/利润率列表，便于比较。
 - **get_profit_by_price_batch(items)**：当用户要求对**多个**产品（如整张表、或 5 个以上编号）查利润率/档位时，**必须**使用本工具，一次传入多组 { code, price }；禁止对每个产品单独多次调用 get_profit_by_price。单次最多 50 条，更多请分批调用。
@@ -88,6 +88,9 @@ INVENTORY & PRICE DECISION RULES
   - Example (Incorrect): 「50三通库存」 → search_inventory(keywords="50三通") ❌（违反中文库存链路与 Hard Constraints：中文库存不得直接 search_inventory）。
   - Example (Incorrect): 「三通50 价格」 → match_quotation(...) → get_inventory_by_code(...) ❌（用户没说库存，价格查询不触发 step 3）。
 - IF the request is an **English product name inventory request**, THEN you MAY call search_inventory(keywords) directly for inventory lookup.
+- IF the user asks for **价格/报价** AND keywords contain **only English letters** (no Chinese characters), THEN call match_quotation(keywords, lang="en") to route to the English description field matching.
+  - Example (Correct): `3" AW pipe price` → match_quotation(keywords='3" AW pipe', lang="en") ✅
+  - Example (Incorrect): `3" AW pipe price` → match_quotation(keywords='3" AW pipe') ❌（未传 lang="en"，中文路径无法命中）
 - IF the user asks for **多个产品的库存** (same message has >=2 items, or whole sheet/bulk import) AND you have multiple codes, THEN you MUST use get_inventory_by_code_batch(codes) instead of looping get_inventory_by_code.
 - IF the user asks for **利润率/利润测算/按成交价算档位** for a single product with known code or full product name plus a price,
   THEN you MUST call get_profit_by_price(code?, product_name?, price).

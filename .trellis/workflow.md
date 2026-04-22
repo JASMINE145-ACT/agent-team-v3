@@ -77,16 +77,20 @@ Based on your task, read the **detailed** guidelines:
 
 **Frontend Task**:
 ```bash
-cat .trellis/spec/frontend/hook-guidelines.md      # For hooks
-cat .trellis/spec/frontend/component-guidelines.md # For components
-cat .trellis/spec/frontend/type-safety.md          # For types
+cat .trellis/spec/frontend/index.md                    # Start here — full index
+cat .trellis/spec/frontend/pages.md                    # All 16 tabs: routes + file locations
+cat .trellis/spec/frontend/component-guidelines.md     # For components
+cat .trellis/spec/frontend/type-safety.md              # For TypeScript types
 ```
 
 **Backend Task**:
 ```bash
-cat .trellis/spec/backend/database-guidelines.md   # For DB operations
-cat .trellis/spec/backend/type-safety.md           # For types
-cat .trellis/spec/backend/logging-guidelines.md    # For logging
+cat .trellis/spec/backend/index.md                     # Start here — full index of all guides
+cat .trellis/spec/backend/database-guidelines.md        # For Neon / SQL operations
+cat .trellis/spec/backend/logging-guidelines.md        # For logging patterns
+cat .trellis/spec/backend/skills-system.md             # For agent routing & skills.py
+cat .trellis/spec/backend/tools-catalog.md             # For tool schemas & return shapes
+cat .trellis/spec/backend/config-reference.md          # For environment variables
 ```
 
 ---
@@ -172,6 +176,7 @@ Based on what you'll develop, read the corresponding guidelines:
 ```bash
 # Read index first, then specific docs based on task
 cat .trellis/spec/frontend/index.md
+cat .trellis/spec/frontend/pages.md     # All tabs: routes + view/controller files
 ```
 
 **Backend Development** (if applicable):
@@ -233,8 +238,8 @@ python3 ./.trellis/scripts/task.py create "<title>" --slug <task-name>
 - [OK] Manual feature testing passes
 
 **Project-specific checks**:
-- See `.trellis/spec/frontend/quality-guidelines.md` for frontend
-- See `.trellis/spec/backend/quality-guidelines.md` for backend
+- See `.trellis/spec/frontend/component-guidelines.md` for frontend quality patterns
+- See `.trellis/spec/backend/quality-guidelines.md` for backend quality patterns
 
 ---
 

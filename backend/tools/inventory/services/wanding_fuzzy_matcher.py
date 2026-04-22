@@ -683,7 +683,7 @@ def search_fuzzy(
 
 
 def _load_one_sheet(ws, price_col: int) -> list[dict]:
-    """从已打开的 worksheet 读出一张表的行（Material, Describrition, unit_price）。需覆盖 E 档列(0-based 18)，故 max_col=20。"""
+    """从已打开的 worksheet 读出一张表的行（Material, Describrition, Describrition_English, unit_price）。需覆盖 E 档列(0-based 18)，故 max_col=20。"""
     rows = []
     for row in ws.iter_rows(max_col=20):
         cells = [getattr(c, "value", None) for c in row]
@@ -697,6 +697,7 @@ def _load_one_sheet(ws, price_col: int) -> list[dict]:
             rows.append({
                 "Material": str(cells[1] or "").strip(),
                 "Describrition": str(cells[2] or "").strip(),
+                "Describrition_English": str(cells[3] or "").strip() if len(cells) > 3 else "",
                 "unit_price": up,
             })
     return rows
@@ -878,6 +879,7 @@ def _try_load_from_db(level: str) -> Optional[pd.DataFrame]:
                 {
                     "Material": str(r.get("material") or "").strip(),
                     "Describrition": str(r.get("description") or "").strip(),
+                    "Describrition_English": str(r.get("description_english") or "").strip(),
                     "unit_price": up_f,
                 }
             )
@@ -1140,6 +1142,59 @@ def match_fuzzy_candidates(
             "score": round(score, 4),
         })
     return out
+
+
+def match_english_candidates(
+    keywords: str,
+    customer_level: str = "B",
+    price_library_path: str | Path | None = None,
+    max_candidates: int = 20,
+) -> List[dict[str, Any]]:
+    """
+    英文 query → Describrition_English CONTAINS 匹配。
+    将 keywords 按空白/标点拆分：长度 ≥2 的片段，以及单独的数字规格（如 3、50）作为 token；
+    每行需全部 token 均出现在英文描述（小写）中才收录。
+    返回 [{code, matched_name, description_english, unit_price, source}, ...]，最多 max_candidates 条。
+    matched_name 为中文 Describrition，保持下游结构一致。
+    """
+    from backend.tools.inventory.config import config
+
+    path = price_library_path or config.PRICE_LIBRARY_PATH
+    df = _get_cached_df(path, customer_level)
+    if df.empty or "Describrition_English" not in df.columns:
+        return []
+
+    raw_tokens = re.split(r'[\s\"\'\-/\\]+', (keywords or "").strip())
+    tokens: list[str] = []
+    for t in raw_tokens:
+        t = (t or "").strip()
+        if not t:
+            continue
+        tl = t.lower()
+        if len(tl) >= 2:
+            tokens.append(tl)
+        elif tl.isdigit():
+            # 英寸/规格数字（如 3" pipe 中的 3）单独参与 CONTAINS
+            tokens.append(tl)
+    if not tokens:
+        return []
+
+    results: list[dict[str, Any]] = []
+    for row in df.itertuples(index=False):
+        en_desc = str(getattr(row, "Describrition_English", "") or "").lower()
+        if not en_desc:
+            continue
+        if all(t in en_desc for t in tokens):
+            results.append({
+                "code": str(getattr(row, "Material", "")).strip(),
+                "matched_name": str(getattr(row, "Describrition", "")).strip(),
+                "description_english": str(getattr(row, "Describrition_English", "")).strip(),
+                "unit_price": float(getattr(row, "unit_price", 0) or 0),
+                "source": "英文字段匹配",
+            })
+        if len(results) >= max_candidates:
+            break
+    return results
 
 
 def get_wanding_price_by_code(

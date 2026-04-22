@@ -157,6 +157,7 @@ def fetch_all_price_library() -> list[dict]:
                     "SELECT "
                     f"{_quote_sql_identifier('Material')} AS material, "
                     f"{_quote_sql_identifier('Describrition')} AS description, "
+                    f"{_quote_sql_identifier('Describrition_English')} AS description_english, "
                     f"{_quote_sql_identifier('（二级代理）A级别_报单价格')} AS price_a, "
                     f"{_quote_sql_identifier('（一级代理）B级别_报单价格')} AS price_b, "
                     f"{_quote_sql_identifier('（聚万大客户）C级别报单价格')} AS price_c, "

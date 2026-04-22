@@ -25,10 +25,11 @@
 | Guide | Description | Status |
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | ✅ Filled |
+| [Pages / Tabs](./pages.md) | All 16 tabs: routes, Chinese names, view/controller files | ✅ Filled |
 | [Component Guidelines](./component-guidelines.md) | Web Component patterns, `@state`, lifecycle | ✅ Filled |
 | [Type Safety](./type-safety.md) | TypeScript conventions, type definitions | ✅ Filled |
 | [i18n Guidelines](./i18n-guidelines.md) | Translation system, locale files | ✅ Filled |
-| [Testing Guidelines](./testing-guidelines.md) | Vitest + Playwright patterns | To fill |
+| [Testing Guidelines](./testing-guidelines.md) | Vitest + Playwright patterns | ✅ Filled |
 
 ---
 
@@ -59,10 +60,17 @@ src/ui/
 │   ├── chat.ts        # Chat handling logic
 │   ├── agents.ts     # Agent management
 │   ├── procurement.ts # Procurement workflow
+│   ├── oos.ts        # OOS dashboard
+│   ├── admin-data.ts  # Price library / product mapping
 │   └── ...
 ├── views/            # View/render functions (pure, return HTML)
+│   ├── chat.ts / overview.ts / oos-dashboard.ts
+│   ├── business-knowledge.ts / work.ts / cron.ts
+│   └── ...
 ├── app.ts           # Main application shell
 ```
+
+**All 16 tabs are documented in [Pages / Tabs](./pages.md)** — includes route, Chinese name, and exact file paths for each page.
 
 ### Gateway Communication
 

@@ -1,5 +1,136 @@
 # Quality Guidelines
 
+> Code quality rules, enforceable patterns, and anti-patterns for this codebase.
+
+---
+
+## Tool Schema Drift Prevention
+
+**CRITICAL**: When changing a tool's parameter schema, update BOTH the handler AND the tool definition simultaneously.
+
+Tool definitions are in:
+- Inventory tools: `backend/tools/inventory/services/inventory_agent_tools.py` → `get_inventory_tools_openai_format()`
+- OOS tools: `backend/tools/oos/oos_tools.py` → `get_oos_tools_openai_format()`
+- Extra tools: `backend/agent/tools.py` → `EXTRA_TOOLS`
+
+Handler implementations are in respective `handler.py` files.
+
+---
+
+## Required Result Shapes
+
+All tools MUST return a JSON string with `success` field:
+
+```python
+# ✅ Correct
+return {"success": True, "result": json.dumps(payload)}
+
+# ❌ Wrong
+return "Here's the price: 12.5"  # raw string
+
+# ✅ Error
+return {"success": False, "error": str(e)}
+```
+
+---
+
+## Chosen Field Whitelist
+
+Only these fields are allowed in the `chosen` object pushed to frontend:
+
+```python
+_KNOWN_CHOSEN_FIELDS: set[str] = {"code", "matched_name", "unit_price", "source"}
+```
+
+Adding new fields requires updating `extension.py` whitelist AND frontend type simultaneously.
+
+---
+
+## match_quotation Result Types
+
+| Status | Meaning | Trigger |
+|--------|---------|---------|
+| `single` | LLM confident, one candidate selected | 1 candidate OR LLM selects with high confidence |
+| `needs_selection` | LLM uncertain, needs human choice | Multiple candidates, low confidence |
+| `needs_human_choice` | LLM uncertain, trimmed options returned | Same as `needs_selection` |
+| `unmatched` | No candidates found | Zero candidates |
+| `llm_error` | Selector failed, rule fallback active | `finish_reason=length` + salvage failed |
+
+---
+
+## Session State Rules
+
+Do not modify `session.pending_human_choice` directly. Use:
+- `SessionStore.set_pending_human_choice()`
+- `SessionStore.clear_pending_human_choice()`
+
+---
+
+## Forbidden Patterns
+
+| ❌ Wrong | ✅ Correct |
+|---------|-----------|
+| Hardcoded API keys | Env vars only |
+| `ORDER BY id` on 万鼎价格库 | `ORDER BY "NO"` |
+| `ORDER BY id` on 整理产品 | `ORDER BY "Product_number_产品编号"` |
+| `"万鼎价格库..."` (unquoted) | `'"万鼎价格库..."'` (double-quoted) |
+| f-string SQL interpolation | `text("... WHERE col = :val")`, `{"val": value}` |
+| `print()` for logging | `logger.info()`, `logger.warning()` |
+| Sync I/O in async handlers | `asyncio.to_thread()` wrapping |
+| Module-level import in handlers | Lazy import inside function OR top-level with try/except |
+| Returning raw string as tool result | Always wrap in `{"success": True, "result": json.dumps(...)}` |
+| `_engine = None` reassignment without guard | Singleton pattern with `_get_engine()` |
+
+---
+
+## Config Critical Rules
+
+1. **NEVER send MiniMax model name to Zhipu URL** → 1211 error. Use `MINIMAX_BASE_URL` for MiniMax models.
+2. **`DATABASE_URL` not set** → all DB functions return empty results gracefully, never crash.
+3. **`INVENTORY_MODIFY_ENABLED=0` (default)** → `modify_inventory` only simulates, no actual writes.
+4. **`DEBUG=false` (default)** → `/api/debug/*` routes are disabled.
+5. **`ENABLE_TOOL_DEFER=false` (default)** → all tools loaded immediately, no lazy schema expansion.
+
+---
+
+## Testing Requirements
+
+New tool handlers MUST have tests covering:
+1. Happy path
+2. Error path (network failure, invalid args)
+3. Empty result path
+4. For selector tools: `finish_reason=length` truncation recovery
+
+---
+
+## Scenario: `llm_selector` token budget (2026-04-04)
+
+**Trigger**: Selector often hit `finish_reason=length` causing `llm_error` fallback.
+
+**Contracts**:
+- `LLM_SELECTOR_MAX_TOKENS=3000` (both env var and cap)
+- If `content` is empty but `reasoning_content` exists → extract JSON block
+- If `reasoning_content` is truncated → regex salvage for `index` and `reason`
+- Salvage fails → rule-based fallback (共同 > 历史报价 > 字段匹配) with `llm_error` marker
+
+**Wrong**: Treat empty `content` as immediate hard failure.
+**Correct**: Attempt `reasoning_content` salvage before rule fallback.
+
+---
+
+## Scenario: `[已渲染到前端]` hard-stop (2026-04-04)
+
+**Trigger**: Query/card desync when LLM generates extra narrative after tool result.
+
+**Contracts**:
+- Constant: `_RENDERED_MARKER_PREFIX = "[已渲染到前端]"`
+- If observation starts with marker prefix → skip next LLM generation step
+- Force finalize current turn answer with marker text
+
+**Wrong**: Depend only on prompt-level silence.
+**Correct**: Runtime loop hard-stop once marker observation is detected.
+
+
 ---
 
 ## Required Tool Response Shape

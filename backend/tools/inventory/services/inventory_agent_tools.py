@@ -13,8 +13,8 @@ from backend.tools.inventory.config import config
 
 logger = logging.getLogger(__name__)
 
-# 候选来源优先级：共同 > 历史报价 > 字段匹配
-_SOURCE_PRIORITY = {"共同": 0, "历史报价": 1, "字段匹配": 2}
+# 候选来源优先级：共同 > 历史报价 > 字段匹配 / 英文字段匹配（同级）
+_SOURCE_PRIORITY = {"共同": 0, "历史报价": 1, "字段匹配": 2, "英文字段匹配": 2}
 
 # 推送给前端的 chosen 字段白名单（与 extension.py 保持同步）
 _KNOWN_CHOSEN_FIELDS: set[str] = {"code", "matched_name", "unit_price", "source"}
@@ -288,12 +288,12 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
     """
     try:
         _push_event = push_event if callable(push_event) else (lambda *_: None)
-        from backend.tools.inventory.services.match_and_inventory import match_quotation_union
 
         keywords = (arguments.get("keywords") or "").strip()
         if not keywords:
             return {"success": True, "result": "请提供 keywords（产品名+规格）。"}
         customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
+        lang = (arguments.get("lang") or "zh").strip().lower()
         show_all = bool(arguments.get("show_all_candidates", False))
         if not show_all:
             batch_keywords = _split_batch_keywords(keywords)
@@ -305,15 +305,30 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
                     ctx=arguments if isinstance(arguments, dict) else None,
                 )
 
-        candidates = match_quotation_union(keywords, customer_level=customer_level)
+        if lang == "en":
+            from backend.tools.inventory.services.match_and_inventory import match_quotation_english
+
+            candidates = match_quotation_english(keywords, customer_level=customer_level)
+        else:
+            from backend.tools.inventory.services.match_and_inventory import match_quotation_union
+
+            candidates = match_quotation_union(keywords, customer_level=customer_level)
         if not candidates:
             return {"success": True, "result": json.dumps({"unmatched": True, "keywords": keywords}, ensure_ascii=False)}
 
-        norm = [
-            {"code": str(c.get("code", "")), "matched_name": str(c.get("matched_name", "")), "unit_price": float(c.get("unit_price", 0) or 0), "source": c.get("source", "未知")}
-            for c in candidates
-        ]
-        # 强制来源优先级稳定排序：共同 > 历史报价 > 字段匹配
+        norm = []
+        for c in candidates:
+            item: dict[str, Any] = {
+                "code": str(c.get("code", "")),
+                "matched_name": str(c.get("matched_name", "")),
+                "unit_price": float(c.get("unit_price", 0) or 0),
+                "source": c.get("source", "未知"),
+            }
+            de = c.get("description_english")
+            if de:
+                item["description_english"] = str(de)
+            norm.append(item)
+        # 强制来源优先级稳定排序：共同 > 历史报价 > 字段匹配 / 英文字段匹配
         norm = sorted(
             norm,
             key=lambda c: _SOURCE_PRIORITY.get((c.get("source") or "").strip(), 99),
@@ -325,7 +340,7 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
         from backend.tools.inventory.services.llm_selector import llm_select_best
 
         sources_present = [
-            src for src in ("共同", "历史报价", "字段匹配")
+            src for src in ("共同", "历史报价", "字段匹配", "英文字段匹配")
             if any((c.get("source") or "").strip() == src for c in norm)
         ]
         match_source_str = "、".join(sources_present) if sources_present else "未知"
@@ -1002,6 +1017,7 @@ def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, c
     if not isinstance(keywords_list, list) or not keywords_list:
         return {"success": True, "result": "请提供 keywords_list（至少一个产品关键词）。"}
     customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
+    lang = (arguments.get("lang") or "zh").strip().lower()
 
     # 强制分批：超出上限时只处理前 N 条，并在结果中提示剩余项
     max_items = _MATCH_QUOTATION_BATCH_MAX_ITEMS
@@ -1020,7 +1036,7 @@ def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, c
         kw = (str(kw_raw or "")).strip()
         if not kw:
             return {"keywords": kw, "input_index": idx, "status": "skipped", "payload": {}}
-        single_args = {"keywords": kw, "customer_level": customer_level}
+        single_args = {"keywords": kw, "customer_level": customer_level, "lang": lang}
         result = _execute_match_quotation(single_args, push_event=None)
         obs_str = result.get("result") or ""
         status = "error" if not result.get("success") else "ok"
@@ -1334,6 +1350,10 @@ def get_inventory_tools_openai_format() -> list[dict]:
                             "description": "产品关键词列表，每项为一个独立产品（如 [\"直接50\", \"三通50\"]）",
                         },
                         "customer_level": {"type": "string", "description": "价格档位，同 match_quotation。默认 B"},
+                        "lang": {
+                            "type": "string",
+                            "description": "同 match_quotation：全英文产品名批量询价时传 'en'。",
+                        },
                     },
                     "required": ["keywords_list"],
                 },
@@ -1351,6 +1371,10 @@ def get_inventory_tools_openai_format() -> list[dict]:
                         "keywords": {"type": "string", "description": "产品名+规格，如 直接50mm、直径25PPR"},
                         "customer_level": {"type": "string", "description": "价格档位：A/B/C/D/D_low/E（报单）或 出厂价_含税/出厂价_不含税/采购不含税。用户说「二级代理」用 A、「青山大客户」用 D、「出厂价含税」用 出厂价_含税。默认 B"},
                         "show_all_candidates": {"type": "boolean", "description": "true 时跳过 LLM 选型，直接返回全部候选列表（用户说「全部list/所有候选/我想自己选/列出所有」时传 true）"},
+                        "lang": {
+                            "type": "string",
+                            "description": "查询语言路径：'en' 表示英文询价，走 Describrition_English CONTAINS 匹配；默认不传（中文路径）。仅当 keywords 全为英文无汉字时传 'en'。",
+                        },
                     },
                     "required": ["keywords"],
                 },

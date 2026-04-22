@@ -1261,6 +1261,30 @@ Changed files (0 total):
 - None - task complete
 
 
+## Session 52: 2026-04-21 — Skill 规范文档（合格标准 + 注意事项）
+
+**Date**: 2026-04-21  
+**Task**: 基于 `学习总结文档/cursor-skills-index.md` 汇总 Skill 编写规范
+
+### Summary
+
+- 新增 `学习总结文档/skill-规范文档.md`，沉淀“合格 Skill”标准。
+- 结构覆盖：最小结构、推荐模板、必备要素、反模式、description 写法、上线前自检清单、分类型建议。
+- 目标是统一 Skill 质量基线：**可触发、可执行、可验证、可维护**。
+
+### Verification
+
+- Code-review agent: **PASS**（文档清晰、可执行；给出非阻塞优化建议）
+- Test-agent: **PASS**  
+  - 路径可读：`学习总结文档/skill-规范文档.md`  
+  - 行数：152  
+  - 标题命中：`Trigger` / `Workflow` / `Output` / `Guardrails`
+
+### Status
+
+[OK] **Completed**
+
+
 ## Session 35: Session 2026-04-15
 
 **Date**: 2026-04-15
