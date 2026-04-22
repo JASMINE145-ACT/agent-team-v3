@@ -90,9 +90,15 @@ async def list_price_library(
     q: str = "",
     page: int = 1,
     page_size: int = 100,
+    product_type: str = "",
     _: None = Depends(get_admin_dep),
 ):
-    return repository.fetch_price_library(q=q, page=page, page_size=page_size)
+    return repository.fetch_price_library(
+        q=q,
+        page=page,
+        page_size=page_size,
+        product_type=product_type,
+    )
 
 
 @router.post("/price-library")

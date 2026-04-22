@@ -22,8 +22,38 @@ PRICE_COLS = {
     "FACTORY_INC_TAX": 4,
     "FACTORY_EXC_TAX": 5,
     "PURCHASE_EXC_TAX": 6,
-    # 下列索引基于「万鼎价格库_管材与国标管件_标准格式.xlsx」表头：
-    # 7/8: A 档 利润率/报单价格；9/10: B 档；11/12: C 档；13/14: D 档；15/16: D 低利润率；17/18: E 档。
+    # 下列索引基于「万鼎价格库_管材与国标管件_标准格式.xlsx」表头（含 Product_Type 列后偏移 +1）：
+    # 列5-7: 出厂价；列8/9: A 档 利润率/报单价格；列10/11: B 档；列12/13: C 档；列14/15: D 档；列16/17: D 低利润率；列18/19: E 档。
+    "A_MARGIN": 9,
+    "A_QUOTE": 9,
+    "B_MARGIN": 11,
+    "B_QUOTE": 11,
+    "C_MARGIN": 13,
+    "C_QUOTE": 13,
+    "D_MARGIN": 15,
+    "D_QUOTE": 15,
+    "D_LOW": 17,
+    "E_MARGIN": 19,
+    "E_QUOTE": 19,
+    # 兼容旧代码
+    "A": 9,
+    "A_TURN": 9,
+    "A_ANNUAL": 9,
+    "B": 11,
+    "B_TURN": 11,
+    "B_ANNUAL": 11,
+    "B_QUOTE": 11,
+    "C": 13,
+    "C_TURN": 13,
+    "C_QUOTE": 13,
+    "D": 15,
+    "D_NOADJ": 15,
+    "D_WHOLESALE": 17,
+    "E": 19,
+}
+
+# 对应每个档位价格列的「利润率」列索引（0-based）。
+PROFIT_COLS: dict[str, int] = {
     "A_MARGIN": 8,
     "A_QUOTE": 8,
     "B_MARGIN": 10,
@@ -35,36 +65,6 @@ PRICE_COLS = {
     "D_LOW": 16,
     "E_MARGIN": 18,
     "E_QUOTE": 18,
-    # 兼容旧代码
-    "A": 8,
-    "A_TURN": 8,
-    "A_ANNUAL": 8,
-    "B": 10,
-    "B_TURN": 10,
-    "B_ANNUAL": 10,
-    "B_QUOTE": 10,
-    "C": 12,
-    "C_TURN": 12,
-    "C_QUOTE": 12,
-    "D": 14,
-    "D_NOADJ": 14,
-    "D_WHOLESALE": 16,
-    "E": 18,
-}
-
-# 对应每个档位价格列的「利润率」列索引（0-based）。
-PROFIT_COLS: dict[str, int] = {
-    "A_MARGIN": 7,
-    "A_QUOTE": 7,
-    "B_MARGIN": 9,
-    "B_QUOTE": 9,
-    "C_MARGIN": 11,
-    "C_QUOTE": 11,
-    "D_MARGIN": 13,
-    "D_QUOTE": 13,
-    "D_LOW": 15,
-    "E_MARGIN": 17,
-    "E_QUOTE": 17,
 }
 
 
@@ -660,6 +660,8 @@ def search_fuzzy(
                 }
                 if hasattr(row, "unit_price"):
                     row_dict["unit_price"] = getattr(row, "unit_price", 0.0)
+                if hasattr(row, "Product_Type"):
+                    row_dict["Product_Type"] = str(getattr(row, "Product_Type", "") or "").strip()
                 iter_rows.append((row_dict, score, inch_exact_hits))
 
         # 英寸优先：若查询里显式给了英寸，且存在英寸精确命中的候选，
@@ -683,7 +685,7 @@ def search_fuzzy(
 
 
 def _load_one_sheet(ws, price_col: int) -> list[dict]:
-    """从已打开的 worksheet 读出一张表的行（Material, Describrition, Describrition_English, unit_price）。需覆盖 E 档列(0-based 18)，故 max_col=20。"""
+    """从已打开的 worksheet 读出一张表的行（Material, Describrition, Describrition_English, Product_Type, unit_price）。需覆盖 E 档列(0-based 18)，故 max_col=20。"""
     rows = []
     for row in ws.iter_rows(max_col=20):
         cells = [getattr(c, "value", None) for c in row]
@@ -698,6 +700,7 @@ def _load_one_sheet(ws, price_col: int) -> list[dict]:
                 "Material": str(cells[1] or "").strip(),
                 "Describrition": str(cells[2] or "").strip(),
                 "Describrition_English": str(cells[3] or "").strip() if len(cells) > 3 else "",
+                "Product_Type": str(cells[4] or "").strip() if len(cells) > 4 else "",
                 "unit_price": up,
             })
     return rows
@@ -880,6 +883,7 @@ def _try_load_from_db(level: str) -> Optional[pd.DataFrame]:
                     "Material": str(r.get("material") or "").strip(),
                     "Describrition": str(r.get("description") or "").strip(),
                     "Describrition_English": str(r.get("description_english") or "").strip(),
+                    "Product_Type": str(r.get("product_type") or "").strip(),
                     "unit_price": up_f,
                 }
             )
@@ -1039,6 +1043,7 @@ def match_fuzzy(
     keywords: str,
     customer_level: str = "B",
     price_library_path: Optional[str | Path] = None,
+    product_type: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """
     DataBase-style 模糊匹配，返回最佳单结果。
@@ -1057,6 +1062,14 @@ def match_fuzzy(
     df = _get_cached_df(path, customer_level)
     if df.empty:
         return None
+    if product_type:
+        if "Product_Type" not in df.columns:
+            logger.warning("Product_Type 严格过滤失败：数据源缺少 Product_Type 列，filter=%s", product_type)
+            return None
+        df = df[df["Product_Type"].astype(str).str.strip() == product_type]
+        if df.empty:
+            logger.warning("Product_Type 过滤后无候选: %s", product_type)
+            return None
 
     results = search_fuzzy(df, keywords)
     if not results:
@@ -1078,6 +1091,7 @@ def match_fuzzy_candidates(
     max_score_tiers: Optional[int] = None,
     min_score: Optional[float] = None,
     min_score_gap: Optional[float] = None,
+    product_type: Optional[str] = None,
 ) -> List[dict[str, Any]]:
     """
     返回候选列表，每项含 code, matched_name, unit_price, score。
@@ -1099,6 +1113,14 @@ def match_fuzzy_candidates(
     df = _get_cached_df(path, customer_level)
     if df.empty:
         return []
+    if product_type:
+        if "Product_Type" not in df.columns:
+            logger.warning("Product_Type 严格过滤失败：数据源缺少 Product_Type 列，filter=%s", product_type)
+            return []
+        df = df[df["Product_Type"].astype(str).str.strip() == product_type]
+        if df.empty:
+            logger.warning("Product_Type 过滤后无候选: %s", product_type)
+            return []
 
     results = search_fuzzy(df, keywords)
     if not results:
@@ -1140,6 +1162,7 @@ def match_fuzzy_candidates(
             "matched_name": (row_dict.get("matched_name") or "")[:200],
             "unit_price": float(row_dict.get("unit_price", 0) or 0),
             "score": round(score, 4),
+            "Product_Type": (row_dict.get("Product_Type") or "").strip(),
         })
     return out
 
@@ -1149,6 +1172,7 @@ def match_english_candidates(
     customer_level: str = "B",
     price_library_path: str | Path | None = None,
     max_candidates: int = 20,
+    product_type: Optional[str] = None,
 ) -> List[dict[str, Any]]:
     """
     英文 query → Describrition_English CONTAINS 匹配。
@@ -1163,6 +1187,14 @@ def match_english_candidates(
     df = _get_cached_df(path, customer_level)
     if df.empty or "Describrition_English" not in df.columns:
         return []
+    if product_type:
+        if "Product_Type" not in df.columns:
+            logger.warning("Product_Type 严格过滤失败：数据源缺少 Product_Type 列，filter=%s", product_type)
+            return []
+        df = df[df["Product_Type"].astype(str).str.strip() == product_type]
+        if df.empty:
+            logger.warning("Product_Type 过滤后无候选: %s", product_type)
+            return []
 
     raw_tokens = re.split(r'[\s\"\'\-/\\]+', (keywords or "").strip())
     tokens: list[str] = []
@@ -1189,6 +1221,7 @@ def match_english_candidates(
                 "code": str(getattr(row, "Material", "")).strip(),
                 "matched_name": str(getattr(row, "Describrition", "")).strip(),
                 "description_english": str(getattr(row, "Describrition_English", "")).strip(),
+                "Product_Type": str(getattr(row, "Product_Type", "")).strip(),
                 "unit_price": float(getattr(row, "unit_price", 0) or 0),
                 "source": "英文字段匹配",
             })

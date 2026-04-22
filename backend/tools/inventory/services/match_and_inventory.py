@@ -35,6 +35,7 @@ def match_wanding_price(
     keywords: str,
     customer_level: str = "B",
     price_library_path: Optional[str] = None,
+    product_type: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """
     万鼎价格库匹配：DataBase-style 模糊逻辑（token + 同义词 + 规格等价 + score）。
@@ -47,6 +48,7 @@ def match_wanding_price(
         keywords,
         customer_level=customer_level,
         price_library_path=price_library_path,
+        product_type=product_type,
     )
 
 
@@ -56,6 +58,7 @@ def match_wanding_price_candidates(
     price_library_path: Optional[str] = None,
     max_candidates: int = 20,
     max_score_tiers: Optional[int] = None,
+    product_type: Optional[str] = None,
 ) -> List[dict[str, Any]]:
     """
     DataBase-style 模糊匹配，返回候选列表（含 score）。
@@ -73,6 +76,7 @@ def match_wanding_price_candidates(
         max_score_tiers=max_score_tiers,
         min_score=getattr(config, "INVENTORY_MIN_SCORE", None),
         min_score_gap=getattr(config, "INVENTORY_MIN_SCORE_GAP", None),
+        product_type=product_type,
     )
 
 
@@ -121,6 +125,7 @@ def match_quotation_union(
     customer_level: str = "B",
     price_library_path: Optional[str] = None,
     mapping_top_k: int = 5,
+    product_type: Optional[str] = None,
 ) -> List[dict[str, Any]]:
     """
     报价历史 + 字段匹配 并行取并集（仅匹配，不查库存、不 LLM 选型）。
@@ -147,6 +152,7 @@ def match_quotation_union(
                 customer_level=customer_level,
                 price_library_path=price_library_path,
                 max_score_tiers=2,
+                product_type=product_type,
             )
         except Exception as e:
             logger.debug("字段匹配失败: %s", e)
@@ -185,6 +191,7 @@ def match_price_and_get_inventory(
     customer_level: str = "B",
     price_library_path: Optional[str] = None,
     allow_suggestions_for_work: bool = False,
+    product_type: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """
     报价历史查询 + 字段匹配（万鼎）同时进行，结果取并集（按 code 去重），再选型/查库存。
@@ -213,6 +220,7 @@ def match_price_and_get_inventory(
                 customer_level=customer_level,
                 price_library_path=price_library_path,
                 max_score_tiers=2,
+                product_type=product_type,
             )
         except Exception as e:
             logger.debug("字段匹配失败: %s", e)
@@ -318,6 +326,7 @@ def match_quotation_english(
     keywords: str,
     customer_level: str = "B",
     price_library_path: Optional[str] = None,
+    product_type: Optional[str] = None,
 ) -> List[dict[str, Any]]:
     """
     英文询价匹配：仅走 Describrition_English CONTAINS，跳过中文历史路与中文 token 匹配。
@@ -330,4 +339,5 @@ def match_quotation_english(
         keywords,
         customer_level=customer_level,
         price_library_path=price_library_path,
+        product_type=product_type,
     )

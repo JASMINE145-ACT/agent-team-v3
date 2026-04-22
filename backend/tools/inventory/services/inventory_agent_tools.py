@@ -294,13 +294,19 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
             return {"success": True, "result": "请提供 keywords（产品名+规格）。"}
         customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
         lang = (arguments.get("lang") or "zh").strip().lower()
+        product_type = _normalize_product_type(arguments.get("product_type"))
         show_all = bool(arguments.get("show_all_candidates", False))
         if not show_all:
             batch_keywords = _split_batch_keywords(keywords)
             min_batch = max(2, int(getattr(config, "MATCH_QUOTATION_BATCH_MIN_ITEMS", 3) or 3))
             if len(batch_keywords) >= min_batch:
                 return _execute_match_quotation_batch(
-                    {"keywords_list": batch_keywords, "customer_level": customer_level},
+                    {
+                        "keywords_list": batch_keywords,
+                        "customer_level": customer_level,
+                        "lang": lang,
+                        "product_type": product_type,
+                    },
                     push_event=push_event,
                     ctx=arguments if isinstance(arguments, dict) else None,
                 )
@@ -308,11 +314,19 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
         if lang == "en":
             from backend.tools.inventory.services.match_and_inventory import match_quotation_english
 
-            candidates = match_quotation_english(keywords, customer_level=customer_level)
+            candidates = match_quotation_english(
+                keywords,
+                customer_level=customer_level,
+                product_type=product_type or None,
+            )
         else:
             from backend.tools.inventory.services.match_and_inventory import match_quotation_union
 
-            candidates = match_quotation_union(keywords, customer_level=customer_level)
+            candidates = match_quotation_union(
+                keywords,
+                customer_level=customer_level,
+                product_type=product_type or None,
+            )
         if not candidates:
             return {"success": True, "result": json.dumps({"unmatched": True, "keywords": keywords}, ensure_ascii=False)}
 
@@ -327,6 +341,9 @@ def _execute_match_quotation(arguments: dict[str, Any], push_event=None) -> dict
             de = c.get("description_english")
             if de:
                 item["description_english"] = str(de)
+            pt = c.get("Product_Type")
+            if pt:
+                item["Product_Type"] = str(pt)
             norm.append(item)
         # 强制来源优先级稳定排序：共同 > 历史报价 > 字段匹配 / 英文字段匹配
         norm = sorted(
@@ -1004,6 +1021,19 @@ _MATCH_QUOTATION_BATCH_MAX_WORKERS = int(
     getattr(config, "MATCH_QUOTATION_BATCH_MAX_WORKERS", 0) or 0
 ) or 8  # 单次最大并行线程数（受 LLM API 并发限制）
 
+_ALLOWED_PRODUCT_TYPES = {"国标", "日标"}
+
+
+def _normalize_product_type(raw: Any) -> str:
+    """标准化 product_type，非法值按空处理并告警。"""
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if value not in _ALLOWED_PRODUCT_TYPES:
+        logger.warning("忽略非法 product_type 参数: %s", value)
+        return ""
+    return value
+
 
 def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, ctx: dict[str, Any] | None = None) -> dict[str, Any]:
     """
@@ -1018,6 +1048,7 @@ def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, c
         return {"success": True, "result": "请提供 keywords_list（至少一个产品关键词）。"}
     customer_level = (arguments.get("customer_level") or "B").strip().upper() or "B"
     lang = (arguments.get("lang") or "zh").strip().lower()
+    product_type = _normalize_product_type(arguments.get("product_type"))
 
     # 强制分批：超出上限时只处理前 N 条，并在结果中提示剩余项
     max_items = _MATCH_QUOTATION_BATCH_MAX_ITEMS
@@ -1036,7 +1067,12 @@ def _execute_match_quotation_batch(arguments: dict[str, Any], push_event=None, c
         kw = (str(kw_raw or "")).strip()
         if not kw:
             return {"keywords": kw, "input_index": idx, "status": "skipped", "payload": {}}
-        single_args = {"keywords": kw, "customer_level": customer_level, "lang": lang}
+        single_args = {
+            "keywords": kw,
+            "customer_level": customer_level,
+            "lang": lang,
+            "product_type": product_type,
+        }
         result = _execute_match_quotation(single_args, push_event=None)
         obs_str = result.get("result") or ""
         status = "error" if not result.get("success") else "ok"
@@ -1354,6 +1390,10 @@ def get_inventory_tools_openai_format() -> list[dict]:
                             "type": "string",
                             "description": "同 match_quotation：全英文产品名批量询价时传 'en'。",
                         },
+                        "product_type": {
+                            "type": "string",
+                            "description": "产品类型过滤：可传 '国标' 或 '日标'；非法值会忽略并告警。",
+                        },
                     },
                     "required": ["keywords_list"],
                 },
@@ -1374,6 +1414,10 @@ def get_inventory_tools_openai_format() -> list[dict]:
                         "lang": {
                             "type": "string",
                             "description": "查询语言路径：'en' 表示英文询价，走 Describrition_English CONTAINS 匹配；默认不传（中文路径）。仅当 keywords 全为英文无汉字时传 'en'。",
+                        },
+                        "product_type": {
+                            "type": "string",
+                            "description": "产品类型过滤：可传 '国标' 或 '日标'；非法值会忽略并告警。",
                         },
                     },
                     "required": ["keywords"],

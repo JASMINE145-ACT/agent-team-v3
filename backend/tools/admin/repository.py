@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
+_ALLOWED_PRODUCT_TYPES = {"国标", "日标"}
 
 _DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 _engine: Optional[Engine] = None
@@ -105,40 +106,45 @@ def setup_tables() -> None:
         logger.warning("建表失败: %s", e)
 
 
-def fetch_price_library(q: str = "", page: int = 1, page_size: int = 100) -> dict:
+def fetch_price_library(
+    q: str = "",
+    page: int = 1,
+    page_size: int = 100,
+    product_type: str = "",
+) -> dict:
     """分页查询，返回 {items: [...], total: int}。"""
     engine = _get_engine()
     if engine is None:
         return {"items": [], "total": 0}
     offset = (page - 1) * page_size
     q = (q or "").strip()
+    product_type = (product_type or "").strip()
+    if product_type and product_type not in _ALLOWED_PRODUCT_TYPES:
+        logger.warning("fetch_price_library 忽略非法 product_type: %s", product_type)
+        product_type = ""
     try:
         with engine.connect() as conn:
+            params: dict[str, Any] = {"limit": page_size, "offset": offset}
+            where_parts: list[str] = []
             if q:
-                like = f"%{q}%"
-                total = conn.execute(
-                    text(
-                        "SELECT COUNT(*) FROM price_library WHERE material ILIKE :q OR description ILIKE :q"
-                    ),
-                    {"q": like},
-                ).scalar() or 0
-                rows = conn.execute(
-                    text(
-                        "SELECT id, material, description, price_a, price_b, price_c, price_d "
-                        "FROM price_library WHERE material ILIKE :q OR description ILIKE :q "
-                        "ORDER BY id LIMIT :limit OFFSET :offset"
-                    ),
-                    {"q": like, "limit": page_size, "offset": offset},
-                ).mappings().all()
-            else:
-                total = conn.execute(text("SELECT COUNT(*) FROM price_library")).scalar() or 0
-                rows = conn.execute(
-                    text(
-                        "SELECT id, material, description, price_a, price_b, price_c, price_d "
-                        "FROM price_library ORDER BY id LIMIT :limit OFFSET :offset"
-                    ),
-                    {"limit": page_size, "offset": offset},
-                ).mappings().all()
+                params["q"] = f"%{q}%"
+                where_parts.append("(material ILIKE :q OR description ILIKE :q)")
+            if product_type:
+                params["product_type"] = product_type
+                where_parts.append("product_type = :product_type")
+            where_sql = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
+            total = conn.execute(
+                text(f"SELECT COUNT(*) FROM price_library{where_sql}"),
+                params,
+            ).scalar() or 0
+            rows = conn.execute(
+                text(
+                    "SELECT id, material, description, product_type, price_a, price_b, price_c, price_d "
+                    f"FROM price_library{where_sql} ORDER BY id LIMIT :limit OFFSET :offset"
+                ),
+                params,
+            ).mappings().all()
             return {"items": [dict(r) for r in rows], "total": int(total)}
     except Exception as e:
         logger.warning("fetch_price_library 失败: %s", e)
@@ -158,6 +164,7 @@ def fetch_all_price_library() -> list[dict]:
                     f"{_quote_sql_identifier('Material')} AS material, "
                     f"{_quote_sql_identifier('Describrition')} AS description, "
                     f"{_quote_sql_identifier('Describrition_English')} AS description_english, "
+                    f"{_quote_sql_identifier('Product_Type')} AS product_type, "
                     f"{_quote_sql_identifier('（二级代理）A级别_报单价格')} AS price_a, "
                     f"{_quote_sql_identifier('（一级代理）B级别_报单价格')} AS price_b, "
                     f"{_quote_sql_identifier('（聚万大客户）C级别报单价格')} AS price_c, "
