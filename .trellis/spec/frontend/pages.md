@@ -64,6 +64,13 @@ nav.settings   → config | debug | logs | admin-data
 
 ## 关键页面详解
 
+### 聊天（chat）— PVC 澄清 Quick Send
+
+- **触发条件**：最后一条 assistant 消息包含连续编号列表（至少 3 项）且当前无流式输出。
+- **交互**：在消息下方渲染 ClarifyCard（选项 chip + `其他类型（输入后按 Enter 发送）` 输入框）。
+- **行为链路**：`ui/components/clarify-card.ts` 解析并渲染 → `ui/chat/grouped-render.ts` 注入组件 → `ui/views/chat.ts` 透传 `onQuickSend` → `ui/app-render.ts` 调用 `state.handleSendChat(text)`。
+- **范围说明**：仅前端快捷发送，不改 `ask_clarification` 后端 schema，不新增 `match_quotation_batch` 的 per-item `product_type` 字段。
+
 ### 业务知识（channels）— `wanding_business_knowledge.md`
 
 - **路径**：`data/wanding_business_knowledge.md`（在 Agent Team version3 根目录）

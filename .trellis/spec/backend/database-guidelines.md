@@ -87,6 +87,24 @@ def _get_engine() -> Optional[Engine]:
 **排序字段**: `Product_number_产品编号`（numeric）
 **用途**: 产品名称映射、规格匹配
 
+### 3. business_knowledge
+
+> 业务知识主存（LLM 选型规则），从本地 MD 迁移至此。本地文件 + 内嵌常量为 fallback。
+
+| Column | Type | Nullable | Meaning |
+|--------|------|----------|---------|
+| `id` | SERIAL | NO | Primary key |
+| `key` | TEXT | NO | 逻辑键名，如 `wanding_selector` |
+| `content` | TEXT | NO | 知识内容（IF/THEN 规则等） |
+| `source` | TEXT | YES | 来源：`共同` / `历史报价` / `字段匹配` 等 |
+| `created_at` | TIMESTAMPTZ | YES | 创建时间 |
+| `updated_at` | TIMESTAMPTZ | YES | 更新时间 |
+
+**唯一索引**: `UNIQUE(key)`
+**用途**: LLM 选型推理、业务规则持久化、纠错学习
+
+**读取优先级**: Neon (`business_knowledge`) → 本地文件 → 内嵌常量
+
 ---
 
 ## Identifier Quoting Rules

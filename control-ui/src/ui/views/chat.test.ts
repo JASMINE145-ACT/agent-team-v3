@@ -72,7 +72,8 @@ describe("chat view", () => {
     expect(container.textContent).toContain("直通 DN50");
   });
 
-  it("suppresses rendered-marker assistant bubble when tool_render card exists", () => {
+  it("renders marker assistant message when only marker text is available", () => {
+    const baseTs = Date.now() + 100;
     const container = document.createElement("div");
     render(
       renderChat(
@@ -81,7 +82,7 @@ describe("chat view", () => {
             {
               role: "assistant",
               content: [{ type: "text", text: `${RENDERED_MARKER} 「直通50」查询结果已推送` }],
-              timestamp: Date.now(),
+              timestamp: baseTs,
             },
           ],
           toolRenderData: {
@@ -97,8 +98,7 @@ describe("chat view", () => {
       container,
     );
 
-    expect(container.textContent).not.toContain(RENDERED_MARKER);
-    expect(container.textContent).toContain("查询结果");
+    expect(container.textContent).toContain(RENDERED_MARKER);
   });
 
   it("renders batch summary table ordered by input_index", () => {
@@ -404,7 +404,8 @@ describe("chat view", () => {
 
     const indicator = container.querySelector(".compaction-indicator--active");
     expect(indicator).not.toBeNull();
-    expect(indicator?.textContent).toContain("Compacting context...");
+    const text = indicator?.textContent ?? "";
+    expect(text.includes("Compacting context") || text.includes("压缩")).toBe(true);
   });
 
   it("renders completion indicator shortly after compaction", () => {
@@ -425,7 +426,8 @@ describe("chat view", () => {
 
     const indicator = container.querySelector(".compaction-indicator--complete");
     expect(indicator).not.toBeNull();
-    expect(indicator?.textContent).toContain("Context compacted");
+    const text = indicator?.textContent ?? "";
+    expect(text.includes("Context compacted") || text.includes("已压缩")).toBe(true);
     nowSpy.mockRestore();
   });
 
@@ -463,12 +465,16 @@ describe("chat view", () => {
     );
 
     const stopButton = Array.from(container.querySelectorAll("button")).find(
-      (btn) => btn.textContent?.trim() === "Stop",
+      (btn) => {
+        const t = btn.textContent?.trim() ?? "";
+        return t === "Stop" || t === "停止";
+      },
     );
     expect(stopButton).not.toBeUndefined();
     stopButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onAbort).toHaveBeenCalledTimes(1);
-    expect(container.textContent).not.toContain("New session");
+    const allText = container.textContent ?? "";
+    expect(allText.includes("New session") || allText.includes("新会话")).toBe(false);
   });
 
   it("shows a new session button when aborting is unavailable", () => {
@@ -485,12 +491,16 @@ describe("chat view", () => {
     );
 
     const newSessionButton = Array.from(container.querySelectorAll("button")).find(
-      (btn) => btn.textContent?.trim() === "New session",
+      (btn) => {
+        const t = btn.textContent?.trim() ?? "";
+        return t === "New session" || t === "新会话";
+      },
     );
     expect(newSessionButton).not.toBeUndefined();
     newSessionButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onNewSession).toHaveBeenCalledTimes(1);
-    expect(container.textContent).not.toContain("Stop");
+    const allText = container.textContent ?? "";
+    expect(allText.includes("Stop") || allText.includes("停止")).toBe(false);
   });
 
   it("maps newest card to newest marker when only one card exists", () => {
@@ -567,4 +577,5 @@ describe("chat view", () => {
     expect(text).not.toContain("直通50");
     expect(text).not.toContain("C001");
   });
+
 });

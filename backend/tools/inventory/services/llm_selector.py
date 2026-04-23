@@ -154,11 +154,12 @@ def _load_business_knowledge() -> str:
         try:
             content = _kb_singleton.get("wanding_selector")
             if content and content.strip():
-                logger.debug("business knowledge loaded from Neon")
+                logger.info("[KNOWLEDGE_SOURCE] Neon — key: wanding_selector, length: %d", len(content))
                 return content.strip()
             logger.debug("business knowledge: Neon returned empty/None, falling back to file")
         except Exception as e:
             logger.warning("business knowledge: Neon get failed (%s), falling back to file", e)
+            logger.info("[KNOWLEDGE_SOURCE] Neon failed, falling back to file — error: %s", e)
 
     # --- Tier 2: local file (with mtime cache) ---
     try:
@@ -176,12 +177,13 @@ def _load_business_knowledge() -> str:
             ):
                 cached = _business_knowledge_cache.get("content", "")
                 if cached:
+                    logger.info("[KNOWLEDGE_SOURCE] Cache — path: %s, length: %d (cached)", path_str, len(cached))
                     return cached
 
             content = p.read_text(encoding="utf-8").strip()
             if content:
                 _business_knowledge_cache = {"path": path_str, "mtime": mtime, "content": content}
-                logger.debug("business knowledge loaded from file: %s", path_str)
+                logger.info("[KNOWLEDGE_SOURCE] File — path: %s, length: %d", path_str, len(content))
                 return content
 
         # File doesn't exist — bootstrap from embedded
@@ -195,7 +197,7 @@ def _load_business_knowledge() -> str:
         logger.debug("load business knowledge from file failed, use embedded: %s", e)
 
     # --- Tier 3: embedded default ---
-    logger.debug("business knowledge loaded from embedded default")
+    logger.info("[KNOWLEDGE_SOURCE] Embedded default")
     return _BUSINESS_KNOWLEDGE
 
 

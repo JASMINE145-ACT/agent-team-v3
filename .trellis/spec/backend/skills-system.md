@@ -43,6 +43,26 @@ Switch between them via `Config.USE_DECISION_RULE_SKILLS=true` (in `.env`).
 
 ---
 
+## `ask_clarification` Tool Behavior
+
+### Backend handler
+`backend/tools/quotation/handler.py` → `_make_ask_clarification_handler()`  
+Returns: `{"needs_clarification": true, "questions": [...], "reasoning": "..."}`
+
+### Frontend rendering
+`questions` array is rendered as **plain text bubble** in current implementation. No structured interactive options.
+
+### Impact on ambiguous PVC query plan
+6 option items must be embedded as plain text in `questions[0]`:
+```
+questions: [
+    "PVC 产品有以下类型，请问您要的是哪种？\n1. PVC-U 排水管（建筑排水用，管身直管，含 D排水系列）\n2. PVC-U 排水管件（排水用弯头/三通/直接等管件）\n3. PVC-U 给水管（AW 给水系列，管身/管件均可）\n4. PVC 电线管/线管（电气安装用，B管/A管）\n5. PVC 阀门（球阀等）\n6. PVC 胶水/辅材（清扫口等）\n请回复序号或类型名称，或说明其他类型。"
+]
+```
+Users reply manually by typing. To support clickable structured options, frontend ClarifyCard component + handler return format change needed (future work).
+
+---
+
 ## How Skill Prompts Are Injected
 
 ```
@@ -119,6 +139,21 @@ User: (gives multiple codes or whole sheet)
 User: '3" AW pipe price'
 → match_quotation(keywords='3" AW pipe', lang="en")
 ```
+
+### PVC Product-Type Ambiguity Clarification
+```
+User: "pvc价格" / "pvc管" / "联塑 pvc" (无品类词)
+→ ask_clarification(questions=["PVC 产品有以下类型...\n1. 排水管\n2. 排水管件\n3. 给水管\n4. 电线管/线管\n5. 阀门\n6. 胶水/辅材"], reasoning="...")
+→ STOP — DO NOT call match_quotation
+
+User replies "1" or "排水管"
+→ match_quotation(keywords="pvc排水管")
+```
+
+触发条件：query 含 `pvc`/`pvc管`/`联塑 pvc` 等**且无品类限定词**（排水/给水/线管/管件/阀门/胶水/AW/conduit）。
+不触发：`pvc排水管`、`pvc给水管 dn50`（已含品类词）。
+
+**规则位置**：`SKILL_INVENTORY_PRICE_RULES`（非 `SKILL_CLARIFY_RULES`），避免与「库存/价格意图歧义」规则耦合。
 
 ---
 
@@ -260,3 +295,4 @@ keywords（全英文）
 | Calling `match_quotation` for each item in a batch | Duplicate cards, selection drift |
 | Calling `get_inventory_by_code` after price query without 库存 intent | Unnecessary tool calls |
 | 全英文字符串传 `lang` 未设置 → 走中文路径 | token 打分无法匹配英文描述，两路皆空 → unmatched |
+| 用户说「pvc」未加品类 → 直接 match_quotation | 误匹配排水管/给水管，需先 ask_clarification |

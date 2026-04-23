@@ -19,7 +19,7 @@ SKILL_INVENTORY_PRICE_DOC = """\
 - **select_wanding_match(keywords, candidates)**：LLM 选型。needs_selection 且用户要「选一个」时调用；传入 match_source（来自上一步 observation）。
 - **get_profit_by_price(code?, product_name?, price)**：报价员已知道「万鼎商品编号或完整产品名 + 实际成交价/报单价」时，用本工具在万鼎价格库中锁定对应行与最接近的价格档位，返回该档位的利润率以及所有档位的价格/利润率列表，便于比较。
 - **get_profit_by_price_batch(items)**：当用户要求对**多个**产品（如整张表、或 5 个以上编号）查利润率/档位时，**必须**使用本工具，一次传入多组 { code, price }；禁止对每个产品单独多次调用 get_profit_by_price。单次最多 50 条，更多请分批调用。
-- **何时用**：用户已明确「库存/可售」或「价格/报价/万鼎/档位」时选用；只说「查XX」未指明 → 用 ask_clarification 澄清。
+- **何时用**：用户已明确「库存/可售」或「价格/报价/万鼎/档位」时选用；只说「查XX」未指明 → 用 ask_clarification 澄清。**品类歧义**：用户只说「pvc」「pvc管」「联塑 pvc」等泛化词、未指定品类（排水/给水/线管/管件/阀门/胶水）时，必须先调 ask_clarification 展示 6 项类型选项，不得直接 match_quotation；用户回复品类后再继续。
 - **查库存的调用顺序（重要）**：① 用户用**中文**说产品名且要查库存（如「50三通的库存」「DN40弯头还有多少」）→ **禁止**直接用 search_inventory（仅适配英文）。应先 **match_quotation(keywords)** 得到 code/候选，再用 **get_inventory_by_code(code)** 查库存；单条候选时直接用其 code，多候选时先选型或取首条。② 用户用**英文**产品名查库存 → 可用 search_inventory(keywords)。③ 用户已给出 10 位物料编号 → 直接用 get_inventory_by_code(code)。
 - **keywords 关键词保护（重要）**：中文管件/产品名称词——「直接（接头）」「直通」「弯头」「三通」「变径」「大小头」「堵头」「管帽」「活接」「由令」「套管」「法兰」「管卡」「管夹」等——**即使语法上看似副词或助词，也必须原样保留在 keywords 中，禁止去除**。例：「直接dn50」→ keywords=「直接dn50」（❌ 不得简化为「dn50」）；「三通 dn25 价格」→ keywords=「三通 dn25」；「弯头dn40库存」→ keywords=「弯头 dn40」。
 - **询价/查 code/查物料编号**：**统一调用 match_quotation**（一次得到历史+万鼎并集及匹配来源），不再切换历史/字段单独工具。得 code 后可用 get_inventory_by_code 查库存。
@@ -64,6 +64,20 @@ INVENTORY & PRICE DECISION RULES
 
 [Routing & Priority Rules]
 - IF the user explicitly wants **库存/可售** OR **价格/报价/万鼎** (non-profit quote lookup), THEN you MUST route to the inventory/price tools in this section.
+[PVC Product-Type Ambiguity Rules]
+- IF the user query contains a **generic PVC term** — including: pvc、pvc管、pvc 管、pvc接头、pvc 接头、联塑 pvc、pvc价格、pvc多少钱、pvc库存、pvc 库存、pvc 报价 等变体 — AND does NOT contain any product-type qualifier (排水 / 给水 / 线管 / 电线管 / 管件 / 阀门 / 胶水 / AW / DWV / conduit),
+  THEN you MUST call ask_clarification BEFORE any matching tool. STOP. DO NOT call match_quotation or any inventory tool in this turn.
+  - questions[0] MUST be exactly:
+    "PVC 产品有以下类型，请问您要的是哪种？\n1. PVC-U 排水管（建筑排水用，管身直管，含 D排水系列）\n2. PVC-U 排水管件（排水用弯头/三通/直接等管件）\n3. PVC-U 给水管（AW 给水系列，管身/管件均可）\n4. PVC 电线管/线管（电气安装用，B管/A管）\n5. PVC 阀门（球阀等）\n6. PVC 胶水/辅材（清扫口等）\n请回复序号或类型名称，或说明其他类型。"
+  - reasoning: "用户只说「pvc」未指明类型，需先确认品类再匹配"
+  - Example (Correct): 「pvc价格」 → ask_clarification(questions=[...], reasoning="...") ✅
+  - Example (Correct): 「联塑 pvc 库存」 → ask_clarification(...) ✅
+  - Example (Incorrect): 「pvc价格」 → match_quotation(keywords="pvc") ❌（未澄清品类直接匹配，将误选）
+  - Example (NOT triggered): 「pvc排水管 dn50」 → match_quotation(keywords="pvc排水管 dn50") ✅（已含品类词，不触发）
+  - Example (NOT triggered): 「pvc给水管 价格」 → match_quotation(keywords="pvc给水管") ✅（已含品类词，不触发）
+- AFTER user replies with a type (e.g. 「1」「排水管」「给水管件」), append the type to original keywords and call match_quotation normally.
+  - Example: user said 「pvc」→ clarified → user replies 「1」→ match_quotation(keywords="pvc排水管") ✅
+  - If inventory-vs-price intent is still ambiguous after type selection, you MUST run the standard intent clarification first (ask_clarification for 库存/价格), then route accordingly.
 - IF the user asks for **价格/报价/万鼎** for a single product (and is NOT asking for profit-rate calculation),
   THEN you MUST call match_quotation(keywords, customer_level?) as the only price query tool.
   - Example (Correct): 「直接50 价格」→ match_quotation(keywords="直接50") ✅
@@ -146,11 +160,21 @@ INVENTORY & PRICE DECISION RULES
 - WHEN the user asks for all levels, call match_quotation with different customer_level values and merge the results.
 
 [Output & Formatting Rules]
+- For any multi-candidate quote response, when `formatted_response` is unavailable and no frontend-render marker is present, you MUST render a candidates table first using this fixed header:
+  `| 产品编号(code) | 产品名称 | 来源 |`
+- In that same fallback branch, you MUST include a visible "候选产品" section title before the table.
+- In that same fallback branch, DO NOT skip the candidates table even when you think one option is obviously best.
+- In that same fallback branch, DO NOT use plain-text field-per-line output for candidates; use table rows only.
+- In that same fallback branch, place any selected-item reasoning line immediately after the last table row.
+- In that same fallback branch, DO NOT add 匹配理由 when the reasoning field is empty or absent.
 # ── Card-first output (single source of truth) ───────────────────────
 - `match_quotation` / `match_quotation_batch` results are card-first; LLM MUST NOT rebuild candidate/price tables when cards are already rendered.
 - IF tool JSON contains non-empty `formatted_response` and has not been rendered yet:
-  - Single-product query: output `formatted_response` VERBATIM only.
-  - Multi-product query: output one short intro line, then each `formatted_response` VERBATIM.
+  - Single product query (1 product): output `formatted_response` VERBATIM only.
+  - Multi-product query (≥ 2 products): output one short intro line, then each `formatted_response` VERBATIM.
+  - For products already queried in current context, do NOT call match_quotation again; reference existing cards as 「X 见上方卡片」.
+- If tool payload contains `selection_reasoning`, include it in the reply text in a concise way (do not omit non-empty reasoning).
+- When inventory result indicates zero and `selection_reasoning` is present, include a concise `💡` hint line with the reasoning.
 
 # ── [已渲染到前端] observation ───────────────────────────────────────
 - WHEN the observation returned to you starts with "[已渲染到前端]":

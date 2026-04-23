@@ -803,6 +803,7 @@ export function renderApp(state: AppViewState) {
                 onComposeDragLeave: () => state.setChatComposeDragOver(false),
                 onComposeDrop: (file) => state.handleComposeDrop(file),
                 onSend: () => state.handleSendChat(),
+                onQuickSend: (text: string) => void state.handleSendChat(text),
                 canAbort: Boolean(state.chatRunId),
                 onAbort: () => void state.handleAbortChat(),
                 onQueueRemove: (id) => state.removeQueuedMessage(id),

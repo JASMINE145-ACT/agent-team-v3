@@ -1,0 +1,67 @@
+/* ClarifyCard - PVC type clarification chips */
+
+.clarify-card {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.clarify-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clarify-chip {
+  padding: 5px 12px;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 16px;
+  background: var(--bg, #ffffff);
+  color: var(--text, #111827);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+  text-align: left;
+  white-space: normal;
+  word-break: break-word;
+  max-width: 320px;
+}
+
+.clarify-chip:hover {
+  background: var(--bg-hover, #f3f4f6);
+  border-color: var(--border-strong, #9ca3af);
+}
+
+.clarify-chip:active {
+  background: var(--bg-active, #e5e7eb);
+}
+
+.clarify-card__other {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.clarify-other-input {
+  flex: 1;
+  max-width: 320px;
+  padding: 5px 10px;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  background: var(--bg, #ffffff);
+  color: var(--text, #111827);
+  outline: none;
+}
+
+.clarify-other-input:focus {
+  border-color: var(--accent, #6366f1);
+  box-shadow: 0 0 0 2px var(--accent-ring, rgba(99, 102, 241, 0.2));
+}
+
+.clarify-other-input::placeholder {
+  color: var(--text-muted, #9ca3af);
+}

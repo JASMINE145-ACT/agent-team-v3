@@ -1,6 +1,7 @@
 import { html, nothing } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import type { AssistantIdentity } from "../assistant-identity.ts";
+import { parseClarifyOptions, renderClarifyCard } from "../components/clarify-card.ts";
 import { toSanitizedMarkdownHtml } from "../markdown.ts";
 import { detectTextDirection } from "../text-direction.ts";
 import type { MessageGroup } from "../types/chat-types.ts";
@@ -144,6 +145,8 @@ export function renderMessageGroup(
     showReasoning: boolean;
     assistantName?: string;
     assistantAvatar?: string | null;
+    onQuickSend?: (text: string) => void;
+    isLastGroup?: boolean;
   },
 ) {
   const normalizedRole = normalizeRoleForGrouping(group.role);
@@ -178,6 +181,18 @@ export function renderMessageGroup(
             opts.onOpenSidebar,
           ),
         )}
+        ${
+          opts.isLastGroup && opts.onQuickSend && group.role === "assistant" && !group.isStreaming
+            ? (() => {
+                const lastMsg = group.messages[group.messages.length - 1];
+                const text = lastMsg ? (extractTextCached(lastMsg.message) ?? "") : "";
+                const options = parseClarifyOptions(text);
+                return options.length > 0
+                  ? renderClarifyCard(options, opts.onQuickSend as (text: string) => void)
+                  : nothing;
+              })()
+            : nothing
+        }
         <div class="chat-group-footer">
           <span class="chat-sender-name">${who}</span>
           <span class="chat-group-timestamp">${timestamp}</span>

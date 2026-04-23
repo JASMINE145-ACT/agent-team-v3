@@ -1260,6 +1260,40 @@ Changed files (0 total):
 
 - None - task complete
 
+## Session 53: 2026-04-23 — PN/MPa 字段匹配修复复核（正则边界 + 去重精度）
+
+**Date**: 2026-04-23
+**Task**: Trellis 字段匹配 PN/MPa 双向扩展检测与修复
+
+### Summary
+
+- 对 `wanding_fuzzy_matcher` 的 PN/MPa 双向扩展做了独立复核，发现并修复两处会影响召回稳定性的实现问题：
+  - `PN16热水管` 这类“PN 数值后直接接中文”场景漏扩展；
+  - `PN3 + 0.3MPa` 这类浮点表示会触发重复扩展。
+- 修复后已按“Code-review PASS -> Test PASS”完成验证闭环。
+
+### Main Changes
+
+- `Agent Team version3/backend/tools/inventory/services/wanding_fuzzy_matcher.py`
+  - `_PN_RE` 由尾部 `\b` 改为负前瞻约束，支持 `PN16热水管` 命中，仍拦截 `PN16A`。
+  - `_apply_pressure_expansion()` 的 `seen_pn/seen_mpa` 从 `float` 改为格式化字符串键，消除浮点精度导致的重复追加。
+  - 在扩展追加后即时写回 `seen_*` 集合，避免同轮重复。
+- `Agent Team version3/tests/test_pressure_expansion.py`
+  - 新增 `PN16热水管` 正向回归。
+  - 新增 `PN16A` 不应命中的边界回归。
+  - 新增 `PN3 0.3MPa` 去重精度回归。
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：两处问题已修复；低风险提示为未来若出现 >2 位小数压力值可再评估格式化策略。
+- Test-agent / local tests: **PASS**
+  - `python -m pytest tests/test_pressure_expansion.py` -> `24 passed, 0 failed`。
+
+### Status
+
+[OK] **Completed**
+
 
 ## Session 52: 2026-04-21 — Skill 规范文档（合格标准 + 注意事项）
 

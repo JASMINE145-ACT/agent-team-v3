@@ -272,6 +272,83 @@ def _apply_knowledge_expansion(keywords: str) -> str:
         return keywords.strip()
     return (keywords.strip() + " " + " ".join(added)).strip()
 
+
+# PN ↔ MPa 双向扩展
+# PN 是公称压力等级：PN10 = 1.0MPa, PN16 = 1.6MPa, PN12.5 = 1.25MPa（数字 × 0.1 ≈ MPa）
+# PN 前需要词边界\b；MPa 前数字后不需要严格\b（因为数字前可能是空格/汉字/标点）
+_PN_RE = re.compile(r'\bPN\s*(\d+(?:\.\d+)?)(?![\da-zA-Z_])', re.IGNORECASE)
+# 数字+MPa，尾部用负前瞻排除纯 ASCII 字母数字后缀（如 MPaA、MPa1），汉字/空格/结尾均放行
+_MPA_RE = re.compile(r'(\d+(?:\.\d+)?)\s*MPA(?![\da-zA-Z])', re.IGNORECASE)
+
+
+def _format_pressure_value(value: float) -> str:
+    """格式化压力值，去除浮点尾巴（如 1.25 而非 1.2500000001）"""
+    formatted = f"{value:.2f}".rstrip('0').rstrip('.')
+    return formatted
+
+
+def _apply_pressure_expansion(keywords: str) -> str:
+    """
+    双向扩展 PN ↔ MPa，并做数值格式化。
+    - PN -> MPa：PN16 -> 1.6MPa
+    - MPa -> PN：1.25MPa -> PN12.5
+    - 格式化：1.60MPa / 1.6 MPa / 1.6mpa -> 统一 1.6MPa
+    - 去重：已扩展过的等价形式不重复追加
+    """
+    if not (keywords or "").strip():
+        return ""
+
+    # 预扫描已存在的 PN/MPa 数值，避免重复追加
+    seen_pn: set[str] = set()
+    seen_mpa: set[str] = set()
+
+    def _scan_pn(m: re.Match) -> str:
+        pn_val = float(m.group(1))
+        seen_pn.add(_format_pressure_value(pn_val))
+        return m.group(0)
+
+    def _scan_mpa(m: re.Match) -> str:
+        mpa_val = float(m.group(1))
+        seen_mpa.add(_format_pressure_value(mpa_val))
+        return m.group(0)
+
+    _PN_RE.sub(_scan_pn, keywords)
+    _MPA_RE.sub(_scan_mpa, keywords)
+
+    additions: list[str] = []
+
+    # PN -> MPa：仅当原词中不存在等价 MPa 值
+    def _sub_pn_to_mpa(m: re.Match) -> str:
+        pn_val = float(m.group(1))
+        mpa_val = pn_val * 0.1
+        mpa_formatted = _format_pressure_value(mpa_val)
+        if mpa_formatted in seen_mpa:
+            return m.group(0)
+        seen_mpa.add(mpa_formatted)
+        additions.append(f"{mpa_formatted}MPa")
+        return m.group(0)
+
+    # MPa -> PN：仅当原词中不存在等价 PN 值
+    def _sub_mpa_to_pn(m: re.Match) -> str:
+        mpa_val = float(m.group(1))
+        pn_val = mpa_val * 10
+        pn_formatted = _format_pressure_value(pn_val)
+        if pn_formatted in seen_pn:
+            return m.group(0)
+        seen_pn.add(pn_formatted)
+        additions.append(f"PN{pn_formatted}")
+        return m.group(0)
+
+    result = keywords
+    result = _PN_RE.sub(_sub_pn_to_mpa, result)
+    result = _MPA_RE.sub(_sub_mpa_to_pn, result)
+
+    if additions:
+        result = result + " " + " ".join(additions)
+
+    return result
+
+
 MM_TO_INCH = {
     "16": '1/2"', "20": '3/4"', "25": '1"', "32": '1-1/4"', "40": '1-1/2"',
     "50": '2"', "65": '2-1/2"', "75": '3"', "100": '4"', "125": '5"',
@@ -1052,6 +1129,7 @@ def match_fuzzy(
     """
     keywords = (keywords or "").strip()
     keywords = _apply_knowledge_expansion(keywords)
+    keywords = _apply_pressure_expansion(keywords)
     keywords = _normalize_keyword_terms(keywords)
     keywords = _strip_query_intent_terms(keywords)
     if not keywords:
@@ -1103,6 +1181,7 @@ def match_fuzzy_candidates(
     """
     keywords = (keywords or "").strip()
     keywords = _apply_knowledge_expansion(keywords)
+    keywords = _apply_pressure_expansion(keywords)
     keywords = _normalize_keyword_terms(keywords)
     keywords = _strip_query_intent_terms(keywords)
     if not keywords:

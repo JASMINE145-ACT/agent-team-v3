@@ -90,6 +90,7 @@ export type ChatProps = {
   onToggleFocusMode: () => void;
   onDraftChange: (next: string) => void;
   onSend: () => void;
+  onQuickSend?: (text: string) => void;
   onAbort?: () => void;
   onQueueRemove: (id: string) => void;
   onNewSession: () => void;
@@ -369,6 +370,11 @@ export function renderChat(props: ChatProps) {
 
   const splitRatio = props.splitRatio ?? 0.6;
   const sidebarOpen = Boolean(props.sidebarOpen && props.onCloseSidebar);
+  const chatItems = buildChatItems(props);
+  const assistantGroups = chatItems.filter(
+    (x): x is MessageGroup => x.kind === "group" && x.role === "assistant",
+  );
+  const lastAssistantGroup = assistantGroups.length > 0 ? assistantGroups[assistantGroups.length - 1] : null;
   const thread = html`
     <div
       class="chat-thread"
@@ -384,7 +390,7 @@ export function renderChat(props: ChatProps) {
           : nothing
       }
       ${repeat(
-        buildChatItems(props),
+        chatItems,
         (item) => item.key,
         (item) => {
           if (item.kind === "divider") {
@@ -431,11 +437,18 @@ export function renderChat(props: ChatProps) {
           }
 
           if (item.kind === "group") {
+            const isLastAssistantGroup =
+              item.role === "assistant" &&
+              lastAssistantGroup != null &&
+              lastAssistantGroup === item &&
+              props.stream === null;
             return renderMessageGroup(item, {
               onOpenSidebar: props.onOpenSidebar,
               showReasoning,
               assistantName: props.assistantName,
               assistantAvatar: assistantIdentity.avatar,
+              onQuickSend: props.onQuickSend,
+              isLastGroup: isLastAssistantGroup,
             });
           }
 
