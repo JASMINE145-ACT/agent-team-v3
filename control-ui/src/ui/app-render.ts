@@ -694,6 +694,7 @@ export function renderApp(state: AppViewState) {
                 },
                 onSelectRecord: (recordId) => {
                   stopAnalysisPoller();
+                  state.reportsSelectedDailyDate = null;
                   void loadReportDetail(state, recordId);
                 },
                 onDetailTabChange: (tab) => {
@@ -701,6 +702,10 @@ export function renderApp(state: AppViewState) {
                 },
                 onReanalyze: (recordId) => {
                   void reanalyzeRecord(state, recordId);
+                },
+                selectedDailyDate: state.reportsSelectedDailyDate ?? null,
+                onDailyDateClick: (date) => {
+                  state.reportsSelectedDailyDate = date;
                 },
                 onEditTask: (task) => {
                   state.reportsEditingTaskId = task.task_key;

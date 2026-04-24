@@ -75,6 +75,18 @@ export class ReportChart extends LitElement {
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          onClick: (_evt, elements) => {
+            if (elements.length === 0) return;
+            const idx = elements[0].index;
+            const label = (this.data as DailyStat[])[idx]?.date ?? "";
+            this.dispatchEvent(
+              new CustomEvent("chart-bar-click", {
+                detail: { date: label },
+                bubbles: true,
+                composed: true,
+              }),
+            );
+          },
           plugins: {
             legend: { display: false },
             tooltip: {

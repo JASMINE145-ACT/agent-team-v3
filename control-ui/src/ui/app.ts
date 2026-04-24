@@ -445,6 +445,7 @@ export class OpenClawApp extends LitElement {
   @state() selectedRecordId: number | null = null;
   @state() reportsCopyJustDone = false;
   @state() reportsDetailTab: "data" | "analysis" = "data";
+  @state() reportsSelectedDailyDate: string | null = null;
 
   @state() debugLoading = false;
   @state() debugStatus: StatusSummary | null = null;

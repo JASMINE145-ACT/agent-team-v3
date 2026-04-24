@@ -1,13 +1,13 @@
-"""NeonBackend — SessionBackend implementation using Neon PostgreSQL (psycopg2)."""
+"""NeonBackend — SessionBackend implementation using Neon PostgreSQL (SQLAlchemy QueuePool)."""
 from __future__ import annotations
 
 import json
 import logging
 from typing import Any, Dict, List, Optional
 
-import psycopg2
-import psycopg2.pool
-from psycopg2.extras import Json
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.pool import QueuePool
 
 from backend.agent.session import Session, Turn
 from backend.agent.session_backend import SessionMeta
@@ -56,46 +56,64 @@ CREATE TABLE IF NOT EXISTS turns (
 ]
 
 
+_DATABASE_URL: str = ""
+_engine: Optional[Engine] = None
+
+
+def _get_engine(database_url: str) -> Optional[Engine]:
+    global _engine
+    if not database_url:
+        return None
+    if _engine is not None:
+        return _engine
+    try:
+        _engine = create_engine(
+            database_url,
+            poolclass=QueuePool,
+            pool_size=5,
+            max_overflow=0,
+            pool_recycle=300,  # 5分钟回收，低于 Neon 5min idle 断连
+            pool_pre_ping=True,  # checkout 前验证连接是否活着
+            connect_args={"sslmode": "require"},
+        )
+    except Exception as e:
+        logger.warning("NeonBackend engine 初始化失败: %s", e)
+        _engine = None
+    return _engine
+
+
 class NeonBackend:
     def __init__(self, database_url: str) -> None:
-        self._pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=1,
-            maxconn=5,
-            dsn=database_url,
-        )
+        self._engine = _get_engine(database_url)
         self._init_schema()
 
     def _init_schema(self) -> None:
-        conn = self._pool.getconn()
-        try:
-            with conn.cursor() as cur:
-                for stmt in _DDL_STATEMENTS:
-                    cur.execute(stmt)
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            logger.error("NeonBackend schema init 失败: %s", e)
-            raise
-        finally:
-            self._pool.putconn(conn)
+        if self._engine is None:
+            return
+        with self._engine.begin() as conn:
+            for stmt in _DDL_STATEMENTS:
+                conn.execute(text(stmt))
 
     def load_turns(self, session_id: str, limit: int) -> List[Turn]:
-        conn = self._pool.getconn()
+        if self._engine is None:
+            return []
         try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT query, agent, answer, ts, from_user, thinking, extra
-                    FROM (
+            with self._engine.connect() as conn:
+                cur = conn.execute(
+                    text(
+                        """
                         SELECT query, agent, answer, ts, from_user, thinking, extra
-                        FROM turns
-                        WHERE session_id = %s
-                        ORDER BY ts DESC
-                        LIMIT %s
-                    ) sub
-                    ORDER BY ts ASC
-                    """,
-                    (session_id, limit),
+                        FROM (
+                            SELECT query, agent, answer, ts, from_user, thinking, extra
+                            FROM turns
+                            WHERE session_id = :sid
+                            ORDER BY ts DESC
+                            LIMIT :lim
+                        ) sub
+                        ORDER BY ts ASC
+                        """
+                    ),
+                    {"sid": session_id, "lim": limit},
                 )
                 rows = cur.fetchall()
             out: List[Turn] = []
@@ -123,136 +141,122 @@ class NeonBackend:
         except Exception as e:
             logger.warning("NeonBackend load_turns 失败 %s: %s", session_id, e)
             return []
-        finally:
-            self._pool.putconn(conn)
 
     def save_turn(self, session_id: str, turn: Turn, from_user: Optional[str] = None) -> None:
+        if self._engine is None:
+            return
         effective_from = from_user or getattr(turn, "from_user", None)
-        conn = self._pool.getconn()
         try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO sessions (session_id, updated_at)
-                    VALUES (%s, now())
-                    ON CONFLICT (session_id) DO UPDATE SET updated_at = now()
-                    """,
-                    (session_id,),
-                )
+            with self._engine.begin() as conn:
                 extra_db = turn.extra if turn.extra is not None else None
-                cur.execute(
-                    """
-                    INSERT INTO turns (session_id, from_user, query, agent, answer, ts, thinking, extra)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        session_id,
-                        effective_from,
-                        turn.query[:2000],
-                        turn.agent or "",
-                        turn.answer,
-                        turn.ts,
-                        turn.thinking,
-                        Json(extra_db) if extra_db is not None else None,
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO sessions (session_id, updated_at)
+                        VALUES (:sid, now())
+                        ON CONFLICT (session_id) DO UPDATE SET updated_at = now()
+                        """
                     ),
+                    {"sid": session_id},
                 )
-            conn.commit()
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO turns (session_id, from_user, query, agent, answer, ts, thinking, extra)
+                        VALUES (:sid, :fu, :q, :ag, :ans, :ts, :th, :extra)
+                        """
+                    ),
+                    {
+                        "sid": session_id,
+                        "fu": effective_from,
+                        "q": turn.query[:2000],
+                        "ag": turn.agent or "",
+                        "ans": turn.answer,
+                        "ts": turn.ts,
+                        "th": turn.thinking,
+                        "extra": json.dumps(extra_db) if extra_db is not None else None,
+                    },
+                )
         except Exception as e:
-            conn.rollback()
             logger.warning("NeonBackend save_turn 失败 %s: %s", session_id, e)
-        finally:
-            self._pool.putconn(conn)
 
     def list_sessions(self) -> List[SessionMeta]:
-        conn = self._pool.getconn()
+        if self._engine is None:
+            return []
         try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT session_id, label, EXTRACT(EPOCH FROM updated_at) FROM sessions ORDER BY updated_at DESC"
-                )
-                rows = cur.fetchall()
+            with self._engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT session_id, label, EXTRACT(EPOCH FROM updated_at) "
+                        "FROM sessions ORDER BY updated_at DESC"
+                    )
+                ).fetchall()
             return [SessionMeta(session_id=r[0], label=r[1], updated_at=float(r[2])) for r in rows]
         except Exception as e:
             logger.warning("NeonBackend list_sessions 失败: %s", e)
             return []
-        finally:
-            self._pool.putconn(conn)
 
     def delete_session(self, session_id: str) -> None:
-        conn = self._pool.getconn()
+        if self._engine is None:
+            return
         try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
-            conn.commit()
+            with self._engine.begin() as conn:
+                conn.execute(text("DELETE FROM sessions WHERE session_id = :sid"), {"sid": session_id})
         except Exception as e:
-            conn.rollback()
             logger.warning("NeonBackend delete_session 失败 %s: %s", session_id, e)
-        finally:
-            self._pool.putconn(conn)
 
     def ensure_session(self, session_id: str, label: Optional[str] = None) -> None:
-        conn = self._pool.getconn()
+        if self._engine is None:
+            return
         try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO sessions (session_id, label)
-                    VALUES (%s, %s)
-                    ON CONFLICT (session_id) DO NOTHING
-                    """,
-                    (session_id, label),
+            with self._engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO sessions (session_id, label) VALUES (:sid, :lbl) "
+                        "ON CONFLICT (session_id) DO NOTHING"
+                    ),
+                    {"sid": session_id, "lbl": label},
                 )
-            conn.commit()
         except Exception as e:
-            conn.rollback()
             logger.warning("NeonBackend ensure_session 失败 %s: %s", session_id, e)
-        finally:
-            self._pool.putconn(conn)
 
     def clear_turns(self, session_id: str) -> None:
-        conn = self._pool.getconn()
+        if self._engine is None:
+            return
         try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM turns WHERE session_id = %s", (session_id,))
-                cur.execute(
-                    "UPDATE sessions SET updated_at = now() WHERE session_id = %s",
-                    (session_id,),
+            with self._engine.begin() as conn:
+                conn.execute(text("DELETE FROM turns WHERE session_id = :sid"), {"sid": session_id})
+                conn.execute(
+                    text("UPDATE sessions SET updated_at = now() WHERE session_id = :sid"),
+                    {"sid": session_id},
                 )
-            conn.commit()
         except Exception as e:
-            conn.rollback()
             logger.warning("NeonBackend clear_turns 失败 %s: %s", session_id, e)
-        finally:
-            self._pool.putconn(conn)
 
     def set_label(self, session_id: str, label: str) -> None:
-        conn = self._pool.getconn()
+        if self._engine is None:
+            return
         try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO sessions (session_id, label)
-                    VALUES (%s, %s)
-                    ON CONFLICT (session_id) DO UPDATE SET label = EXCLUDED.label
-                    """,
-                    (session_id, label[:80]),
+            with self._engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO sessions (session_id, label) VALUES (:sid, :lbl) "
+                        "ON CONFLICT (session_id) DO UPDATE SET label = EXCLUDED.label"
+                    ),
+                    {"sid": session_id, "lbl": label[:80]},
                 )
-            conn.commit()
         except Exception as e:
-            conn.rollback()
             logger.warning("NeonBackend set_label 失败 %s: %s", session_id, e)
-        finally:
-            self._pool.putconn(conn)
 
     def read_session_sidecar(self, session_id: str) -> Dict[str, Any]:
-        conn = self._pool.getconn()
+        if self._engine is None:
+            return {}
         try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT session_aux FROM sessions WHERE session_id = %s",
-                    (session_id,),
-                )
-                row = cur.fetchone()
+            with self._engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT session_aux FROM sessions WHERE session_id = :sid"),
+                    {"sid": session_id},
+                ).fetchone()
             if not row or row[0] is None:
                 return {}
             val = row[0]
@@ -266,29 +270,23 @@ class NeonBackend:
         except Exception as e:
             logger.warning("NeonBackend read_session_sidecar 失败 %s: %s", session_id, e)
             return {}
-        finally:
-            self._pool.putconn(conn)
 
     def persist_session_sidecar(self, session_id: str, session: Session) -> None:
+        if self._engine is None:
+            return
         payload: Dict[str, Any] = {}
         for k in _AUX_JSON_KEYS:
             payload[k] = getattr(session, k, None)
-        conn = self._pool.getconn()
         try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO sessions (session_id, session_aux, updated_at)
-                    VALUES (%s, %s::jsonb, now())
-                    ON CONFLICT (session_id) DO UPDATE SET
-                        session_aux = EXCLUDED.session_aux,
-                        updated_at = now()
-                    """,
-                    (session_id, json.dumps(payload, ensure_ascii=False)),
+            with self._engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO sessions (session_id, session_aux, updated_at) "
+                        "VALUES (:sid, :aux::jsonb, now()) "
+                        "ON CONFLICT (session_id) DO UPDATE SET "
+                        "session_aux = EXCLUDED.session_aux, updated_at = now()"
+                    ),
+                    {"sid": session_id, "aux": json.dumps(payload, ensure_ascii=False)},
                 )
-            conn.commit()
         except Exception as e:
-            conn.rollback()
             logger.warning("NeonBackend persist_session_sidecar 失败 %s: %s", session_id, e)
-        finally:
-            self._pool.putconn(conn)

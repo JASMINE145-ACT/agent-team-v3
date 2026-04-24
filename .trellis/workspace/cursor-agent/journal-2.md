@@ -31,6 +31,155 @@
 
 [OK] **Completed**
 
+## Session 57: 2026-04-24 — Ralph Iteration 6（最终收口：前端高亮样式契约补测 + 扩展回归）
+
+**Date**: 2026-04-24  
+**Task**: `2026-04-24-reports-wow-chart-predict.md` 最后一轮查缺补漏（max-turn=6）
+
+### Summary
+
+- 新增前端测试覆盖“已选日期行高亮”视觉契约，确保图表联动状态不仅触发回调，也能体现在表格行样式上。
+- 执行一组扩展回归（前端 vitest + tsc、后端 reports 相关 pytest 套件）确认三项需求在当前代码库中稳定通过。
+
+### Main Changes
+
+- `control-ui/src/ui/views/reports-tab.test.ts`
+  - 新增 `highlights selected daily row when selectedDailyDate is set`
+  - 断言选中日期行样式包含高亮背景（`accent-soft`）与加粗（`font-weight:600`）。
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：新增测试覆盖有效，未引入阻塞问题；建议后续可增加未选中行负向断言（非阻塞）。
+- Test-agent: **PASS**
+  - `cd control-ui && npx vitest run "src/ui/views/reports-tab.test.ts" "src/ui/report-chart.test.ts"` -> `6 passed`
+  - `cd control-ui && npx tsc --noEmit` -> `0 errors`
+  - `python -m pytest tests/test_reports_runner.py backend/reports/tests/test_runner_prev_summary.py backend/reports/tests/test_llm_prompt.py tests/test_reports_llm_analyzer.py tests/test_reports_analyzer.py tests/test_reports_formatter.py -q` -> `25 passed`
+
+### Status
+
+[OK] **Completed**
+
+## Session 56: 2026-04-24 — Ralph Iteration 5（runner 测试稳健化：去 SQL 文本耦合）
+
+**Date**: 2026-04-24  
+**Task**: 继续执行 `2026-04-24-reports-wow-chart-predict.md`，提升测试抗变更能力
+
+### Summary
+
+- 本轮将 `tests/test_reports_runner.py` 的 success update 识别逻辑从 SQL 文本匹配切换为参数结构语义匹配，降低换行/空格/SQL 文案变更导致的脆弱失败。
+- 保持原有行为验证目标不变：确保 `run_report_task` 正确写入 `week_start/week_end` 与 `prev_week` 百分比。
+
+### Main Changes
+
+- `tests/test_reports_runner.py`
+  - 新增 helper：`_find_success_update_params(execute_calls, expected_record_id)`
+  - helper 约束：
+    - `execute` 第 2 参数为 6 元 tuple；
+    - `record_id` 等于预期值；
+    - `summary/report_json/report_md/week_start/week_end` 类型与关键字段符合预期。
+  - 两个测试均改为调用 helper，替代 `"status='success'"` SQL 文本检索。
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：参数语义匹配可靠，避免 SQL 文本脆弱性，未引入明显误判。
+- Test-agent: **PASS**
+  - `python -m pytest tests/test_reports_runner.py -v` -> `2 passed`
+  - `python -m pytest backend/reports/tests/test_runner_prev_summary.py backend/reports/tests/test_llm_prompt.py -q` -> `6 passed`
+  - `cd control-ui && npx vitest run "src/ui/views/reports-tab.test.ts" "src/ui/report-chart.test.ts"` -> `5 passed`
+  - `cd control-ui && npx tsc --noEmit` -> `0 errors`
+
+### Status
+
+[OK] **Completed**
+
+## Session 55: 2026-04-24 — Ralph Iteration 4（周报链路补测：runner prev_week 写库断言）
+
+**Date**: 2026-04-24  
+**Task**: 继续执行 `2026-04-24-reports-wow-chart-predict.md`，补齐链路级测试缺口
+
+### Summary
+
+- 本轮聚焦“查缺补漏”中的后端链路稳定性，新增 `run_report_task` 层面的回归测试，验证 `summary_json.prev_week`（含 `amount_pct` / `count_pct`）确实写入成功记录。
+- 目标是避免仅测 helper 而漏掉“实际 UPDATE 参数”这一关键落库行为。
+
+### Main Changes
+
+- `tests/test_reports_runner.py`
+  - 新增 `test_run_report_task_includes_prev_week_summary_with_pct`
+  - 通过 mock `fetchone.side_effect` 模拟：
+    - `INSERT ... RETURNING id`
+    - `SELECT summary_json` 返回上周汇总
+  - patch `backend.reports.runner.Json` 为透传，直接断言 `UPDATE status='success'` 参数中的 `summary` 结构：
+    - `prev_week.total_sales_amount`
+    - `prev_week.total_order_count`
+    - `prev_week.amount_pct`
+    - `prev_week.count_pct`
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：断言命中关键行为，mock 路径可靠；仅提示 SQL 文本匹配可后续做稳健化。
+- Test-agent: **PASS**
+  - `python -m pytest tests/test_reports_runner.py -v` -> `2 passed`
+  - `python -m pytest backend/reports/tests/test_runner_prev_summary.py backend/reports/tests/test_llm_prompt.py -q` -> `6 passed`
+  - `cd control-ui && npx vitest run "src/ui/views/reports-tab.test.ts" "src/ui/report-chart.test.ts"` -> `5 tests passed`
+  - `cd control-ui && npx tsc --noEmit` -> exit `0`
+
+### Status
+
+[OK] **Completed**
+
+## Session 54: 2026-04-24 — 周报三项增强（WoW KPI + 图表联动 + 下周预测）
+
+**Date**: 2026-04-24  
+**Task**: 执行 `docs/superpowers/plans/2026-04-24-reports-wow-chart-predict.md`
+
+### Summary
+
+- 完成计划中的三项增强：
+  - KPI 卡片新增 WoW 环比百分比（销售额/订单数）。
+  - `report-chart` 柱状图点击后联动高亮每日明细行，支持再次点击取消与手动清除。
+  - `build_analysis_prompt()` 新增「下周预测」段落与“必须标注预测”约束。
+- 增加后端测试覆盖：`_fetch_prev_summary` 空数据行为与 prompt 关键文案回归。
+
+### Main Changes
+
+- `backend/reports/runner.py`
+  - 新增 `_fetch_prev_summary(conn, task_key, week_start)`。
+  - `run_report_task()` 在写库前注入 `summary.prev_week`，包含上周销售额/订单数及 `amount_pct`/`count_pct`。
+- `control-ui/src/ui/views/reports-tab.ts`
+  - KPI 区读取 `summary_json.prev_week` 并渲染涨跌百分比。
+  - `ReportsTabParams` 新增 `selectedDailyDate` 与 `onDailyDateClick`。
+  - daily 图表监听 `chart-bar-click`，并在表格中高亮对应日期行。
+- `control-ui/src/ui/report-chart.ts`
+  - daily 图表新增 Chart.js `onClick`，派发 `chart-bar-click`（`bubbles + composed`）。
+- `control-ui/src/ui/app-view-state.ts`
+  - 新增 `reportsSelectedDailyDate: string | null`。
+- `control-ui/src/ui/app.ts`
+  - 新增 `@state() reportsSelectedDailyDate` 初始值 `null`。
+- `control-ui/src/ui/app-render.ts`
+  - `renderReportsTab()` 传入 `selectedDailyDate/onDailyDateClick`。
+  - 切换报告 `onSelectRecord` 时清空 `reportsSelectedDailyDate`。
+- `backend/reports/llm_analyzer.py`
+  - prompt 输出要求新增第 4 项「下周预测」，并补“预测必须标注”规则。
+- 新增测试：
+  - `backend/reports/tests/test_runner_prev_summary.py`
+  - `backend/reports/tests/test_llm_prompt.py`
+
+### Verification Gate
+
+- Code-review agent: **PASS**
+  - 结论：实现与计划一致，无阻塞性缺陷；建议后续补充前端交互自动化测试。
+- Test-agent: **PASS**
+  - `python -m pytest backend/reports/tests/test_runner_prev_summary.py backend/reports/tests/test_llm_prompt.py -v` -> `3 passed, 0 failed`
+  - `cd control-ui && npx tsc --noEmit` -> `0 errors`
+
+### Status
+
+[OK] **Completed**
+
 ---
 
 ## Session 48: 2026-04-19 — CCB history compression study (Ralph iteration 9)

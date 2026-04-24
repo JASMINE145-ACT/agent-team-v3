@@ -57,6 +57,8 @@ export type ReportsTabParams = {
   onSelectRecord: (recordId: number) => void;
   onDetailTabChange: (tab: "data" | "analysis") => void;
   onReanalyze: (recordId: number) => void;
+  selectedDailyDate: string | null;
+  onDailyDateClick: (date: string | null) => void;
   onEditTask: (task: ReportTask) => void;
   onCancelEdit: () => void;
   onEditFormChange: (patch: ReportTaskConfig) => void;
@@ -73,6 +75,11 @@ function renderDataTab(params: ReportsTabParams) {
   const rj = (params.reportDetail.report_json ?? {}) as ReportJson;
   const totalAmount = rj.total_sales_amount ?? 0;
   const totalCount = rj.total_order_count ?? 0;
+  const summaryJson = (params.reportDetail.summary_json ?? {}) as Record<string, unknown>;
+  const prevWeek = summaryJson.prev_week as
+    | { total_sales_amount: number; total_order_count: number; amount_pct: number; count_pct: number }
+    | null
+    | undefined;
   const daily = rj.daily_stats ?? [];
   const customers = rj.top_customers ?? [];
   const statuses = rj.status_stats ?? [];
@@ -87,6 +94,11 @@ function renderDataTab(params: ReportsTabParams) {
             ${t("agents.reports.metricTotal")}
           </div>
           <div style="font-size:18px;font-weight:700;color:var(--text-primary);">${rp(totalAmount)}</div>
+          ${prevWeek != null
+            ? html`<div style="font-size:11px;margin-top:4px;color:${prevWeek.amount_pct >= 0 ? "var(--color-success,#22c55e)" : "var(--color-danger,#ef4444)"};">
+                ${prevWeek.amount_pct >= 0 ? "▲" : "▼"} ${Math.abs(prevWeek.amount_pct)}% vs 上周
+              </div>`
+            : nothing}
         </div>
         <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;">
           <div
@@ -95,12 +107,33 @@ function renderDataTab(params: ReportsTabParams) {
             ${t("agents.reports.metricCount")}
           </div>
           <div style="font-size:18px;font-weight:700;color:var(--text-primary);">${totalCount}</div>
+          ${prevWeek != null
+            ? html`<div style="font-size:11px;margin-top:4px;color:${prevWeek.count_pct >= 0 ? "var(--color-success,#22c55e)" : "var(--color-danger,#ef4444)"};">
+                ${prevWeek.count_pct >= 0 ? "▲" : "▼"} ${Math.abs(prevWeek.count_pct)}% vs 上周
+              </div>`
+            : nothing}
         </div>
       </div>
 
       ${daily.length > 0
         ? html`
-            <report-chart type="daily" .data=${daily}></report-chart>
+            <report-chart
+              type="daily"
+              .data=${daily}
+              @chart-bar-click=${(e: CustomEvent<{ date: string }>) => {
+                const clicked = e.detail.date;
+                params.onDailyDateClick(clicked === params.selectedDailyDate ? null : clicked);
+              }}
+            ></report-chart>
+            ${params.selectedDailyDate
+              ? html`<div style="font-size:11px;color:var(--text-muted);text-align:right;margin-top:-8px;">
+                  已选 ${params.selectedDailyDate} —
+                  <button
+                    style="border:none;background:none;color:var(--accent,#6366f1);cursor:pointer;font-size:11px;padding:0;"
+                    @click=${() => params.onDailyDateClick(null)}
+                  >清除</button>
+                </div>`
+              : nothing}
             <div>
               <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text-secondary);">
                 ${t("agents.reports.tableDaily")}
@@ -114,15 +147,24 @@ function renderDataTab(params: ReportsTabParams) {
                   </tr>
                 </thead>
                 <tbody>
-                  ${daily.map(
-                    (row) => html`
-                      <tr style="border-bottom:1px solid var(--border);">
+                  ${daily.map((row) => {
+                    const isSelected = row.date === params.selectedDailyDate;
+                    return html`
+                      <tr
+                        style="
+                          border-bottom:1px solid var(--border);
+                          background:${isSelected
+                            ? "var(--accent-soft,rgba(99,102,241,.10))"
+                            : "transparent"};
+                          font-weight:${isSelected ? "600" : "400"};
+                        "
+                      >
                         <td style="padding:6px 8px;" class="mono">${row.date}</td>
                         <td style="padding:6px 8px;text-align:right;">${row.order_count}</td>
                         <td style="padding:6px 8px;text-align:right;">${rp(row.sales_amount)}</td>
                       </tr>
-                    `,
-                  )}
+                    `;
+                  })}
                 </tbody>
               </table>
             </div>

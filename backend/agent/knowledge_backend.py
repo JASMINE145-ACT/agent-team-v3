@@ -1,11 +1,12 @@
-"""KnowledgeBackend — Neon PostgreSQL storage for business knowledge documents."""
+"""KnowledgeBackend — Neon PostgreSQL storage for business knowledge documents (SQLAlchemy QueuePool)."""
 from __future__ import annotations
 
 import logging
 from typing import Optional
 
-import psycopg2
-import psycopg2.pool
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.pool import QueuePool
 
 logger = logging.getLogger(__name__)
 
@@ -20,68 +21,73 @@ CREATE TABLE IF NOT EXISTS business_knowledge (
 
 _UPSERT = """
 INSERT INTO business_knowledge (key, content)
-VALUES (%s, %s)
+VALUES (:key, :content)
 ON CONFLICT (key) DO UPDATE
     SET content    = EXCLUDED.content,
         updated_at = now()
 """
 
-_SELECT = "SELECT content FROM business_knowledge WHERE key = %s"
+_SELECT = "SELECT content FROM business_knowledge WHERE key = :key"
 
 
 class KnowledgeBackend:
     def __init__(self, database_url: str) -> None:
-        self._pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=1,
-            maxconn=3,
-            dsn=database_url,
-        )
+        if not database_url:
+            self._engine: Optional[Engine] = None
+            return
+        try:
+            self._engine = create_engine(
+                database_url,
+                poolclass=QueuePool,
+                pool_size=3,
+                max_overflow=0,
+                pool_recycle=300,  # 5分钟回收，低于 Neon idle 断连
+                pool_pre_ping=True,  # checkout 前验证连接是否活着
+                connect_args={"sslmode": "require"},
+            )
+        except Exception as e:
+            logger.warning("KnowledgeBackend engine 初始化失败: %s", e)
+            self._engine = None
+            return
         self._init_schema()
 
     def _init_schema(self) -> None:
-        conn = self._pool.getconn()
+        if self._engine is None:
+            return
         try:
-            with conn.cursor() as cur:
-                cur.execute(_DDL)
-            conn.commit()
+            with self._engine.begin() as conn:
+                conn.execute(text(_DDL))
         except Exception as e:
-            conn.rollback()
-            logger.error("KnowledgeBackend schema init failed: %s", e)
-            raise
-        finally:
-            self._pool.putconn(conn)
+            logger.warning("KnowledgeBackend schema init failed: %s", e)
 
     def get(self, key: str) -> Optional[str]:
         """Return content for key, or None if missing or on error."""
-        conn = self._pool.getconn()
+        if self._engine is None:
+            return None
         try:
-            with conn.cursor() as cur:
-                cur.execute(_SELECT, (key,))
-                row = cur.fetchone()
+            with self._engine.connect() as conn:
+                row = conn.execute(text(_SELECT), {"key": key}).fetchone()
             return row[0] if row else None
         except Exception as e:
             logger.warning("KnowledgeBackend.get failed: %s", e)
             return None
-        finally:
-            self._pool.putconn(conn)
 
     def put(self, key: str, content: str) -> None:
         """Upsert content for key. Raises on error."""
-        conn = self._pool.getconn()
+        if self._engine is None:
+            raise RuntimeError("KnowledgeBackend: no database connection")
         try:
-            with conn.cursor() as cur:
-                cur.execute(_UPSERT, (key, content))
-            conn.commit()
+            with self._engine.begin() as conn:
+                conn.execute(text(_UPSERT), {"key": key, "content": content})
         except Exception as e:
-            conn.rollback()
             logger.error("KnowledgeBackend.put failed: %s", e)
             raise
-        finally:
-            self._pool.putconn(conn)
 
     def close(self) -> None:
-        """Release the connection pool (idempotent)."""
-        try:
-            self._pool.closeall()
-        except Exception as e:
-            logger.warning("KnowledgeBackend.close failed: %s", e)
+        """Release the engine (idempotent)."""
+        if self._engine is not None:
+            try:
+                self._engine.dispose()
+            except Exception as e:
+                logger.warning("KnowledgeBackend.close failed: %s", e)
+            self._engine = None

@@ -327,6 +327,7 @@ export type AppViewState = {
   selectedRecordId: number | null;
   reportsCopyJustDone: boolean;
   reportsDetailTab: "data" | "analysis";
+  reportsSelectedDailyDate: string | null;
   debugLoading: boolean;
   debugStatus: StatusSummary | null;
   debugHealth: HealthSnapshot | null;
