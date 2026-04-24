@@ -220,3 +220,62 @@ Naming convention: `001_create_price_tables.sql`, `002_create_data_libraries.sql
 3. **`DATABASE_URL` contains special chars** (e.g., `#` in password) → parse error. Use URL-encoded values.
 4. **Stale `table_name` in `data_libraries`** → query returns 0 rows silently. Use `resolve_library_meta()`.
 5. **`pool_pre_ping=True`** is required for Neon serverless (connections may go stale).
+6. **Excel null 列不占位** → Excel 第 20 列为 null（空），但 COPY 每行必须有 `len(neon_cols)` 个字段，空列也必须映射到 `col_20`，否则后续列全部错位 1 位。
+7. **COPY 格式用 TEXT 而非 CSV** → `FORMAT CSV` 对 `\t` 分隔符处理行为不同（空串被当字面值），改用 `FORMAT TEXT, DELIMITER E'\\t'`。
+8. **NULL '' 需显式声明** → COPY 时空串不会自动变 NULL，必须加 `NULL ''` 选项。
+9. **Neon `information_schema.columns` 查询返回乱码列名** → 用 `psycopg2` 直接查询时列名显示为乱码，但实际表结构正常；用位置映射（0-based index）代替字符串匹配更可靠。
+10. **跳过脏数据** → Excel 的 `Material` 列有 19 行含字符串代码（如 `GPR-PP04C03009`），而 Neon 该列为 `numeric`，上传时需 `try: float(val)` 过滤。
+11. **中文列名 psycopg2 参数绑定失效** → `:列名` 风格的 SQLAlchemy 参数绑定不支持中文列名；COPY 绕过此限制。
+
+## Excel → Neon 价格库上传流程
+
+**脚本**: `scripts/upload_price_library_to_neon.py`
+
+**关键步骤**：
+1. `openpyxl` 读 Excel，`read_only=True, data_only=True` 避免格式问题
+2. `EXCEL_INDEX_TO_NEON_COL` 用 **位置索引**（0-based）映射，不依赖列名字符串匹配
+3. Excel 第 20 列为 null → 必须映射到 Neon `col_20`（占位不错位）
+4. `ALTER TABLE ADD COLUMN IF NOT EXISTS "Product_Type" TEXT`（如有则跳过）
+5. `DELETE FROM table` 清空旧数据
+6. `COPY ... FROM STDIN WITH (FORMAT TEXT, DELIMITER E'\\t', NULL '')` 批量导入
+7. 跳过 Material 非数字的行（`float(val)` 过滤）
+8. 验证：`COUNT(*)`、`Product_Type` 分布、前 3 行采样
+
+**已知限制**：
+- 19 行 Material 含字符串代码被跳过（需人工处理）
+- Excel 列 `INCLUDE TAX\n出厂价_含税`（index=5）在 Neon 中对应 `INCLUDE_TAX_出厂价_含税`，为空值时 COPY 写空串 → `NULL ''` 转 NULL
+
+## business_knowledge 同步
+
+**表**: `business_knowledge`（key / content / updated_at）
+
+**同步原则**：本地 MD 文件为 source of truth，Neon 为主存储（供运行时直接读）。修改本地 MD 后需手动推送到 Neon。
+
+**推送脚本**：
+```python
+import psycopg2
+from pathlib import Path
+
+content = Path("backend/tools/data/wanding_business_knowledge.md").read_text(encoding="utf-8")
+conn = psycopg2.connect(DATABASE_URL)
+conn.set_client_encoding("UTF8")
+cur = conn.cursor()
+cur.execute("""
+    INSERT INTO business_knowledge (key, content)
+    VALUES ('wanding_selector', %s)
+    ON CONFLICT (key) DO UPDATE SET content = EXCLUDED.content, updated_at = now()
+""", (content,))
+conn.commit()
+conn.close()
+```
+
+**检查同步状态**（判断本地是否比 Neon 新）：
+```python
+# 1. Neon: SELECT length(content), updated_at FROM business_knowledge WHERE key = 'wanding_selector'
+# 2. 本地: Path("backend/tools/data/wanding_business_knowledge.md").stat().st_mtime
+# 若本地 mtime > Neon updated_at，则需推送
+```
+
+**已确认**（2026-04-23）：
+- Neon `wanding_selector`: 2668 字符，`updated_at: 2026-04-23 23:20:19 UTC`
+- 本地 `wanding_business_knowledge.md`: 2668 字符，`mtime: 2026-04-22 01:38:52`（Neon 已同步最新）
