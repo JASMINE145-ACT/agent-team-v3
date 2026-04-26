@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import "../styles.css";
 import { mountApp as mountTestApp, registerAppMountHooks } from "./test-helpers/app-mount.ts";
 
@@ -55,13 +55,13 @@ describe("control UI routing", () => {
     const app = mountApp("/chat");
     await app.updateComplete;
 
-    const link = app.querySelector<HTMLAnchorElement>('a.nav-item[href="/channels"]');
+    const link = app.querySelector<HTMLAnchorElement>('a.nav-item[href="/instances"]');
     expect(link).not.toBeNull();
     link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
 
     await app.updateComplete;
-    expect(app.tab).toBe("channels");
-    expect(window.location.pathname).toBe("/channels");
+    expect(app.tab).toBe("instances");
+    expect(window.location.pathname).toBe("/instances");
   });
 
   it("resets to the main session when opening chat from sidebar navigation", async () => {
@@ -184,5 +184,48 @@ describe("control UI routing", () => {
     expect(app.settings.token).toBe("abc123");
     expect(window.location.pathname).toBe("/ui/overview");
     expect(window.location.hash).toBe("");
+  });
+
+  it("switches admin-data sub tabs between library and business knowledge", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/admin/business-knowledge")) {
+        return { ok: true, status: 200, json: async () => ({ items: [] }) };
+      }
+      if (url.endsWith("/api/admin/libraries")) {
+        return { ok: true, status: 200, json: async () => ({ items: [] }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ items: [] }) };
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    try {
+      const app = mountApp("/admin-data");
+      app.adminData = { ...app.adminData, token: "ok", activeSubTab: "library" };
+      await app.updateComplete;
+
+      expect(app.textContent).toContain("上传新库");
+
+      const bkButton = Array.from(app.querySelectorAll("button")).find(
+        (btn) => btn.textContent?.trim() === "业务知识",
+      );
+      expect(bkButton).toBeTruthy();
+      bkButton?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+      await app.updateComplete;
+
+      expect(app.adminData.activeSubTab).toBe("business-knowledge");
+      expect(app.textContent).toContain("Key");
+
+      const libraryButton = Array.from(app.querySelectorAll("button")).find(
+        (btn) => btn.textContent?.trim() === "数据库",
+      );
+      expect(libraryButton).toBeTruthy();
+      libraryButton?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+      await app.updateComplete;
+
+      expect(app.adminData.activeSubTab).toBe("library");
+      expect(app.textContent).toContain("上传新库");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

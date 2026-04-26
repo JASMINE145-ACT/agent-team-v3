@@ -20,7 +20,6 @@ import type {
   AgentsFilesListResult,
   AgentIdentityResult,
   AgentInfo,
-  ChannelsStatusSnapshot,
   ConfigSnapshot,
   ConfigUiHints,
   CronJob,
@@ -29,7 +28,6 @@ import type {
   HealthSnapshot,
   LogEntry,
   LogLevel,
-  NostrProfile,
   PresenceEntry,
   QuotationDraftDetail,
   QuotationDraftListItem,
@@ -41,7 +39,6 @@ import type {
   StatusSummary,
 } from "./types.ts";
 import type { ChatAttachment, ChatQueueItem, ChatUploadedFile, CronFormState } from "./ui-types.ts";
-import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 import type { SessionLogEntry } from "./views/usage.ts";
 
 export type AppViewState = {
@@ -124,22 +121,6 @@ export type AppViewState = {
   configSearchQuery: string;
   configActiveSection: string | null;
   configActiveSubsection: string | null;
-  channelsLoading: boolean;
-  channelsSnapshot: ChannelsStatusSnapshot | null;
-  channelsError: string | null;
-  channelsLastSuccess: number | null;
-  bkContent: string;
-  bkLoading: boolean;
-  bkError: string | null;
-  bkSaving: boolean;
-  bkLastSuccess: number | null;
-  bkDependentFiles: { mapping_table: string; price_library: string } | null;
-  whatsappLoginMessage: string | null;
-  whatsappLoginQrDataUrl: string | null;
-  whatsappLoginConnected: boolean | null;
-  whatsappBusy: boolean;
-  nostrProfileFormState: NostrProfileFormState | null;
-  nostrProfileAccountId: string | null;
   configFormDirty: boolean;
   presenceLoading: boolean;
   presenceEntries: PresenceEntry[];
@@ -362,17 +343,6 @@ export type AppViewState = {
   loadAssistantIdentity: () => Promise<void>;
   loadCron: () => Promise<void>;
   loadFulfillDrafts: () => Promise<void>;
-  handleWhatsAppStart: (force: boolean) => Promise<void>;
-  handleWhatsAppWait: () => Promise<void>;
-  handleWhatsAppLogout: () => Promise<void>;
-  handleChannelConfigSave: () => Promise<void>;
-  handleChannelConfigReload: () => Promise<void>;
-  handleNostrProfileEdit: (accountId: string, profile: NostrProfile | null) => void;
-  handleNostrProfileCancel: () => void;
-  handleNostrProfileFieldChange: (field: keyof NostrProfile, value: string) => void;
-  handleNostrProfileSave: () => Promise<void>;
-  handleNostrProfileImport: () => Promise<void>;
-  handleNostrProfileToggleAdvanced: () => void;
   handleExecApprovalDecision: (decision: "allow-once" | "allow-always" | "deny") => Promise<void>;
   handleGatewayUrlConfirm: () => void;
   handleGatewayUrlCancel: () => void;

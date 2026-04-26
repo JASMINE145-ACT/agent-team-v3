@@ -4,6 +4,7 @@ import type {
   LibraryMeta,
   LibraryRow,
   LibraryColumnDef,
+  BkItem,
 } from "./admin-data.types.ts";
 
 export type {
@@ -12,6 +13,7 @@ export type {
   LibraryMeta,
   LibraryRow,
   LibraryColumnDef,
+  BkItem,
 } from "./admin-data.types.ts";
 
 function apiUrl(basePath: string, path: string, params?: Record<string, string | number>): string {
@@ -61,7 +63,81 @@ export function initialAdminDataState(): AdminDataState {
     librarySchemaLoading: false,
     librarySchemaError: null,
     librarySchemaOpen: false,
+    bkItems: [],
+    bkLoading: false,
+    bkError: null,
+    bkSaving: false,
+    bkSaveKey: null,
+    bkEditingKey: null,
+    bkEditingContent: "",
   };
+}
+
+export async function loadBkItems(host: AdminDataHost): Promise<void> {
+  const tok = host.adminData.token;
+  if (!tok) return;
+  patch(host, { bkLoading: true, bkError: null });
+  try {
+    const res = await fetch(apiUrl(host.basePath, "/api/admin/business-knowledge"), {
+      headers: authHeaders(tok),
+    });
+    if (res.status === 401) {
+      adminLogout(host);
+      patch(host, { bkLoading: false });
+      return;
+    }
+    if (!res.ok) {
+      patch(host, { bkLoading: false, bkError: await res.text() });
+      return;
+    }
+    const data = (await res.json()) as { items?: BkItem[] };
+    patch(host, {
+      bkItems: Array.isArray(data.items) ? data.items : [],
+      bkLoading: false,
+      bkError: null,
+    });
+  } catch (e) {
+    patch(host, { bkLoading: false, bkError: String(e) });
+  }
+}
+
+export async function saveBkItem(host: AdminDataHost, key: string, content: string): Promise<boolean> {
+  const tok = host.adminData.token;
+  if (!tok) return false;
+  patch(host, { bkSaving: true, bkSaveKey: key, bkError: null });
+  try {
+    const res = await fetch(apiUrl(host.basePath, `/api/admin/business-knowledge/${encodeURIComponent(key)}`), {
+      method: "PUT",
+      headers: authHeaders(tok),
+      body: JSON.stringify({ content }),
+    });
+    if (res.status === 401) {
+      adminLogout(host);
+      patch(host, { bkSaving: false, bkSaveKey: null });
+      return false;
+    }
+    if (!res.ok) {
+      patch(host, {
+        bkSaving: false,
+        bkSaveKey: null,
+        bkError: (await res.text()) || `HTTP ${res.status}`,
+      });
+      return false;
+    }
+    await loadBkItems(host);
+    patch(host, { bkSaving: false, bkSaveKey: null, bkEditingKey: null, bkEditingContent: "" });
+    return true;
+  } catch (e) {
+    patch(host, { bkSaving: false, bkSaveKey: null, bkError: String(e) });
+    return false;
+  }
+}
+
+export function setBkEditingKey(host: AdminDataHost, key: string | null, content = ""): void {
+  patch(host, {
+    bkEditingKey: key,
+    bkEditingContent: key ? content : "",
+  });
 }
 
 export async function adminLogin(host: AdminDataHost, password: string): Promise<void> {

@@ -38,7 +38,7 @@ control-ui/
 │       │   ├── agents.ts
 │       │   ├── procurement.ts
 │       │   ├── fulfillment.ts
-│       │   ├── business-knowledge.ts
+│       │   ├── admin-data.ts    # 数据管理（含自定义库 + 业务知识子模块）
 │       │   ├── skills.ts
 │       │   ├── sessions.ts
 │       │   └── ...

@@ -9,8 +9,6 @@ import { scheduleChatScroll, scheduleLogsScroll } from "./app-scroll.ts";
 import type { OpenClawApp } from "./app.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgents, loadAgentInfo } from "./controllers/agents.ts";
-import { loadBusinessKnowledge } from "./controllers/business-knowledge.ts";
-import { loadChannels } from "./controllers/channels.ts";
 import { loadConfig, loadConfigSchema } from "./controllers/config.ts";
 import { loadCronJobs, loadCronStatus } from "./controllers/cron.ts";
 import { fetchDashboard } from "./controllers/dashboard.ts";
@@ -33,7 +31,7 @@ import {
 import { loadPresence } from "./controllers/presence.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { loadSkills } from "./controllers/skills.ts";
-import { loadLibraries } from "./controllers/admin-data.ts";
+import { loadBkItems, loadLibraries } from "./controllers/admin-data.ts";
 import type { AdminDataHost } from "./controllers/admin-data.types.ts";
 import { loadReports } from "./controllers/reports.ts";
 import {
@@ -202,17 +200,6 @@ export async function refreshActiveTab(host: SettingsHost) {
       loadShortageStatsForOverview(host as unknown as OpenClawApp),
     ]);
   }
-  if (host.tab === "channels") {
-    await loadBusinessKnowledge(host as unknown as {
-      basePath: string;
-      bkContent: string;
-      bkLoading: boolean;
-      bkError: string | null;
-      bkSaving: boolean;
-      bkLastSuccess: number | null;
-      bkDependentFiles: { mapping_table: string; price_library: string } | null;
-    });
-  }
   if (host.tab === "instances") {
     const state = host as unknown as OpenClawApp;
     await loadOos(state);
@@ -274,7 +261,11 @@ export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "admin-data") {
     const h = host as unknown as AdminDataHost;
     if (h.adminData.token) {
-      await loadLibraries(h);
+      if (h.adminData.activeSubTab === "business-knowledge") {
+        await loadBkItems(h);
+      } else {
+        await loadLibraries(h);
+      }
     }
   }
 }
@@ -436,7 +427,6 @@ export function syncUrlWithSessionKey(host: SettingsHost, sessionKey: string, re
 
 export async function loadOverview(host: SettingsHost) {
   await Promise.all([
-    loadChannels(host as unknown as OpenClawApp, false),
     loadPresence(host as unknown as OpenClawApp),
     loadSessions(host as unknown as OpenClawApp),
     loadCronStatus(host as unknown as OpenClawApp),
@@ -445,17 +435,8 @@ export async function loadOverview(host: SettingsHost) {
   ]);
 }
 
-export async function loadChannelsTab(host: SettingsHost) {
-  await Promise.all([
-    loadChannels(host as unknown as OpenClawApp, true),
-    loadConfigSchema(host as unknown as OpenClawApp),
-    loadConfig(host as unknown as OpenClawApp),
-  ]);
-}
-
 export async function loadCron(host: SettingsHost) {
   await Promise.all([
-    loadChannels(host as unknown as OpenClawApp, false),
     loadCronStatus(host as unknown as OpenClawApp),
     loadCronJobs(host as unknown as OpenClawApp),
   ]);

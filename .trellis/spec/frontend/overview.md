@@ -35,9 +35,9 @@ control-ui/src/
 │   ├── app-render.ts        # Main render function — orchestrates all tabs
 │   ├── app-render.helpers.ts# Shared render helpers (tab nav, theme toggle…)
 │   ├── app-view-state.ts    # AppViewState TYPE definition (no implementation)
-│   ├── app-*.ts             # Lifecycle, gateway, chat, channels, settings…
+│   ├── app-*.ts             # Lifecycle, gateway, chat, settings…
 │   ├── controllers/         # Business logic + API calls (DO NOT render)
-│   │   ├── admin-data.ts    # Admin data CRUD (login, load, upload…)
+│   │   ├── admin-data.ts    # Admin data (login, libraries, rows, schema-sync…)
 │   │   ├── admin-data.types.ts  # AdminDataState, LibraryMeta types
 │   │   ├── chat.ts         # Chat history, send, upload file
 │   │   ├── reports.ts       # Report list, detail, run task
@@ -499,10 +499,31 @@ Admin data management lives in a self-contained sub-state (`AdminDataState`) to 
 - `views/admin-data.ts` — pure render functions
 - `routes_admin.py` (backend) — REST API endpoints
 
-CRUD operations: login → list → upload → view/edit rows → delete row/library.
-
 The `data_libraries` table drives this — `columns` JSONB field controls what columns the admin UI renders dynamically.
+
+**Implemented operations**:
+- Login / logout (`X-Admin-Token` in `sessionStorage`)
+- Library list: upload `.xlsx/.csv` → parse → create table → register
+- Library detail: paginated data load + text search filter
+- Row edit: inline cell edit → `saveLibraryRow` (PUT if existing, POST if new)
+- Row delete: `deleteLibraryRow` (DELETE)
+- Library drop: `dropLibrary` (DROP TABLE)
+- Schema sync: `loadLibraryData` calls `schema-diff` API → `libraryNewColumns` warn bar → `syncLibrarySchema` merges columns
+- Column management: `addLibraryColumn` / `dropLibraryColumn` / `renameLibraryColumn` via dedicated API endpoints
+- Upload warnings: `libraryUploadWarnings` displayed as warn bar after upload
+
+**State fields** (`AdminDataState`):
+```
+token, loginError, loginLoading,
+libraries[], librariesLoading, librariesError,
+libraryUploading, libraryUploadWarnings[],
+activeLibraryId, libraryData[], libraryDataTotal,
+libraryDataPage, libraryDataQuery, libraryDataLoading, libraryDataError,
+libraryNewColumns[], librarySchemaLoading, librarySchemaError, librarySchemaOpen
+```
+
+**Schema panel** (`librarySchemaOpen`): collapsed by default, toggled via "管理列" button. Shows all columns + add/rename/delete actions.
 
 ---
 
-*Last reviewed: 2026-04-24 — reflects `control-ui/` as of current main branch.*
+*Last reviewed: 2026-04-26 — reflects `control-ui/` as of current main branch.*

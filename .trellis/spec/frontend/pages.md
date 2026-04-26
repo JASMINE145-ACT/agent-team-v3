@@ -11,7 +11,6 @@
 |--------|------|--------|---------|---------|
 | `chat` | `/chat` | 聊天 | Chat | 直接网关聊天会话，用于快速干预 |
 | `overview` | `/overview` | 概览 | Overview | 网关状态、入口点、快速健康检查 |
-| `channels` | `/channels` | 业务知识 | Business Knowledge | 编辑 `wanding_business_knowledge.md`，供选型与匹配使用 |
 | `instances` | `/instances` | 无货看板 | Out of Stock | 无货产品总览与列表，无需向 Agent 提问 |
 | `sessions` | `/sessions` | 采购 | Procurement | 基于缺货生成采购建议，批准后落库并通知采购员 |
 | `work` | `/work` | 报价 | Quotation | 批量报价：上传文件、识别、查价与库存、匹配填写、落库 |
@@ -32,7 +31,7 @@
 
 ```
 nav.chat        → chat
-nav.control     → overview | channels | instances | sessions | work | cron
+nav.control     → overview | instances | sessions | work | cron
 nav.agent      → agents | skills | nodes | reports
 nav.settings   → config | debug | logs | admin-data
 ```
@@ -45,7 +44,6 @@ nav.settings   → config | debug | logs | admin-data
 |-----|-----------|----------------|------|
 | `chat` | `ui/views/chat.ts` | `ui/controllers/chat.ts` | 聊天消息渲染、发送 |
 | `overview` | `ui/views/overview.ts` | `ui/controllers/config.ts` | 健康检查、网关连接状态 |
-| `channels` | `ui/views/channels.ts` | `ui/controllers/channels.ts` | 业务知识编辑（对应 `wanding_business_knowledge.md`） |
 | `instances` | `ui/views/instances.ts` | `ui/controllers/oos.ts` | 无货看板（OOS Dashboard） |
 | `sessions` | `ui/views/sessions.ts` | `ui/controllers/procurement.ts` | 采购建议 |
 | `work` | `ui/views/work.ts` | — | 批量报价工作流 |
@@ -71,13 +69,13 @@ nav.settings   → config | debug | logs | admin-data
 - **行为链路**：`ui/components/clarify-card.ts` 解析并渲染 → `ui/chat/grouped-render.ts` 注入组件 → `ui/views/chat.ts` 透传 `onQuickSend` → `ui/app-render.ts` 调用 `state.handleSendChat(text)`。
 - **范围说明**：仅前端快捷发送，不改 `ask_clarification` 后端 schema，不新增 `match_quotation_batch` 的 per-item `product_type` 字段。
 
-### 业务知识（channels）— `wanding_business_knowledge.md`
+### 业务知识（admin-data 子 Tab）— Neon `business_knowledge`
 
-- **路径**：`data/wanding_business_knowledge.md`（在 Agent Team version3 根目录）
-- **用途**：存放选型纠偏样本，LLM 选型时会参考此文件
-- **View**：`ui/views/channels.ts`（实际渲染的是 Business Knowledge 编辑器）
-- **Controller**：`ui/controllers/channels.ts`（调用 `loadBusinessKnowledge` / `saveBusinessKnowledge`）
-- **API 端点**：`GET/PUT /api/business-knowledge`
+- **路径**：`business_knowledge` 表（`key='wanding_selector'`）
+- **用途**：存放选型纠偏样本，LLM 选型时会优先读取 Neon 数据
+- **View**：`ui/views/admin-data.ts`（子 tab：`[数据库] [业务知识]`）
+- **Controller**：`ui/controllers/admin-data.ts`（`loadBkItems` / `saveBkItem`）
+- **API 端点**：`GET /api/admin/business-knowledge`、`PUT /api/admin/business-knowledge/{key}`（`X-Admin-Token`）
 
 ### 无货看板（instances）— OOS Dashboard
 
@@ -87,12 +85,27 @@ nav.settings   → config | debug | logs | admin-data
 - **Controller**：`ui/controllers/oos.ts`（`loadOos` / `deleteOosItem` / `addOosItem`）
 - **API 端点**：`GET /api/oos/list` / `GET /api/oos/stats`
 
-### 数据管理（admin-data）— 万鼎价格库 / 产品映射
+### 数据管理（admin-data）— 自定义库 / 价格库 / 产品映射
 
-- **用途**：对 Neon 两张表（价格库、产品映射）做增删改查
 - **View**：`ui/views/admin-data.ts`（含 `renderAdminData`）
 - **Controller**：`ui/controllers/admin-data.ts`
 - **认证**：`X-Admin-Token` header（`ADMIN_PASSWORD`）
+- **后端**：`routes_admin.py` + `repository.py`（`data_libraries` 动态库表）
+
+**功能清单**：
+
+| 操作 | 说明 |
+|------|------|
+| 上传新库 | `.xlsx/.csv` → 自动解析 schema → 建表 → 注册 |
+| 库列表 | 查看所有已注册自定义库（含列数/行数/时间） |
+| 查看库数据 | 分页加载（100行/页）+ 全文搜索 |
+| 编辑单元格 | 行内直接修改 → `保存` 触发 PUT |
+| 新增行 | `+ 新增一行` → 空行追加 → `保存` 触发 POST |
+| 删除行 | 行内 `删除` 按钮 → DELETE |
+| 删除库 | 列表页 `删除` 按钮 → DROP TABLE |
+| 同步结构（Schema Sync） | 检测数据库新列 → warn bar → 合并到 `data_libraries.columns` |
+| 管理列 | 展开面板：新增列 / 删除列 / 重命名列 |
+| 上传警告 | 解析警告信息横幅（`libraryUploadWarnings`） |
 
 ---
 
@@ -103,7 +116,7 @@ nav.settings   → config | debug | logs | admin-data
 ```typescript
 // ui/navigation.ts — 路由定义
 export type Tab =
-  | "chat" | "overview" | "channels" | "instances"
+  | "chat" | "overview" | "instances"
   | "sessions" | "work" | "cron" | "skills"
   | "reports" | "nodes" | "agents" | "config"
   | "debug" | "logs" | "admin-data" | "usage"
@@ -111,7 +124,6 @@ export type Tab =
 // ui/app-render.ts — 渲染分发
 import { renderChat } from "./views/chat.ts";
 import { renderOverview } from "./views/overview.ts";
-import { renderBusinessKnowledge } from "./views/channels.ts";
 import { renderOosDashboard } from "./views/oos-dashboard.ts";
 // ...
 ```

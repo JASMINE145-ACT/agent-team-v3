@@ -9,8 +9,6 @@ import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controlle
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
 import { loadAgents, loadAgentInfo } from "./controllers/agents.ts";
-import { loadChannels } from "./controllers/channels.ts";
-import { loadBusinessKnowledge, saveBusinessKnowledge } from "./controllers/business-knowledge.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
 import {
   applyConfig,
@@ -66,6 +64,9 @@ import {
   loadLibraryData,
   patchLibraryRow,
   renameLibraryColumn,
+  loadBkItems,
+  saveBkItem,
+  setBkEditingKey,
   saveLibraryRow,
   syncLibrarySchema,
   uploadLibrary,
@@ -82,8 +83,6 @@ import {
 import { icons } from "./icons.ts";
 import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
 import { renderAgents } from "./views/agents.ts";
-import { renderChannels } from "./views/channels.ts";
-import { renderBusinessKnowledge } from "./views/business-knowledge.ts";
 import { renderChat } from "./views/chat.ts";
 import { renderConfig } from "./views/config.ts";
 import { loadFulfillDraftDetail, confirmFulfillDraft } from "./controllers/fulfill.ts";
@@ -262,7 +261,6 @@ export function renderApp(state: AppViewState) {
                 sessionsCount,
                 cronEnabled: state.cronStatus?.enabled ?? null,
                 cronNext,
-                lastChannelsRefresh: state.channelsLastSuccess,
                 oosStats: state.overviewOosStats,
                 shortageStats: state.overviewShortageStats,
                 quotationStats: state.quotationStats,
@@ -285,22 +283,6 @@ export function renderApp(state: AppViewState) {
                 },
                 onConnect: () => state.connect(),
                 onRefresh: () => state.loadOverview(),
-              })
-            : nothing
-        }
-
-        ${
-          state.tab === "channels"
-            ? renderBusinessKnowledge({
-                loading: state.bkLoading,
-                saving: state.bkSaving,
-                error: state.bkError,
-                content: state.bkContent,
-                lastSuccessAt: state.bkLastSuccess,
-                dependentFiles: state.bkDependentFiles,
-                onReload: () => loadBusinessKnowledge(state),
-                onSave: (content) => saveBusinessKnowledge(state, content),
-                onContentChange: (content) => (state.bkContent = content),
               })
             : nothing
         }
@@ -937,6 +919,21 @@ export function renderApp(state: AppViewState) {
                 },
                 onLibraryWarningsDismiss: () => {
                   state.adminData = { ...state.adminData, libraryUploadWarnings: [] };
+                },
+                onSubTabChange: (tab) => {
+                  state.adminData = { ...state.adminData, activeSubTab: tab };
+                  if (tab === "business-knowledge") {
+                    void loadBkItems(state as unknown as AdminDataHost);
+                  }
+                },
+                onBkRefresh: () => loadBkItems(state as unknown as AdminDataHost),
+                onBkStartEdit: (key, content) => setBkEditingKey(state as unknown as AdminDataHost, key, content),
+                onBkCancelEdit: () => setBkEditingKey(state as unknown as AdminDataHost, null),
+                onBkEditContentChange: (content) => {
+                  state.adminData = { ...state.adminData, bkEditingContent: content };
+                },
+                onBkSave: (key, content) => {
+                  void saveBkItem(state as unknown as AdminDataHost, key, content);
                 },
               })
             : nothing

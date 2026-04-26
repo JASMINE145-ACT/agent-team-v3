@@ -71,13 +71,24 @@
 
 ---
 
-## Business Knowledge
+## Admin — Business Knowledge（requires `X-Admin-Token`）
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/admin/business-knowledge` | ADMIN | 列出所有业务知识记录 |
+| PUT | `/api/admin/business-knowledge/{key}` | ADMIN | Upsert 单条业务知识 |
+
+---
+
+## Business Knowledge（Legacy）
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/business-knowledge` | — | Get current knowledge file content |
 | PUT | `/api/business-knowledge` | — | Update/replace knowledge content |
 | GET | `/api/business-knowledge/dependent-files` | — | Files that depend on this knowledge |
+
+> **注意**：`/api/admin/business-knowledge`（ADMIN）是新接入路径；原有 `/api/business-knowledge` 仍保留供 Agent 内部调用。
 
 ---
 

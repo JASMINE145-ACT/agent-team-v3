@@ -2,19 +2,6 @@ import { LitElement } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { i18n, I18nController, isSupportedLocale } from "../i18n/index.ts";
 import {
-  handleChannelConfigReload as handleChannelConfigReloadInternal,
-  handleChannelConfigSave as handleChannelConfigSaveInternal,
-  handleNostrProfileCancel as handleNostrProfileCancelInternal,
-  handleNostrProfileEdit as handleNostrProfileEditInternal,
-  handleNostrProfileFieldChange as handleNostrProfileFieldChangeInternal,
-  handleNostrProfileImport as handleNostrProfileImportInternal,
-  handleNostrProfileSave as handleNostrProfileSaveInternal,
-  handleNostrProfileToggleAdvanced as handleNostrProfileToggleAdvancedInternal,
-  handleWhatsAppLogout as handleWhatsAppLogoutInternal,
-  handleWhatsAppStart as handleWhatsAppStartInternal,
-  handleWhatsAppWait as handleWhatsAppWaitInternal,
-} from "./app-channels.ts";
-import {
   handleAbortChat as handleAbortChatInternal,
   handleSendChat as handleSendChatInternal,
   removeQueuedMessage as removeQueuedMessageInternal,
@@ -90,11 +77,9 @@ import type {
   LogEntry,
   LogLevel,
   PresenceEntry,
-  ChannelsStatusSnapshot,
   SessionsListResult,
   SkillStatusReport,
   StatusSummary,
-  NostrProfile,
   ReportRecord,
   ReportTask,
   ReportTaskConfig,
@@ -105,7 +90,6 @@ import {
   type ChatUploadedFile,
   type CronFormState,
 } from "./ui-types.ts";
-import type { NostrProfileFormState } from "./views/channels.nostr-profile-form.ts";
 
 declare global {
   interface Window {
@@ -218,24 +202,6 @@ export class OpenClawApp extends LitElement {
   @state() configActiveSection: string | null = null;
   @state() configActiveSubsection: string | null = null;
 
-  @state() channelsLoading = false;
-  @state() channelsSnapshot: ChannelsStatusSnapshot | null = null;
-  @state() channelsError: string | null = null;
-  @state() channelsLastSuccess: number | null = null;
-
-  /** 涓氬姟鐭ヨ瘑椤碉紙鍘?Channels 浣嶏級锛歸anding_business_knowledge.md 鍐呭涓庡姞杞?淇濆瓨鐘舵€?*/
-  @state() bkContent = "";
-  @state() bkLoading = false;
-  @state() bkError: string | null = null;
-  @state() bkSaving = false;
-  @state() bkLastSuccess: number | null = null;
-  @state() bkDependentFiles: { mapping_table: string; price_library: string } | null = null;
-  @state() whatsappLoginMessage: string | null = null;
-  @state() whatsappLoginQrDataUrl: string | null = null;
-  @state() whatsappLoginConnected: boolean | null = null;
-  @state() whatsappBusy = false;
-  @state() nostrProfileFormState: NostrProfileFormState | null = null;
-  @state() nostrProfileAccountId: string | null = null;
 
   @state() presenceLoading = false;
   @state() presenceEntries: PresenceEntry[] = [];
@@ -717,50 +683,6 @@ export class OpenClawApp extends LitElement {
       messageOverride,
       opts,
     );
-  }
-
-  async handleWhatsAppStart(force: boolean) {
-    await handleWhatsAppStartInternal(this, force);
-  }
-
-  async handleWhatsAppWait() {
-    await handleWhatsAppWaitInternal(this);
-  }
-
-  async handleWhatsAppLogout() {
-    await handleWhatsAppLogoutInternal(this);
-  }
-
-  async handleChannelConfigSave() {
-    await handleChannelConfigSaveInternal(this);
-  }
-
-  async handleChannelConfigReload() {
-    await handleChannelConfigReloadInternal(this);
-  }
-
-  handleNostrProfileEdit(accountId: string, profile: NostrProfile | null) {
-    handleNostrProfileEditInternal(this, accountId, profile);
-  }
-
-  handleNostrProfileCancel() {
-    handleNostrProfileCancelInternal(this);
-  }
-
-  handleNostrProfileFieldChange(field: keyof NostrProfile, value: string) {
-    handleNostrProfileFieldChangeInternal(this, field, value);
-  }
-
-  async handleNostrProfileSave() {
-    await handleNostrProfileSaveInternal(this);
-  }
-
-  async handleNostrProfileImport() {
-    await handleNostrProfileImportInternal(this);
-  }
-
-  handleNostrProfileToggleAdvanced() {
-    handleNostrProfileToggleAdvancedInternal(this);
   }
 
   async handleExecApprovalDecision(decision: "allow-once" | "allow-always" | "deny") {

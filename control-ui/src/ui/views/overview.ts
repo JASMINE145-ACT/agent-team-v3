@@ -17,7 +17,6 @@ export type OverviewProps = {
   sessionsCount: number | null;
   cronEnabled: boolean | null;
   cronNext: number | null;
-  lastChannelsRefresh: number | null;
   /** Overview 用的无货/缺货统计（来自各自 stats 接口） */
   oosStats: OosStats | null;
   shortageStats: ShortageStats | null;
@@ -286,18 +285,16 @@ export function renderOverview(props: OverviewProps) {
             </div>
           </div>
           <div class="stat">
-            <div class="stat-label">${t("overview.snapshot.uptime")}</div>
-            <div class="stat-value">${uptime}</div>
+            <div class="stat-label">${t("overview.access.authMode")}</div>
+            <div class="stat-value">${authMode ?? t("common.na")}</div>
           </div>
           <div class="stat">
             <div class="stat-label">${t("overview.snapshot.tickInterval")}</div>
             <div class="stat-value">${tick}</div>
           </div>
           <div class="stat">
-            <div class="stat-label">${t("overview.snapshot.lastChannelsRefresh")}</div>
-            <div class="stat-value">
-              ${props.lastChannelsRefresh ? formatRelativeTimestamp(props.lastChannelsRefresh) : t("common.na")}
-            </div>
+            <div class="stat-label">${t("overview.snapshot.uptime")}</div>
+            <div class="stat-value">${uptime}</div>
           </div>
         </div>
         ${

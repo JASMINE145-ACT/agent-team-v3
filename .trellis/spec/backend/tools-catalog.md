@@ -1,7 +1,7 @@
 # Tools Catalog
 
 > Complete inventory of all Agent tools with names, purposes, schemas, and return shapes.
-> Auto-built from `get_all_tools()` in `backend/agent/tools.py`.
+> **Last updated**: 2026-04-25 — reflects actual injected tools in `backend/core/registry.py`
 
 ---
 
@@ -14,7 +14,30 @@
 | `risk_level: low` | Safe to auto-execute |
 | `risk_level: medium` | Should confirm before execution |
 | `risk_level: high` | Requires explicit user confirmation |
-| `deferred: true` | Loaded lazily via `tool_search` |
+| `deferred: true` | Stub injected; full schema only after `tool_search` resolves |
+
+---
+
+## Prompt 注入机制
+
+### P0 Tools (Non-Deferred)
+
+完整 schema 直接注入 prompt，LLM 可直接调用：
+
+| 来源 | Tools |
+|------|-------|
+| Inventory | `search_inventory`, `get_profit_by_price`, `get_profit_by_price_batch`, `get_inventory_by_code`, `get_inventory_by_code_batch`, `match_quotation`, `match_quotation_batch`, `match_by_quotation_history`, `match_wanding_price`, `select_wanding_match`, `modify_inventory` |
+| Quote | `fill_quotation_sheet`, `parse_excel_smart`, `edit_excel` |
+| Core | `ask_clarification`, `tool_search` |
+
+### Deferred Stubs
+
+仅注入 `{ name, description, parameters: {} }`，调用前需 `tool_search` 展开完整 schema：
+
+| 来源 | Tools |
+|------|-------|
+| Quote | `run_quotation_fill`, `append_business_knowledge`, `batch_quick_quote` |
+| OOS | `get_oos_list`, `get_oos_stats`, `get_oos_by_file`, `get_oos_by_time`, `register_oos`, `register_oos_from_text` |
 
 ---
 
@@ -156,17 +179,44 @@ memo?: string — optional note
 
 ## Quotation Tools (`get_quote_tools_openai_format`)
 
-### `extract_quotation_data`
-**Purpose**: Extract quotation rows from Excel file (row 2 to "Total Excluding PPN" marker row −1).
+> 以下为 P0 tools，完整 schema 直接注入 prompt。
+
+### `fill_quotation_sheet`
+**Purpose**: 读取 Excel 报价单 → 解析产品明细 → 查询库存+价格 → 填充报价单。完整流程工具。
+```
+file_path: string (required) — absolute path to quotation Excel
+customer_level?: string — A/B/C/D/D_low/E/出厂价_含税/出厂价_不含税/采购不含税. Default B
+```
+**Return**: `success + result` JSON with filled rows.
+
+---
+
+### `parse_excel_smart`
+**Purpose**: 智能解析 Excel 文件，识别表头和数据区域，返回结构化数据。
 ```
 file_path: string (required) — absolute path
 sheet_name?: string — specific sheet name
 ```
-**Return**: `success + result` (Markdown table) + `rows_count`.
+**Return**: `success + result` JSON with parsed rows + headers.
+
+---
+
+### `edit_excel`
+**Purpose**: 修改 Excel 单元格值，支持行列定位。
+```
+file_path: string (required) — absolute path
+sheet?: string — sheet name, default "Sheet1"
+row?: number — 1-indexed row number
+col?: number|string — column index or letter
+value: string (required) — value to write
+```
+**Return**: `success + result` JSON.
 
 ---
 
 ## OOS Tools (`get_oos_tools_openai_format`)
+
+> 以下全部为 **deferred tools**，stub 注入 prompt，调用前需 `tool_search` 展开完整 schema。
 
 ### `get_oos_list`
 **Purpose**: Get out-of-stock product list with occurrence count and email status.
@@ -222,16 +272,9 @@ unit?: string
 
 ## EXTRA_TOOLS (defined in `backend/agent/tools.py`)
 
-### `run_quotation_fill`
-**Purpose**: Full pipeline — extract → Wanding match → inventory check → fill Excel. Only when user explicitly requests "询价填充/填充报价单/完整报价" AND `file_path` exists in context.
-```
-file_path: string (required) — absolute path to quotation Excel
-customer_level?: string — A/B/C/D/D_low/E/出厂价_含税/出厂价_不含税/采购不含税. Default B
-```
+> `ask_clarification` 和 `tool_search` 为 **P0**（非 deferred）；其余为 **deferred stubs**。
 
----
-
-### `ask_clarification`
+### `ask_clarification` ⭐ P0
 **Purpose**: Ask user clarifying questions when intent is ambiguous (e.g. "查XX" could be inventory or price). Skip when keywords clearly contain 库存/可售/价格/报价/万鼎/档位.
 ```
 questions: string[] (required)
@@ -240,7 +283,24 @@ reasoning: string — why clarification is needed
 
 ---
 
-### `append_business_knowledge`
+### `tool_search` ⭐ P0
+**Purpose**: Find and expand full schema for a deferred-loading tool.
+```
+query: string (required) — tool name or description, e.g. "run_quotation_fill", "无货"
+```
+
+---
+
+### `run_quotation_fill` ⭐ Deferred
+**Purpose**: Full pipeline — extract → Wanding match → inventory check → fill Excel. Only when user explicitly requests "询价填充/填充报价单/完整报价" AND `file_path` exists in context.
+```
+file_path: string (required) — absolute path to quotation Excel
+customer_level?: string — A/B/C/D/D_low/E/出厂价_含税/出厂价_不含税/采购不含税. Default B
+```
+
+---
+
+### `append_business_knowledge` ⭐ Deferred
 **Purpose**: Append one knowledge entry to `wanding_business_knowledge.md` for future selection reference. Call when user says "记录到知识库/记在 knowledge/把这个记下来".
 ```
 content: string (required) — one polished knowledge entry
@@ -248,21 +308,13 @@ content: string (required) — one polished knowledge entry
 
 ---
 
-### `batch_quick_quote`
+### `batch_quick_quote` ⭐ Deferred
 **Purpose**: Bulk text input of products+quantities, returns price+inventory in Markdown table. For WeCom quick quote scenarios.
 ```
 inquiry_text: string (required) — e.g. "50三通 100个，25弯头 50个" or "DN50三通×100、DN25弯头×50"
 customer_level?: string — default B
 ```
 **Limit**: 100 items max.
-
----
-
-### `tool_search`
-**Purpose**: Find and expand full schema for a deferred-loading tool.
-```
-query: string (required) — tool name or description, e.g. "run_quotation_fill", "无货"
-```
 
 ---
 
@@ -291,4 +343,9 @@ User: "错了" / "不对"
 | Handler function | `_execute_<tool_name>` | `_execute_match_quotation` |
 | Result wrapper | `{"success": True, "result": json.dumps(payload)}` | — |
 | Error wrapper | `{"success": False, "error": "<message>"}` | — |
-| Deferred tool | `x_tool_meta.deferred: true` + `tool_search` to resolve | OOS, modify_inventory |
+| Deferred stub | `x_tool_meta.deferred: true` + `tool_search` to resolve | OOS tools, `run_quotation_fill` |
+| P0 (non-deferred) | Full schema in prompt, direct call | Inventory tools, `fill_quotation_sheet`, `ask_clarification` |
+
+---
+
+## ReAct Loop Tool Execution (`CoreAgent`)

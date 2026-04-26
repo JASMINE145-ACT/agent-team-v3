@@ -13,14 +13,6 @@ The frontend uses **TypeScript 5.x** with strict typing. All types are defined i
 Domain types shared across the application:
 
 ```typescript
-// Channel types
-export type ChannelsStatusSnapshot = {
-  ts: number;
-  channelOrder: string[];
-  channels: Record<string, unknown>;
-  // ...
-};
-
 // Session types
 export type GatewaySessionRow = {
   key: string;

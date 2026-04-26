@@ -25,6 +25,12 @@ export type AdminDataViewProps = {
   onAddColumn: (libId: number) => void;
   onDropColumn: (libId: number, colName: string) => void;
   onRenameColumn: (libId: number, colName: string) => void;
+  onSubTabChange: (tab: "library" | "business-knowledge") => void;
+  onBkRefresh: () => void;
+  onBkStartEdit: (key: string, content: string) => void;
+  onBkCancelEdit: () => void;
+  onBkEditContentChange: (content: string) => void;
+  onBkSave: (key: string, content: string) => void;
 };
 
 function numOrNull(s: string): number | null {
@@ -73,8 +79,96 @@ export function renderAdminData(props: AdminDataViewProps) {
         <h2 class="admin-title">数据管理</h2>
         <button class="admin-btn admin-btn--ghost" type="button" @click=${props.onLogout}>退出登录</button>
       </div>
-      ${renderCustomLibraries(props)}
+      <div class="admin-row" style="margin-bottom:12px;gap:8px;">
+        <button
+          type="button"
+          class="admin-btn ${s.activeSubTab === "library" ? "admin-btn--primary" : ""}"
+          @click=${() => props.onSubTabChange("library")}
+        >
+          数据库
+        </button>
+        <button
+          type="button"
+          class="admin-btn ${s.activeSubTab === "business-knowledge" ? "admin-btn--primary" : ""}"
+          @click=${() => props.onSubTabChange("business-knowledge")}
+        >
+          业务知识
+        </button>
+      </div>
+      ${s.activeSubTab === "library" ? renderCustomLibraries(props) : renderBkList(props)}
     </section>
+  `;
+}
+
+function renderBkList(props: AdminDataViewProps) {
+  const s = props.host.adminData;
+  return html`
+    <div class="admin-block">
+      <div class="admin-row" style="margin-bottom:12px;">
+        <button type="button" class="admin-btn" ?disabled=${s.bkLoading} @click=${props.onBkRefresh}>
+          ${s.bkLoading ? "刷新中…" : "刷新"}
+        </button>
+      </div>
+      ${s.bkError ? html`<p class="admin-err">${s.bkError}</p>` : nothing}
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>最后更新</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${s.bkItems.length === 0 && !s.bkLoading
+              ? html`<tr><td colspan="3" class="admin-muted" style="text-align:center">暂无业务知识数据</td></tr>`
+              : s.bkItems.map(
+                  (item) => html`
+                    <tr>
+                      <td class="mono">${item.key}</td>
+                      <td>${item.updated_at?.slice(0, 19).replace("T", " ") ?? "-"}</td>
+                      <td class="admin-actions">
+                        <button
+                          type="button"
+                          class="admin-btn admin-btn--sm"
+                          @click=${() => props.onBkStartEdit(item.key, item.content)}
+                        >
+                          编辑
+                        </button>
+                      </td>
+                    </tr>
+                    ${s.bkEditingKey === item.key
+                      ? html`<tr>
+                          <td colspan="3">
+                            <textarea
+                              class="admin-input"
+                              style="width:100%;min-height:220px;font-family:monospace;"
+                              .value=${s.bkEditingContent}
+                              @input=${(e: Event) =>
+                                props.onBkEditContentChange((e.target as HTMLTextAreaElement).value)}
+                            ></textarea>
+                            <div class="admin-row" style="margin-top:8px;gap:8px;">
+                              <button
+                                type="button"
+                                class="admin-btn admin-btn--primary"
+                                ?disabled=${s.bkSaving && s.bkSaveKey === item.key}
+                                @click=${() => props.onBkSave(item.key, s.bkEditingContent)}
+                              >
+                                ${s.bkSaving && s.bkSaveKey === item.key ? "保存中…" : "保存"}
+                              </button>
+                              <button type="button" class="admin-btn admin-btn--ghost" @click=${props.onBkCancelEdit}>
+                                取消
+                              </button>
+                            </div>
+                          </td>
+                        </tr>`
+                      : nothing}
+                  `,
+                )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   `;
 }
 

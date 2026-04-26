@@ -698,6 +698,56 @@ def list_libraries() -> list[dict]:
         return []
 
 
+def list_business_knowledge() -> list[dict]:
+    """返回所有 business_knowledge 记录，按 updated_at desc。"""
+    engine = _get_engine()
+    if engine is None:
+        return []
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT id, key, content, updated_at "
+                    "FROM business_knowledge ORDER BY updated_at DESC, id DESC"
+                )
+            ).mappings().all()
+        return [
+            {
+                **dict(r),
+                "updated_at": str(r["updated_at"]) if r.get("updated_at") is not None else None,
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.warning("list_business_knowledge 失败: %s", e)
+        return []
+
+
+def upsert_business_knowledge(key: str, content: str) -> bool:
+    """Upsert business_knowledge by key."""
+    engine = _get_engine()
+    if engine is None:
+        return False
+    k = (key or "").strip()
+    if not k:
+        return False
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO business_knowledge (key, content, updated_at) "
+                    "VALUES (:key, :content, NOW()) "
+                    "ON CONFLICT (key) DO UPDATE "
+                    "SET content = EXCLUDED.content, updated_at = NOW()"
+                ),
+                {"key": k, "content": content},
+            )
+        return True
+    except Exception as e:
+        logger.warning("upsert_business_knowledge 失败: %s", e)
+        return False
+
+
 def create_library_and_insert(name: str, columns: list[dict], rows: list[list]) -> Optional[int]:
     engine = _get_engine()
     if engine is None:

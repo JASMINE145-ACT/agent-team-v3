@@ -74,6 +74,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class BusinessKnowledgeUpdateBody(BaseModel):
+    content: str = ""
+
+
 @router.post("/login")
 async def admin_login(body: LoginRequest):
     _require_enabled()
@@ -81,6 +85,23 @@ async def admin_login(body: LoginRequest):
     if token is None:
         raise HTTPException(status_code=401, detail="密码错误")
     return {"token": token}
+
+
+@router.get("/business-knowledge")
+async def list_business_knowledge(_: None = Depends(get_admin_dep)):
+    return {"items": repository.list_business_knowledge()}
+
+
+@router.put("/business-knowledge/{key}")
+async def update_business_knowledge(
+    key: str,
+    body: BusinessKnowledgeUpdateBody,
+    _: None = Depends(get_admin_dep),
+):
+    ok = repository.upsert_business_knowledge(key, body.content)
+    if not ok:
+        raise HTTPException(status_code=503, detail="数据库不可用或操作失败")
+    return {"ok": True}
 
 
 class PriceRow(BaseModel):
