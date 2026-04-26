@@ -1,0 +1,504 @@
+<h2>Schema Editor — UI 设计方案</h2>
+<p class="subtitle">库详情页增加"列管理"面板，展示如何融入现有界面</p>
+
+<style>
+  .admin-layout {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 0;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #0f172a;
+    font-size: 12px;
+    min-height: 480px;
+  }
+  .sidebar {
+    background: #1e293b;
+    border-right: 1px solid #334155;
+    padding: 12px 0;
+  }
+  .sidebar-item {
+    padding: 8px 14px;
+    color: #94a3b8;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    border-left: 2px solid transparent;
+  }
+  .sidebar-item.active {
+    background: rgba(99,102,241,.12);
+    color: #a5b4fc;
+    border-left-color: #6366f1;
+  }
+  .sidebar-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #475569;
+    padding: 16px 14px 4px;
+  }
+  .main {
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .lib-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid #334155;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #0f172a;
+  }
+  .lib-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #e2e8f0;
+  }
+  .lib-sub {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 2px;
+  }
+  .btn-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    padding: 5px 10px;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    background: #1e293b;
+    color: #94a3b8;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn.accent {
+    background: rgba(99,102,241,.15);
+    border-color: rgba(99,102,241,.4);
+    color: #a5b4fc;
+  }
+  .btn.sync {
+    background: rgba(16,185,129,.12);
+    border-color: rgba(16,185,129,.35);
+    color: #6ee7b7;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .sync-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #10b981;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid #334155;
+    padding: 0 16px;
+    background: #0f172a;
+  }
+  .tab {
+    padding: 8px 14px;
+    font-size: 12px;
+    color: #64748b;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-right: 4px;
+  }
+  .tab.active {
+    color: #e2e8f0;
+    border-bottom-color: #6366f1;
+    font-weight: 600;
+  }
+  .tab-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+  .col-list {
+    width: 240px;
+    border-right: 1px solid #334155;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  .col-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 6px 8px;
+  }
+  .col-list-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: #475569;
+  }
+  .col-add-btn {
+    font-size: 18px;
+    color: #6366f1;
+    cursor: pointer;
+    line-height: 1;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    background: rgba(99,102,241,.15);
+  }
+  .col-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 6px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .col-item:hover {
+    background: rgba(255,255,255,.04);
+  }
+  .col-item.selected {
+    background: rgba(99,102,241,.1);
+    border-color: rgba(99,102,241,.3);
+  }
+  .col-item.new-detected {
+    background: rgba(16,185,129,.07);
+    border-color: rgba(16,185,129,.25);
+  }
+  .col-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .badge-text { background: rgba(99,102,241,.2); color: #a5b4fc; }
+  .badge-num  { background: rgba(251,191,36,.15); color: #fcd34d; }
+  .badge-new  { background: rgba(16,185,129,.2); color: #6ee7b7; }
+  .col-name {
+    flex: 1;
+    font-size: 12px;
+    color: #cbd5e1;
+    font-family: monospace;
+  }
+  .col-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+  }
+  .col-item:hover .col-actions { opacity: 1; }
+  .col-item.selected .col-actions { opacity: 1; }
+  .icon-btn {
+    font-size: 12px;
+    padding: 2px 4px;
+    border-radius: 3px;
+    color: #64748b;
+    cursor: pointer;
+    transition: color .15s;
+  }
+  .icon-btn.rename:hover { color: #60a5fa; }
+  .icon-btn.delete:hover { color: #f87171; }
+  .detail-pane {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .field-group {
+    margin-bottom: 14px;
+  }
+  .field-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: #475569;
+    margin-bottom: 5px;
+  }
+  .field-input {
+    width: 100%;
+    padding: 7px 10px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 12px;
+    box-sizing: border-box;
+  }
+  .field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .type-select {
+    padding: 7px 10px;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 12px;
+    width: 100%;
+  }
+  .danger-zone {
+    margin-top: 20px;
+    padding: 12px;
+    border: 1px solid rgba(239,68,68,.25);
+    border-radius: 8px;
+    background: rgba(239,68,68,.05);
+  }
+  .danger-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: #f87171;
+    margin-bottom: 8px;
+  }
+  .danger-desc {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 10px;
+  }
+  .btn-danger {
+    padding: 5px 10px;
+    border: 1px solid rgba(239,68,68,.4);
+    border-radius: 6px;
+    background: rgba(239,68,68,.1);
+    color: #f87171;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .sync-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(16,185,129,.08);
+    border: 1px solid rgba(16,185,129,.25);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    font-size: 12px;
+    color: #6ee7b7;
+  }
+  .sync-banner-icon { font-size: 16px; }
+  .sync-banner-text { flex: 1; }
+  .sync-banner-text strong { display: block; }
+  .sync-banner-text span { font-size: 11px; color: #4ade80; opacity: .7; }
+  .btn-accept {
+    padding: 5px 10px;
+    border: 1px solid rgba(16,185,129,.4);
+    border-radius: 6px;
+    background: rgba(16,185,129,.15);
+    color: #6ee7b7;
+    font-size: 11px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .divider {
+    border: none;
+    border-top: 1px solid #334155;
+    margin: 14px 0;
+  }
+  .save-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .btn-primary {
+    padding: 6px 14px;
+    background: rgba(99,102,241,.8);
+    border: 1px solid #6366f1;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+</style>
+
+<div class="mockup">
+  <div class="mockup-header">管理界面 — 价格库 · 列管理 Tab（方案一布局）</div>
+  <div class="mockup-body" style="padding:0;">
+    <div class="admin-layout">
+
+      <!-- 侧边栏 -->
+      <div class="sidebar">
+        <div class="sidebar-label">数据库列表</div>
+        <div class="sidebar-item">📦 标准件库</div>
+        <div class="sidebar-item active">🔩 PVC 价格库</div>
+        <div class="sidebar-item">📋 辅材价格库</div>
+        <div class="sidebar-label">操作</div>
+        <div class="sidebar-item">⬆️ 上传新库</div>
+      </div>
+
+      <!-- 主区域 -->
+      <div class="main">
+        <!-- 库头部 -->
+        <div class="lib-header">
+          <div>
+            <div class="lib-title">PVC 价格库</div>
+            <div class="lib-sub">dl_3_pvc_price · 2847 行 · 上次同步: 刚才</div>
+          </div>
+          <div class="btn-row">
+            <div class="btn sync"><div class="sync-dot"></div> 同步结构</div>
+            <div class="btn">重命名</div>
+            <div class="btn">删除库</div>
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+          <div class="tab">数据</div>
+          <div class="tab active">列管理</div>
+        </div>
+
+        <!-- 列管理内容区 -->
+        <div class="tab-body">
+
+          <!-- 左：列列表 -->
+          <div class="col-list">
+            <div class="col-list-header">
+              <div class="col-list-title">列 (7)</div>
+              <div class="col-add-btn" title="新增列">＋</div>
+            </div>
+
+            <!-- 新检测到的列 — 醒目提示 -->
+            <div class="col-item new-detected">
+              <span class="col-badge badge-new">新</span>
+              <span class="col-name">product_type</span>
+              <div class="col-actions">
+                <span class="icon-btn rename" title="重命名">✏️</span>
+              </div>
+            </div>
+
+            <div class="col-item selected">
+              <span class="col-badge badge-text">TEXT</span>
+              <span class="col-name">material</span>
+              <div class="col-actions">
+                <span class="icon-btn rename" title="重命名">✏️</span>
+                <span class="icon-btn delete" title="删除">🗑</span>
+              </div>
+            </div>
+            <div class="col-item">
+              <span class="col-badge badge-text">TEXT</span>
+              <span class="col-name">description</span>
+              <div class="col-actions">
+                <span class="icon-btn rename">✏️</span>
+                <span class="icon-btn delete">🗑</span>
+              </div>
+            </div>
+            <div class="col-item">
+              <span class="col-badge badge-num">NUM</span>
+              <span class="col-name">price_a</span>
+              <div class="col-actions">
+                <span class="icon-btn rename">✏️</span>
+                <span class="icon-btn delete">🗑</span>
+              </div>
+            </div>
+            <div class="col-item">
+              <span class="col-badge badge-num">NUM</span>
+              <span class="col-name">price_b</span>
+              <div class="col-actions">
+                <span class="icon-btn rename">✏️</span>
+                <span class="icon-btn delete">🗑</span>
+              </div>
+            </div>
+            <div class="col-item">
+              <span class="col-badge badge-num">NUM</span>
+              <span class="col-name">price_c</span>
+              <div class="col-actions">
+                <span class="icon-btn rename">✏️</span>
+                <span class="icon-btn delete">🗑</span>
+              </div>
+            </div>
+            <div class="col-item">
+              <span class="col-badge badge-num">NUM</span>
+              <span class="col-name">price_d</span>
+              <div class="col-actions">
+                <span class="icon-btn rename">✏️</span>
+                <span class="icon-btn delete">🗑</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右：列详情/编辑 -->
+          <div class="detail-pane">
+
+            <!-- 新列自动检测提示 banner -->
+            <div class="sync-banner">
+              <span class="sync-banner-icon">✨</span>
+              <div class="sync-banner-text">
+                <strong>检测到 1 个新列</strong>
+                <span>物理表 dl_3_pvc_price 中存在 product_type，尚未登记到元数据</span>
+              </div>
+              <div class="btn-accept">确认加入</div>
+            </div>
+
+            <!-- 当前选中列的编辑表单 -->
+            <div class="field-group">
+              <div class="field-label">列名（物理名）</div>
+              <input class="field-input" value="material" readonly style="color:#64748b;cursor:not-allowed;">
+            </div>
+            <div class="field-row">
+              <div class="field-group">
+                <div class="field-label">显示名称</div>
+                <input class="field-input" value="物料名称">
+              </div>
+              <div class="field-group">
+                <div class="field-label">数据类型</div>
+                <select class="type-select">
+                  <option selected>TEXT 文本</option>
+                  <option>NUMERIC 数字</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="save-row">
+              <div class="btn-primary">保存修改</div>
+              <div class="btn">取消</div>
+            </div>
+
+            <hr class="divider">
+
+            <!-- 危险区 -->
+            <div class="danger-zone">
+              <div class="danger-title">⚠️ 危险操作</div>
+              <div class="danger-desc">删除列将永久清除 dl_3_pvc_price 表中该列的所有数据，且无法恢复。</div>
+              <div class="btn-danger">删除此列…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:12px;">
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px;">自动感知流程</div>
+    <div style="font-size:11px;color:#94a3b8;line-height:1.6;">
+      打开库 → 后端查 <code style="color:#a5b4fc;background:rgba(99,102,241,.15);padding:1px 4px;border-radius:3px;">information_schema</code> → 对比 columns → 发现新列 → Banner 提示 → 用户确认合并
+    </div>
+  </div>
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:12px;">
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px;">手动同步</div>
+    <div style="font-size:11px;color:#94a3b8;line-height:1.6;">
+      点"同步结构"按钮 → <code style="color:#6ee7b7;background:rgba(16,185,129,.1);padding:1px 4px;border-radius:3px;">POST /sync-schema</code> → 同上流程，结果显示 Banner
+    </div>
+  </div>
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:12px;">
+    <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#475569;margin-bottom:6px;">UI 加列</div>
+    <div style="font-size:11px;color:#94a3b8;line-height:1.6;">
+      点 ＋ → 输入列名 + 选类型 → <code style="color:#a5b4fc;background:rgba(99,102,241,.15);padding:1px 4px;border-radius:3px;">POST /columns</code> → 后端 ALTER TABLE + 更新 JSONB
+    </div>
+  </div>
+</div>

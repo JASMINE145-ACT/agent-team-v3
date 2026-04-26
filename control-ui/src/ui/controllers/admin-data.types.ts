@@ -33,6 +33,10 @@ export type AdminDataState = {
   libraryDataQuery: string;
   libraryDataLoading: boolean;
   libraryDataError: string | null;
+  libraryNewColumns: LibraryColumnDef[];
+  librarySchemaLoading: boolean;
+  librarySchemaError: string | null;
+  librarySchemaOpen: boolean;
 };
 
 /** 须为带 @state() adminData 的组件实例（如 OpenClawApp），以便 patch 赋值触发重渲染 */

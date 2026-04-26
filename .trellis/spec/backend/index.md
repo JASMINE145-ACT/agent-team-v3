@@ -24,6 +24,7 @@ The backend is organized into `core/` (pure infrastructure) and `tools/` (busine
 | [Config Reference](./config-reference.md) | All environment variables grouped by domain | ✅ Filled |
 | [Tools Catalog](./tools-catalog.md) | All tools with schemas, return shapes, access patterns | ✅ Filled |
 | [API Routes + Gateway](./api-routes.md) | All REST endpoints + WebSocket gateway methods + SSE events | ✅ Filled |
+| [Reports System](./reports-system.md) | Weekly report pipeline: LLM analysis, phase-2 daemon, status polling, UI rendering | ✅ Filled |
 
 ---
 

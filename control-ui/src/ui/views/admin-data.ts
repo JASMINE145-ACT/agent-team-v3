@@ -20,6 +20,11 @@ export type AdminDataViewProps = {
   onLibraryAddRow: (libId: number) => void;
   onLibraryDrop: (libId: number) => void;
   onLibraryWarningsDismiss: () => void;
+  onSyncSchema: (libId: number) => void;
+  onToggleSchemaPanel: () => void;
+  onAddColumn: (libId: number) => void;
+  onDropColumn: (libId: number, colName: string) => void;
+  onRenameColumn: (libId: number, colName: string) => void;
 };
 
 function numOrNull(s: string): number | null {
@@ -202,10 +207,58 @@ function renderLibraryDetail(props: AdminDataViewProps, lib: LibraryMeta) {
       />
       <button type="button" class="admin-btn" @click=${() => props.onLibraryQueryApply(lib.id)}>应用筛选</button>
       <button type="button" class="admin-btn" @click=${() => props.onLibraryRefresh(lib.id)}>刷新</button>
+      <button type="button" class="admin-btn" ?disabled=${s.librarySchemaLoading} @click=${() => props.onSyncSchema(lib.id)}>
+        ${s.librarySchemaLoading ? "同步中…" : "同步结构"}
+      </button>
+      <button type="button" class="admin-btn" @click=${props.onToggleSchemaPanel}>
+        管理列 ${s.librarySchemaOpen ? "▴" : "▾"}
+      </button>
       <button type="button" class="admin-btn admin-btn--primary" @click=${() => props.onLibraryAddRow(lib.id)}>
         + 新增一行
       </button>
     </div>
+    ${s.libraryNewColumns.length > 0
+      ? html`<div class="admin-warn-bar">
+          检测到 ${s.libraryNewColumns.length} 个新列未同步：
+          ${s.libraryNewColumns.map((c) => c.name).join(", ")} —— 
+          <button
+            type="button"
+            class="admin-btn admin-btn--sm"
+            ?disabled=${s.librarySchemaLoading}
+            @click=${() => props.onSyncSchema(lib.id)}
+          >
+            合并列
+          </button>
+        </div>`
+      : nothing}
+    ${s.librarySchemaOpen
+      ? html`<div style="margin:10px 0;">
+          ${s.librarySchemaError ? html`<p class="admin-err">${s.librarySchemaError}</p>` : nothing}
+          <div class="admin-table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr><th>列名</th><th>类型</th><th>原始名</th><th>操作</th></tr>
+              </thead>
+              <tbody>
+                ${lib.columns.map((col) => html`
+                  <tr>
+                    <td class="mono">${col.name}</td>
+                    <td>${col.type}</td>
+                    <td>${col.original_name}</td>
+                    <td class="admin-actions">
+                      <button type="button" class="admin-btn admin-btn--sm" @click=${() => props.onRenameColumn(lib.id, col.name)}>改名</button>
+                      <button type="button" class="admin-btn admin-btn--sm admin-btn--danger" @click=${() => props.onDropColumn(lib.id, col.name)}>删除</button>
+                    </td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          </div>
+          <div class="admin-row" style="margin-top:8px;">
+            <button type="button" class="admin-btn admin-btn--sm" @click=${() => props.onAddColumn(lib.id)}>+ 新增列</button>
+          </div>
+        </div>`
+      : nothing}
     ${s.libraryDataError ? html`<p class="admin-err">${s.libraryDataError}</p>` : nothing}
     ${s.libraryDataLoading ? html`<p class="admin-muted">加载中…</p>` : nothing}
     <div class="admin-table-wrap">

@@ -63,6 +63,13 @@ def get_admin_dep(x_admin_token: Optional[str] = Header(None, alias="X-Admin-Tok
     require_admin_token(x_admin_token)
 
 
+def _invalidate_library_caches() -> None:
+    admin_cache.invalidate_price_library()
+    admin_cache.invalidate_product_mapping()
+    invalidate_wanding_cache()
+    invalidate_mapping_cache()
+
+
 class LoginRequest(BaseModel):
     password: str
 
@@ -160,6 +167,15 @@ class MappingRow(BaseModel):
     spec: str = ""
     product_code: str = ""
     quotation_name: str = ""
+
+
+class LibraryColumnCreateBody(BaseModel):
+    name: str
+    type: str
+
+
+class LibraryColumnRenameBody(BaseModel):
+    new_name: str
 
 
 @router.get("/product-mapping")
@@ -307,6 +323,91 @@ async def get_library_data(
         page_size=page_size,
         lib_id=lib_id,
     )
+
+
+@router.get("/libraries/{lib_id}/schema-diff")
+async def get_library_schema_diff(lib_id: int, _: None = Depends(get_admin_dep)):
+    meta = repository.resolve_library_meta(lib_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="库不存在")
+    physical_cols = repository.introspect_table_columns(meta["table_name"])
+    existing = {str(c.get("name", "")).strip() for c in meta["columns"]}
+    new_columns = [
+        {"name": c, "type": "TEXT", "original_name": c}
+        for c in physical_cols
+        if c not in existing
+    ]
+    return {"new_columns": new_columns}
+
+
+@router.post("/libraries/{lib_id}/sync-schema")
+async def sync_library_schema(lib_id: int, _: None = Depends(get_admin_dep)):
+    meta = repository.resolve_library_meta(lib_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="库不存在")
+    merged = repository.sync_library_schema(lib_id, meta["table_name"], meta["columns"])
+    _invalidate_library_caches()
+    return {"merged": merged}
+
+
+@router.post("/libraries/{lib_id}/columns")
+async def add_library_column(lib_id: int, body: LibraryColumnCreateBody, _: None = Depends(get_admin_dep)):
+    meta = repository.resolve_library_meta(lib_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="库不存在")
+    try:
+        repository.add_library_column(lib_id, meta["table_name"], body.name, body.type)
+        _invalidate_library_caches()
+        next_meta = repository.resolve_library_meta(lib_id)
+        return {"columns": (next_meta or meta)["columns"]}
+    except ValueError as e:
+        msg = str(e)
+        if "invalid column name" in msg or "invalid column type" in msg or "protected column" in msg:
+            raise HTTPException(status_code=422, detail=msg) from e
+        if "column already exists" in msg:
+            raise HTTPException(status_code=500, detail=msg) from e
+        raise HTTPException(status_code=500, detail=msg) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.delete("/libraries/{lib_id}/columns/{col_name}")
+async def delete_library_column(lib_id: int, col_name: str, _: None = Depends(get_admin_dep)):
+    meta = repository.resolve_library_meta(lib_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="库不存在")
+    try:
+        repository.drop_library_column(lib_id, meta["table_name"], col_name)
+        _invalidate_library_caches()
+        return {"ok": True}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.patch("/libraries/{lib_id}/columns/{col_name}")
+async def patch_library_column(
+    lib_id: int,
+    col_name: str,
+    body: LibraryColumnRenameBody,
+    _: None = Depends(get_admin_dep),
+):
+    meta = repository.resolve_library_meta(lib_id)
+    if meta is None:
+        raise HTTPException(status_code=404, detail="库不存在")
+    try:
+        repository.rename_library_column(lib_id, meta["table_name"], col_name, body.new_name)
+        _invalidate_library_caches()
+        return {"ok": True}
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/libraries/{lib_id}/data")

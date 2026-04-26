@@ -31,6 +31,199 @@
 
 [OK] **Completed**
 
+## Session 57: Library Schema Sync 第六轮收口（schema-diff 兜底契约）
+
+**Date**: 2026-04-24  
+**Task**: Ralph loop iteration 6，补齐 `schema-diff` 在无物理列场景下的返回契约测试并完成最终门禁。
+
+### Summary
+
+新增 `schema-diff` 空结果用例测试，明确约束当物理表 introspect 返回空列表时，接口应返回 `200 + {"new_columns": []}`。
+
+### Main Changes
+
+- `tests/test_admin_libraries_routes.py`
+  - 新增 `test_schema_diff_returns_empty_list_when_no_physical_columns`
+    - mock `resolve_library_meta` 返回存在库
+    - mock `introspect_table_columns` 返回空数组
+    - 断言响应 `status_code == 200` 且 payload 为 `{"new_columns": []}`
+
+### Verification Gate Evidence
+
+1) **Code-Review Agent PASS**
+- 结论：新增测试与当前路由契约一致，无阻断问题。
+
+2) **Test Agent PASS**
+- `python -m pytest -q tests/test_library_schema_sync.py tests/test_admin_libraries_routes.py`
+  - 结果：`23 passed`
+- `cd control-ui && npx vitest run src/ui/controllers/admin-data.test.ts --browser.enabled false`
+  - 结果：`1 file passed, 2 tests passed`
+- `cd control-ui && npx tsc --noEmit`
+  - 结果：通过（无类型错误）
+
+3) **Documentation / Trellis**
+- 本条 Session 57 已记录本轮改动与证据链
+
+### Status
+
+[OK] **Completed**
+
+## Session 56: Library Schema Sync 第五轮加固（异常路径契约测试）
+
+**Date**: 2026-04-24  
+**Task**: Ralph loop iteration 5，补充 `schema-diff` / `sync-schema` 异常路径契约测试。
+
+### Summary
+
+新增三条路由异常路径测试，覆盖库不存在（404）和同步内部异常（500）分支，进一步锁定 API 行为边界。
+
+### Main Changes
+
+- `tests/test_admin_libraries_routes.py`
+  - 新增 `test_schema_diff_returns_404_when_library_missing`
+  - 新增 `test_sync_schema_returns_404_when_library_missing`
+  - 新增 `test_sync_schema_propagates_repository_failure`
+    - 使用 `TestClient(..., raise_server_exceptions=False)` 验证 500 状态码
+
+### Verification Gate Evidence
+
+1) **Code-Review Agent PASS**
+- 结论：新增测试与当前路由行为对齐，无阻断问题。
+
+2) **Test Agent PASS**
+- `python -m pytest -q tests/test_library_schema_sync.py tests/test_admin_libraries_routes.py`
+  - 结果：`22 passed`
+- `cd control-ui && npx vitest run src/ui/controllers/admin-data.test.ts --browser.enabled false`
+  - 结果：`1 passed file, 2 passed tests`
+- `cd control-ui && npx tsc --noEmit`
+  - 结果：通过（无类型错误）
+
+3) **Documentation / Trellis**
+- 本条 Session 56 已记录本轮改动与证据链
+
+### Status
+
+[OK] **Completed**
+
+## Session 55: Library Schema Sync 第四轮加固（路由契约测试）
+
+**Date**: 2026-04-24  
+**Task**: Ralph loop iteration 4，补充 schema-diff / sync-schema 路由契约测试，锁定 spec 行为。
+
+### Summary
+
+新增两条 `routes_admin` 路由测试：验证 `schema-diff` 只返回新增列，`sync-schema` 返回合并列名数组，进一步固化 API 返回结构。
+
+### Main Changes
+
+- `tests/test_admin_libraries_routes.py`
+  - 新增 `test_schema_diff_returns_only_new_columns`
+    - mock `resolve_library_meta` 与 `introspect_table_columns`
+    - 断言返回的 `new_columns` 仅包含元数据外的新增物理列，且结构为 `{name,type,original_name}`
+  - 新增 `test_sync_schema_returns_merged_column_names`
+    - mock `sync_library_schema`
+    - 断言 `POST /sync-schema` 返回 `{merged: [...]}` 与预期列名列表一致
+
+### Verification Gate Evidence
+
+1) **Code-Review Agent PASS**
+- 结论：新增测试无阻断问题，契约覆盖与 spec 对齐。
+
+2) **Test Agent PASS**
+- `python -m pytest -q tests/test_library_schema_sync.py tests/test_admin_libraries_routes.py`
+  - 结果：`19 passed`
+- `cd control-ui && npx vitest run src/ui/controllers/admin-data.test.ts --browser.enabled false`
+  - 结果：`1 file passed, 2 tests passed`
+- `cd control-ui && npx tsc --noEmit`
+  - 结果：通过（无类型错误）
+
+3) **Documentation / Trellis**
+- 本条 Session 55 已记录本轮改动与证据链
+
+### Status
+
+[OK] **Completed**
+
+## Session 54: Library Schema Sync 第三轮加固（前端控制器测试）
+
+**Date**: 2026-04-24  
+**Task**: Ralph loop iteration 3，补足 schema-sync 前端控制器链路自动化验证并打通运行环境。
+
+### Summary
+
+新增 `admin-data` controller 测试，覆盖 `loadLibraryData` 并行拉取 schema-diff 与 `syncLibrarySchema` 完成后清空待合并列；补充 `jsdom` 开发依赖，确保该测试可在非 browser 模式稳定运行。
+
+### Main Changes
+
+- `control-ui/src/ui/controllers/admin-data.test.ts`（新文件）
+  - 新增 `loads library rows and schema-diff columns together`
+  - 新增 `syncLibrarySchema clears pending new columns after reload`
+  - 使用 `vi.stubGlobal("fetch", ...)` 模拟接口链路，并通过 `afterEach(vi.unstubAllGlobals)` 防止全局污染
+
+- `control-ui/package.json`
+  - 新增 devDependency：`jsdom`
+
+- `control-ui/package-lock.json`
+  - 锁文件同步更新（包含 `jsdom` 及其传递依赖）
+
+### Verification Gate Evidence
+
+1) **Code-Review Agent PASS**
+- 复审结论：通过（测试实现与依赖变更均无阻断问题）
+
+2) **Test Agent PASS**
+- `python -m pytest -q tests/test_library_schema_sync.py tests/test_admin_libraries_routes.py`
+  - 结果：`17 passed`
+- `cd control-ui && npx vitest run src/ui/controllers/admin-data.test.ts --browser.enabled false`
+  - 结果：`1 passed file, 2 passed tests`
+- `cd control-ui && npx tsc --noEmit`
+  - 结果：通过（无类型错误）
+
+3) **Documentation / Trellis**
+- 本条 Session 54 已记录本轮改动与证据链
+
+### Status
+
+[OK] **Completed**
+
+## Session 53: Library Schema Sync 第二轮加固（验证与保护列）
+
+**Date**: 2026-04-24  
+**Task**: Ralph loop iteration 2，继续按 spec 补强 schema-sync 细节与测试。
+
+### Summary
+
+完成 repository 与路由测试层的二次收敛：修正 `introspect_table_columns` 参数处理，补上保护列校验，并扩大自动化覆盖。
+
+### Main Changes
+
+- `backend/tools/admin/repository.py`
+  - `introspect_table_columns()` 改为直接使用原始 `table_name` 参数查询 `information_schema`，避免对 `_safe_table_name` 结果再 `strip('"')` 的隐式依赖。
+  - `add_library_column()` 新增保护列拒绝：`id` / `_row_index` → `ValueError("protected column")`。
+  - `rename_library_column()` 新增目标列保护校验：禁止重命名为 `id` / `_row_index`。
+
+- `tests/test_library_schema_sync.py`
+  - 扩展 `introspect_table_columns` 测试，断言查询参数为 `{"tn": "dl_1_demo"}`。
+  - 新增 `test_add_library_column_rejects_protected_name`。
+  - 新增 `test_rename_library_column_rejects_protected_target`。
+
+- `tests/test_admin_libraries_routes.py`
+  - 扩展 schema 列管理错误映射用例：覆盖非法列名 422 分支（repository 抛 `ValueError("invalid column name")`）。
+
+### Verification Evidence
+
+- Code-review agent：**PASS**
+  - 结论：本轮改动无阻断问题，保护列校验与测试覆盖到位。
+- Test-agent：**PASS**
+  - `python -m pytest -q tests/test_library_schema_sync.py tests/test_admin_libraries_routes.py`
+  - 结果：`17 passed`
+  - `cd control-ui && npx tsc --noEmit`
+  - 结果：无类型错误
+
+### Status
+
+[OK] **Completed**
+
 ## Session 57: 2026-04-24 — Ralph Iteration 6（最终收口：前端高亮样式契约补测 + 扩展回归）
 
 **Date**: 2026-04-24  
@@ -1408,6 +1601,55 @@ Changed files (0 total):
 ### Next Steps
 
 - None - task complete
+
+## Session 52: Library Schema Sync 落地（后端 + 前端 + 测试）
+
+**Date**: 2026-04-24  
+**Task**: 按 `2026-04-24-library-schema-sync-design.md` 实现库结构同步、列管理与联动 UI。
+
+### Summary
+
+完成 data libraries 的 schema-diff/sync 与 UI 列管理（新增/删除/改名），并补齐路由与仓储层测试。
+
+### Main Changes
+
+- **Backend repository (`backend/tools/admin/repository.py`)**
+  - 新增 `_safe_col_name()`，统一列名白名单校验（`^[a-z_][a-z0-9_]*$`）。
+  - 新增 `introspect_table_columns()`，读取 `information_schema.columns` 并排除 `id`、`_row_index`。
+  - 新增 `sync_library_schema()`，把物理表新增列合并进 `data_libraries.columns`（默认 `TEXT`）。
+  - 新增 `add_library_column()` / `drop_library_column()` / `rename_library_column()`，实现物理表与元数据同步变更。
+
+- **Backend routes (`backend/server/api/routes_admin.py`)**
+  - 新增端点：
+    - `GET /api/admin/libraries/{lib_id}/schema-diff`
+    - `POST /api/admin/libraries/{lib_id}/sync-schema`
+    - `POST /api/admin/libraries/{lib_id}/columns`
+    - `DELETE /api/admin/libraries/{lib_id}/columns/{col_name}`
+    - `PATCH /api/admin/libraries/{lib_id}/columns/{col_name}`
+  - 新增 `_invalidate_library_caches()`，schema 变更后统一失效缓存（price/mapping/wanding/matcher）。
+
+- **Frontend state/controller/view**
+  - `admin-data.types.ts`：新增 `libraryNewColumns`、`librarySchemaLoading`、`librarySchemaError`、`librarySchemaOpen`。
+  - `admin-data.ts`：`loadLibraryData()` 并行加载 schema-diff；新增 `syncLibrarySchema` / `addLibraryColumn` / `dropLibraryColumn` / `renameLibraryColumn`。
+  - `admin-data.ts`：工具栏新增“同步结构”“管理列”，支持 warn-bar 一键合并、内联列管理表格与 prompt/confirm 交互。
+  - `app-render.ts`：接入新 handlers（同步、开关面板、加列、删列、改名）。
+
+- **Tests**
+  - 新增 `tests/test_library_schema_sync.py`（仓储层：introspect/sync/add/drop/rename）。
+  - 扩展 `tests/test_admin_libraries_routes.py`（路由错误映射 + schema mutation 缓存失效）。
+
+### Verification Evidence
+
+- Code-review agent：**PASS**（确认无阻断问题）
+- Test-agent：**PASS**
+  - `python -m pytest -q tests/test_admin_libraries_routes.py tests/test_library_schema_sync.py`
+  - 结果：`15 passed`
+  - `cd control-ui && npx tsc --noEmit`
+  - 结果：`exit code 0`
+
+### Status
+
+[OK] **Completed**
 
 ## Session 53: 2026-04-23 — PN/MPa 字段匹配修复复核（正则边界 + 去重精度）
 

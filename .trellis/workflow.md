@@ -147,6 +147,7 @@ cat .trellis/spec/backend/config-reference.md          # For environment variabl
 |       |-- index.md                      # Guides index
 |       |-- cross-layer-thinking-guide.md # Pre-implementation checklist
 |       +-- *.md                          # Other guides
++-- knowledge-graph.md  # Concept index (searchable by term → file)
 +-- workflow.md             # This document
 ```
 
@@ -380,6 +381,7 @@ python3 ./.trellis/scripts/task.py list-archive    # List archived tasks
 | Frontend work | `frontend/index.md` → relevant docs |
 | Backend work | `backend/index.md` → relevant docs |
 | Cross-Layer Feature | `guides/cross-layer-thinking-guide.md` |
+| Unknown concept | `knowledge-graph.md` — concept index |
 
 ### Commit Convention
 

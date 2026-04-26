@@ -3,6 +3,7 @@ import type {
   AdminDataHost,
   LibraryMeta,
   LibraryRow,
+  LibraryColumnDef,
 } from "./admin-data.types.ts";
 
 export type {
@@ -10,6 +11,7 @@ export type {
   AdminDataHost,
   LibraryMeta,
   LibraryRow,
+  LibraryColumnDef,
 } from "./admin-data.types.ts";
 
 function apiUrl(basePath: string, path: string, params?: Record<string, string | number>): string {
@@ -55,6 +57,10 @@ export function initialAdminDataState(): AdminDataState {
     libraryDataQuery: "",
     libraryDataLoading: false,
     libraryDataError: null,
+    libraryNewColumns: [],
+    librarySchemaLoading: false,
+    librarySchemaError: null,
+    librarySchemaOpen: false,
   };
 }
 
@@ -163,9 +169,14 @@ export async function loadLibraryData(host: AdminDataHost, libId: number): Promi
       page: host.adminData.libraryDataPage,
       page_size: 100,
     };
-    const res = await fetch(apiUrl(host.basePath, `/api/admin/libraries/${libId}/data`, params), {
-      headers: authHeaders(tok),
-    });
+    const [res, diffRes] = await Promise.all([
+      fetch(apiUrl(host.basePath, `/api/admin/libraries/${libId}/data`, params), {
+        headers: authHeaders(tok),
+      }),
+      fetch(apiUrl(host.basePath, `/api/admin/libraries/${libId}/schema-diff`), {
+        headers: authHeaders(tok),
+      }),
+    ]);
     if (res.status === 401) {
       adminLogout(host);
       return;
@@ -175,9 +186,131 @@ export async function loadLibraryData(host: AdminDataHost, libId: number): Promi
       return;
     }
     const data = (await res.json()) as { items: LibraryRow[]; total: number };
-    patch(host, { libraryData: data.items, libraryDataTotal: data.total, libraryDataLoading: false });
+    let newCols: LibraryColumnDef[] = [];
+    if (diffRes.ok) {
+      const diffJson = (await diffRes.json()) as { new_columns?: LibraryColumnDef[] };
+      newCols = Array.isArray(diffJson.new_columns) ? diffJson.new_columns : [];
+    }
+    patch(host, {
+      libraryData: data.items,
+      libraryDataTotal: data.total,
+      libraryDataLoading: false,
+      libraryNewColumns: newCols,
+    });
   } catch (e) {
     patch(host, { libraryDataLoading: false, libraryDataError: String(e) });
+  }
+}
+
+export async function syncLibrarySchema(host: AdminDataHost, libId: number): Promise<void> {
+  const tok = host.adminData.token;
+  if (!tok) return;
+  patch(host, { librarySchemaLoading: true, librarySchemaError: null });
+  try {
+    const res = await fetch(apiUrl(host.basePath, `/api/admin/libraries/${libId}/sync-schema`), {
+      method: "POST",
+      headers: authHeaders(tok),
+    });
+    if (res.status === 401) {
+      adminLogout(host);
+      return;
+    }
+    if (!res.ok) {
+      patch(host, { librarySchemaLoading: false, librarySchemaError: await res.text() });
+      return;
+    }
+    await loadLibraries(host);
+    await loadLibraryData(host, libId);
+    patch(host, { librarySchemaLoading: false, librarySchemaError: null, libraryNewColumns: [] });
+  } catch (e) {
+    patch(host, { librarySchemaLoading: false, librarySchemaError: String(e) });
+  }
+}
+
+export async function addLibraryColumn(
+  host: AdminDataHost,
+  libId: number,
+  name: string,
+  type: "TEXT" | "NUMERIC",
+): Promise<void> {
+  const tok = host.adminData.token;
+  if (!tok) return;
+  patch(host, { librarySchemaLoading: true, librarySchemaError: null });
+  try {
+    const res = await fetch(apiUrl(host.basePath, `/api/admin/libraries/${libId}/columns`), {
+      method: "POST",
+      headers: authHeaders(tok),
+      body: JSON.stringify({ name, type }),
+    });
+    if (res.status === 401) {
+      adminLogout(host);
+      return;
+    }
+    if (!res.ok) {
+      patch(host, { librarySchemaLoading: false, librarySchemaError: await res.text() });
+      return;
+    }
+    await loadLibraries(host);
+    await loadLibraryData(host, libId);
+    patch(host, { librarySchemaLoading: false, librarySchemaError: null });
+  } catch (e) {
+    patch(host, { librarySchemaLoading: false, librarySchemaError: String(e) });
+  }
+}
+
+export async function dropLibraryColumn(host: AdminDataHost, libId: number, colName: string): Promise<void> {
+  const tok = host.adminData.token;
+  if (!tok) return;
+  patch(host, { librarySchemaLoading: true, librarySchemaError: null });
+  try {
+    const res = await fetch(apiUrl(host.basePath, `/api/admin/libraries/${libId}/columns/${encodeURIComponent(colName)}`), {
+      method: "DELETE",
+      headers: { "X-Admin-Token": tok },
+    });
+    if (res.status === 401) {
+      adminLogout(host);
+      return;
+    }
+    if (!res.ok) {
+      patch(host, { librarySchemaLoading: false, librarySchemaError: await res.text() });
+      return;
+    }
+    await loadLibraries(host);
+    await loadLibraryData(host, libId);
+    patch(host, { librarySchemaLoading: false, librarySchemaError: null });
+  } catch (e) {
+    patch(host, { librarySchemaLoading: false, librarySchemaError: String(e) });
+  }
+}
+
+export async function renameLibraryColumn(
+  host: AdminDataHost,
+  libId: number,
+  oldName: string,
+  newName: string,
+): Promise<void> {
+  const tok = host.adminData.token;
+  if (!tok) return;
+  patch(host, { librarySchemaLoading: true, librarySchemaError: null });
+  try {
+    const res = await fetch(apiUrl(host.basePath, `/api/admin/libraries/${libId}/columns/${encodeURIComponent(oldName)}`), {
+      method: "PATCH",
+      headers: authHeaders(tok),
+      body: JSON.stringify({ new_name: newName }),
+    });
+    if (res.status === 401) {
+      adminLogout(host);
+      return;
+    }
+    if (!res.ok) {
+      patch(host, { librarySchemaLoading: false, librarySchemaError: await res.text() });
+      return;
+    }
+    await loadLibraries(host);
+    await loadLibraryData(host, libId);
+    patch(host, { librarySchemaLoading: false, librarySchemaError: null });
+  } catch (e) {
+    patch(host, { librarySchemaLoading: false, librarySchemaError: String(e) });
   }
 }
 

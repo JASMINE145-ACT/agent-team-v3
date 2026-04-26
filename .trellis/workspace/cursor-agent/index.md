@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 51
-- **Last Active**: 2026-04-20
+- **Total Sessions**: 57
+- **Last Active**: 2026-04-24
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~1536 | Active |
+| `journal-3.md` | ~10 | Active |
+| `journal-2.md` | ~1985 | Archived |
 | `journal-1.md` | ~230 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +31,12 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits |
 |---|------|-------|---------|
+| 57 | 2026-04-24 | 周报三项增强（WoW KPI + 图表联动 + 下周预测）最终收口 | - |
+| 56 | 2026-04-24 | 周报三项增强第 5 轮（runner 测试稳健化） | - |
+| 55 | 2026-04-24 | 周报三项增强第 4 轮（prev_week 写库断言） | - |
+| 54 | 2026-04-24 | 周报三项增强（WoW KPI + 图表联动 + 下周预测）| - |
+| 53 | 2026-04-23 | PN/MPa 字段匹配修复复核（正则边界 + 去重精度） | - |
+| 52 | 2026-04-21 | Skill 规范文档（合格标准 + 注意事项） | - |
 | 51 | 2026-04-20 | 修复 Neon 库表查询：表名/列名/排序字段全面修正 | - |
 | 50 | 2026-04-20 | 万鼎业务知识 Neon 主存储（KnowledgeBackend + llm_selector 降级链） | - |
 | 49 | 2026-04-19 | CCB history compression study (Ralph iteration 10) | - |

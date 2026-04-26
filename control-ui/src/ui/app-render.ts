@@ -55,15 +55,19 @@ import {
   updateSkillEnabled,
 } from "./controllers/skills.ts";
 import {
+  addLibraryColumn,
   addLibraryRow,
   adminLogin,
   adminLogout,
   deleteLibraryRow,
+  dropLibraryColumn,
   dropLibrary,
   loadLibraries,
   loadLibraryData,
   patchLibraryRow,
+  renameLibraryColumn,
   saveLibraryRow,
+  syncLibrarySchema,
   uploadLibrary,
 } from "./controllers/admin-data.ts";
 import type { AdminDataHost } from "./controllers/admin-data.types.ts";
@@ -903,6 +907,34 @@ export function renderApp(state: AppViewState) {
                   deleteLibraryRow(state as unknown as AdminDataHost, libId, rowId),
                 onLibraryAddRow: (libId) => addLibraryRow(state as unknown as AdminDataHost, libId),
                 onLibraryDrop: (libId) => dropLibrary(state as unknown as AdminDataHost, libId),
+                onSyncSchema: (libId) => syncLibrarySchema(state as unknown as AdminDataHost, libId),
+                onToggleSchemaPanel: () => {
+                  state.adminData = {
+                    ...state.adminData,
+                    librarySchemaOpen: !state.adminData.librarySchemaOpen,
+                  };
+                },
+                onAddColumn: (libId) => {
+                  const name = prompt("新列名：")?.trim() ?? "";
+                  if (!name) return;
+                  const rawType = (prompt("类型（TEXT/NUMERIC）：", "TEXT") ?? "").trim().toUpperCase();
+                  const colType = rawType === "NUMERIC" ? "NUMERIC" : rawType === "TEXT" ? "TEXT" : "";
+                  if (!colType) {
+                    state.adminData = { ...state.adminData, librarySchemaError: "类型只允许 TEXT 或 NUMERIC" };
+                    return;
+                  }
+                  void addLibraryColumn(state as unknown as AdminDataHost, libId, name, colType);
+                },
+                onDropColumn: (libId, colName) => {
+                  if (confirm(`删除列 ${colName} 将永久清除所有行的该列数据，确认？`)) {
+                    void dropLibraryColumn(state as unknown as AdminDataHost, libId, colName);
+                  }
+                },
+                onRenameColumn: (libId, colName) => {
+                  const next = prompt("新列名：", colName)?.trim() ?? "";
+                  if (!next || next === colName) return;
+                  void renameLibraryColumn(state as unknown as AdminDataHost, libId, colName, next);
+                },
                 onLibraryWarningsDismiss: () => {
                   state.adminData = { ...state.adminData, libraryUploadWarnings: [] };
                 },

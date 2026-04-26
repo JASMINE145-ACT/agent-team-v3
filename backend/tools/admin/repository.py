@@ -497,6 +497,182 @@ def _safe_table_name(table_name: str) -> str:
     return _quote_sql_identifier(tn)
 
 
+def _safe_col_name(col_name: str) -> str:
+    cn = (col_name or "").strip()
+    if not re.fullmatch(r"[a-z_][a-z0-9_]*", cn):
+        raise ValueError("invalid column name")
+    return cn
+
+
+def introspect_table_columns(table_name: str) -> list[str]:
+    """Query physical table columns, excluding id/_row_index."""
+    engine = _get_engine()
+    if engine is None:
+        return []
+    table = (table_name or "").strip()
+    if not table:
+        return []
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    f"""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = :tn
+                    ORDER BY ordinal_position
+                    """
+                ),
+                {"tn": table},
+            ).fetchall()
+        cols = [str(r[0]) for r in rows if r and r[0] is not None]
+        return [c for c in cols if c not in {"id", "_row_index"}]
+    except Exception as e:
+        logger.warning("introspect_table_columns 失败 (table=%s): %s", table_name, e)
+        return []
+
+
+def sync_library_schema(lib_id: int, table_name: str, existing_columns: list[dict]) -> list[str]:
+    engine = _get_engine()
+    if engine is None:
+        return []
+    physical_cols = introspect_table_columns(table_name)
+    if not physical_cols:
+        return []
+    existing_names = {str(c.get("name", "")).strip() for c in existing_columns}
+    new_cols = [name for name in physical_cols if name and name not in existing_names]
+    if not new_cols:
+        return []
+    merged = list(existing_columns)
+    for name in new_cols:
+        merged.append(
+            {
+                "name": name,
+                "type": "TEXT",
+                "original_name": name,
+                "warnings": [],
+            }
+        )
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE data_libraries SET columns=CAST(:cols AS jsonb), updated_at=NOW() WHERE id=:id"),
+                {"cols": json.dumps(merged, ensure_ascii=False), "id": lib_id},
+            )
+    except Exception as e:
+        logger.warning("sync_library_schema 失败 (lib_id=%s): %s", lib_id, e)
+        return []
+    return new_cols
+
+
+def add_library_column(lib_id: int, table_name: str, col_name: str, col_type: str) -> None:
+    engine = _get_engine()
+    if engine is None:
+        raise RuntimeError("database unavailable")
+    col = _safe_col_name(col_name)
+    if col in {"id", "_row_index"}:
+        raise ValueError("protected column")
+    typ = (col_type or "").upper().strip()
+    if typ not in {"TEXT", "NUMERIC"}:
+        raise ValueError("invalid column type")
+    sql_type = "NUMERIC" if typ == "NUMERIC" else "TEXT"
+    safe_table = _safe_table_name(table_name)
+    quoted_col = _quote_sql_identifier(col)
+    with engine.begin() as conn:
+        conn.execute(text(f"ALTER TABLE {safe_table} ADD COLUMN {quoted_col} {sql_type} NULL"))
+        row = conn.execute(
+            text("SELECT columns FROM data_libraries WHERE id=:id"),
+            {"id": lib_id},
+        ).mappings().first()
+        if row is None:
+            raise ValueError("library not found")
+        columns = row["columns"] if isinstance(row["columns"], list) else json.loads(row["columns"] or "[]")
+        columns = list(columns)
+        if any(str(c.get("name", "")).strip() == col for c in columns):
+            raise ValueError("column already exists in metadata")
+        columns.append(
+            {
+                "name": col,
+                "type": typ,
+                "original_name": col,
+                "warnings": [],
+            }
+        )
+        conn.execute(
+            text("UPDATE data_libraries SET columns=CAST(:cols AS jsonb), updated_at=NOW() WHERE id=:id"),
+            {"cols": json.dumps(columns, ensure_ascii=False), "id": lib_id},
+        )
+
+
+def drop_library_column(lib_id: int, table_name: str, col_name: str) -> None:
+    engine = _get_engine()
+    if engine is None:
+        raise RuntimeError("database unavailable")
+    col = _safe_col_name(col_name)
+    if col in {"id", "_row_index"}:
+        raise ValueError("protected column")
+    safe_table = _safe_table_name(table_name)
+    quoted_col = _quote_sql_identifier(col)
+    with engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT columns FROM data_libraries WHERE id=:id"),
+            {"id": lib_id},
+        ).mappings().first()
+        if row is None:
+            raise ValueError("library not found")
+        columns = row["columns"] if isinstance(row["columns"], list) else json.loads(row["columns"] or "[]")
+        columns = list(columns)
+        if not any(str(c.get("name", "")).strip() == col for c in columns):
+            raise KeyError("column not found")
+        conn.execute(text(f"ALTER TABLE {safe_table} DROP COLUMN {quoted_col}"))
+        kept = [c for c in columns if str(c.get("name", "")).strip() != col]
+        conn.execute(
+            text("UPDATE data_libraries SET columns=CAST(:cols AS jsonb), updated_at=NOW() WHERE id=:id"),
+            {"cols": json.dumps(kept, ensure_ascii=False), "id": lib_id},
+        )
+
+
+def rename_library_column(lib_id: int, table_name: str, old_name: str, new_name: str) -> None:
+    engine = _get_engine()
+    if engine is None:
+        raise RuntimeError("database unavailable")
+    old_col = _safe_col_name(old_name)
+    new_col = _safe_col_name(new_name)
+    if old_col in {"id", "_row_index"}:
+        raise ValueError("protected column")
+    if new_col in {"id", "_row_index"}:
+        raise ValueError("protected column")
+    safe_table = _safe_table_name(table_name)
+    with engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT columns FROM data_libraries WHERE id=:id"),
+            {"id": lib_id},
+        ).mappings().first()
+        if row is None:
+            raise ValueError("library not found")
+        columns = row["columns"] if isinstance(row["columns"], list) else json.loads(row["columns"] or "[]")
+        columns = list(columns)
+        idx = next((i for i, c in enumerate(columns) if str(c.get("name", "")).strip() == old_col), -1)
+        if idx < 0:
+            raise KeyError("column not found")
+        if any(str(c.get("name", "")).strip() == new_col for c in columns):
+            raise ValueError("column already exists")
+        conn.execute(
+            text(
+                f"ALTER TABLE {safe_table} RENAME COLUMN {_quote_sql_identifier(old_col)} TO {_quote_sql_identifier(new_col)}"
+            )
+        )
+        next_col = dict(columns[idx])
+        next_col["name"] = new_col
+        next_col["original_name"] = new_col
+        columns[idx] = next_col
+        conn.execute(
+            text("UPDATE data_libraries SET columns=CAST(:cols AS jsonb), updated_at=NOW() WHERE id=:id"),
+            {"cols": json.dumps(columns, ensure_ascii=False), "id": lib_id},
+        )
+
+
 def list_libraries() -> list[dict]:
     engine = _get_engine()
     if engine is None:

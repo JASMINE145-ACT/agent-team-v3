@@ -197,3 +197,189 @@ def test_drop_library_invalidates_caches(monkeypatch):
     assert resp.status_code == 200
     assert resp.json().get("ok") is True
     assert calls == {"price": 1, "mapping": 1, "wanding": 1, "map_matcher": 1}
+
+
+def test_schema_column_routes_error_mapping(monkeypatch):
+    _setup_admin_auth(monkeypatch)
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.resolve_library_meta",
+        lambda lib_id: {"table_name": "dl_1_demo", "columns": [{"name": "material", "type": "TEXT"}]},
+    )
+    client = TestClient(app)
+
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.add_library_column",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("invalid column type")),
+    )
+    resp = client.post(
+        "/api/admin/libraries/1/columns",
+        headers={"X-Admin-Token": "ok", "Content-Type": "application/json"},
+        json={"name": "x", "type": "BAD"},
+    )
+    assert resp.status_code == 422
+
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.add_library_column",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("invalid column name")),
+    )
+    resp = client.post(
+        "/api/admin/libraries/1/columns",
+        headers={"X-Admin-Token": "ok", "Content-Type": "application/json"},
+        json={"name": "bad-name", "type": "TEXT"},
+    )
+    assert resp.status_code == 422
+
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.drop_library_column",
+        lambda *args, **kwargs: (_ for _ in ()).throw(KeyError("column not found")),
+    )
+    resp = client.delete("/api/admin/libraries/1/columns/missing", headers={"X-Admin-Token": "ok"})
+    assert resp.status_code == 404
+
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.rename_library_column",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("duplicate column")),
+    )
+    resp = client.patch(
+        "/api/admin/libraries/1/columns/material",
+        headers={"X-Admin-Token": "ok", "Content-Type": "application/json"},
+        json={"new_name": "material2"},
+    )
+    assert resp.status_code == 500
+
+
+def test_schema_mutation_routes_invalidate_caches(monkeypatch):
+    _setup_admin_auth(monkeypatch)
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.resolve_library_meta",
+        lambda lib_id: {"table_name": "dl_1_demo", "columns": [{"name": "material", "type": "TEXT"}]},
+    )
+    monkeypatch.setattr("backend.server.api.routes_admin.repository.sync_library_schema", lambda *a, **k: ["new_col"])
+    monkeypatch.setattr("backend.server.api.routes_admin.repository.add_library_column", lambda *a, **k: None)
+    monkeypatch.setattr("backend.server.api.routes_admin.repository.drop_library_column", lambda *a, **k: None)
+    monkeypatch.setattr("backend.server.api.routes_admin.repository.rename_library_column", lambda *a, **k: None)
+    calls: dict[str, int] = {"price": 0, "mapping": 0, "wanding": 0, "map_matcher": 0}
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.admin_cache.invalidate_price_library",
+        lambda: calls.__setitem__("price", calls["price"] + 1),
+    )
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.admin_cache.invalidate_product_mapping",
+        lambda: calls.__setitem__("mapping", calls["mapping"] + 1),
+    )
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.invalidate_wanding_cache",
+        lambda: calls.__setitem__("wanding", calls["wanding"] + 1),
+    )
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.invalidate_mapping_cache",
+        lambda: calls.__setitem__("map_matcher", calls["map_matcher"] + 1),
+    )
+    client = TestClient(app)
+    assert client.post("/api/admin/libraries/1/sync-schema", headers={"X-Admin-Token": "ok"}).status_code == 200
+    assert client.post(
+        "/api/admin/libraries/1/columns",
+        headers={"X-Admin-Token": "ok", "Content-Type": "application/json"},
+        json={"name": "x", "type": "TEXT"},
+    ).status_code == 200
+    assert client.delete("/api/admin/libraries/1/columns/x", headers={"X-Admin-Token": "ok"}).status_code == 200
+    assert client.patch(
+        "/api/admin/libraries/1/columns/material",
+        headers={"X-Admin-Token": "ok", "Content-Type": "application/json"},
+        json={"new_name": "mat2"},
+    ).status_code == 200
+    assert calls == {"price": 4, "mapping": 4, "wanding": 4, "map_matcher": 4}
+
+
+def test_schema_diff_returns_only_new_columns(monkeypatch):
+    _setup_admin_auth(monkeypatch)
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.resolve_library_meta",
+        lambda lib_id: {
+            "table_name": "dl_1_demo",
+            "columns": [{"name": "material", "type": "TEXT", "original_name": "material"}],
+        },
+    )
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.introspect_table_columns",
+        lambda table_name: ["material", "price_a", "price_b"],
+    )
+    client = TestClient(app)
+    resp = client.get("/api/admin/libraries/1/schema-diff", headers={"X-Admin-Token": "ok"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["new_columns"] == [
+        {"name": "price_a", "type": "TEXT", "original_name": "price_a"},
+        {"name": "price_b", "type": "TEXT", "original_name": "price_b"},
+    ]
+
+
+def test_schema_diff_returns_empty_list_when_no_physical_columns(monkeypatch):
+    _setup_admin_auth(monkeypatch)
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.resolve_library_meta",
+        lambda lib_id: {
+            "table_name": "dl_1_demo",
+            "columns": [{"name": "material", "type": "TEXT", "original_name": "material"}],
+        },
+    )
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.introspect_table_columns",
+        lambda table_name: [],
+    )
+    client = TestClient(app)
+    resp = client.get("/api/admin/libraries/1/schema-diff", headers={"X-Admin-Token": "ok"})
+    assert resp.status_code == 200
+    assert resp.json() == {"new_columns": []}
+
+
+def test_sync_schema_returns_merged_column_names(monkeypatch):
+    _setup_admin_auth(monkeypatch)
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.resolve_library_meta",
+        lambda lib_id: {
+            "table_name": "dl_1_demo",
+            "columns": [{"name": "material", "type": "TEXT", "original_name": "material"}],
+        },
+    )
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.sync_library_schema",
+        lambda lib_id, table_name, columns: ["price_a", "price_b"],
+    )
+    client = TestClient(app)
+    resp = client.post("/api/admin/libraries/1/sync-schema", headers={"X-Admin-Token": "ok"})
+    assert resp.status_code == 200
+    assert resp.json() == {"merged": ["price_a", "price_b"]}
+
+
+def test_schema_diff_returns_404_when_library_missing(monkeypatch):
+    _setup_admin_auth(monkeypatch)
+    monkeypatch.setattr("backend.server.api.routes_admin.repository.resolve_library_meta", lambda lib_id: None)
+    client = TestClient(app)
+    resp = client.get("/api/admin/libraries/404/schema-diff", headers={"X-Admin-Token": "ok"})
+    assert resp.status_code == 404
+    assert "库不存在" in resp.text
+
+
+def test_sync_schema_returns_404_when_library_missing(monkeypatch):
+    _setup_admin_auth(monkeypatch)
+    monkeypatch.setattr("backend.server.api.routes_admin.repository.resolve_library_meta", lambda lib_id: None)
+    client = TestClient(app)
+    resp = client.post("/api/admin/libraries/404/sync-schema", headers={"X-Admin-Token": "ok"})
+    assert resp.status_code == 404
+    assert "库不存在" in resp.text
+
+
+def test_sync_schema_propagates_repository_failure(monkeypatch):
+    _setup_admin_auth(monkeypatch)
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.resolve_library_meta",
+        lambda lib_id: {"table_name": "dl_1_demo", "columns": []},
+    )
+    monkeypatch.setattr(
+        "backend.server.api.routes_admin.repository.sync_library_schema",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("sync failed")),
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/api/admin/libraries/1/sync-schema", headers={"X-Admin-Token": "ok"})
+    assert resp.status_code == 500
