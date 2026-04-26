@@ -265,7 +265,7 @@ function renderLibraryList(props: AdminDataViewProps) {
                       </button>
                       <button
                         type="button"
-                        class="admin-btn admin-btn--sm admin-btn--danger"
+                        class="admin-btn admin-btn--sm"
                         @click=${() => {
                           if (confirm(`确认删除库「${lib.name}」及其所有数据？此操作不可恢复。`)) {
                             props.onLibraryDrop(lib.id);
