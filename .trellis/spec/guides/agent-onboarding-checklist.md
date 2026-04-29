@@ -7,7 +7,7 @@
 
 ## Phase 1: Project Orientation (3 min)
 
-- [ ] Read `spec/index.md`
+- [ ] Read `INDEX.md`
 - [ ] Read `spec/tech-framework-guidelines.md`
 - [ ] Read `INDEX.md`
 

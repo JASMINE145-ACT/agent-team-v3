@@ -66,12 +66,11 @@
 | `spec/tech-framework-guidelines.md` | 技术框架基线（技术选型约束） |
 | `spec/guides/cross-layer-thinking-guide.md` | 跨层思考指南（前后端联动设计） |
 | `spec/guides/code-reuse-thinking-guide.md` | 代码复用思考指南 |
-| `spec/agent-fast-path.md` | Agent 快速入手路径（任务导向） |
-| `spec/agent-onboarding-checklist.md` | Agent 接手项目检查清单 |
-| `spec/role-based-reading-paths.md` | 按角色的阅读计划（开发 / 设计 / 维护） |
-| `spec/time-budget-reading.md` | 按时间预算的阅读指南（5min / 30min / 1h） |
+| `spec/guides/agent-fast-path.md` | Agent 快速入手路径（任务导向） |
+| `spec/guides/agent-onboarding-checklist.md` | Agent 接手项目检查清单 |
+| `spec/guides/role-based-reading-paths.md` | 按角色的阅读计划（开发 / 设计 / 维护） |
+| `spec/guides/time-budget-reading.md` | 按时间预算的阅读指南（5min / 30min / 1h） |
 | `spec/secondary-modules-quick-reference.md` | 次要模块速查 |
-| `spec/index.md` | Spec 主目录（文件级索引） |
 
 ---
 
@@ -235,11 +234,10 @@
 | 概念 | 文件 |
 |------|------|
 | 技术框架基线 / 技术选型约束 | `spec/tech-framework-guidelines.md` |
-| Agent 快速入手（任务导向） | `spec/agent-fast-path.md` |
-| Agent 接手检查清单 | `spec/agent-onboarding-checklist.md` |
-| 索引维护规范 | `spec/index-maintenance.md` |
-| 按角色阅读计划 | `spec/role-based-reading-paths.md` |
-| 按时间预算阅读 | `spec/time-budget-reading.md` |
+| Agent 快速入手（任务导向） | `spec/guides/agent-fast-path.md` |
+| Agent 接手检查清单 | `spec/guides/agent-onboarding-checklist.md` |
+| 按角色阅读计划 | `spec/guides/role-based-reading-paths.md` |
+| 按时间预算阅读 | `spec/guides/time-budget-reading.md` |
 | Trellis 工作流规范 | `workflow.md` |
 | Slash 命令（/trellis:*） | `.cursor/commands/trellis-*.md` |
 | 跨层思考指南 | `spec/guides/cross-layer-thinking-guide.md` |

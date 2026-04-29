@@ -8,6 +8,12 @@
 
 **Frontend**: `control-ui/` — A Lit Web Components based admin control panel.
 
+Quick navigation:
+- Project index: `../index.md`
+- Technical framework baseline: `../tech-framework-guidelines.md`
+- Task-first navigation: `../agent-fast-path.md`
+- Onboarding checklist: `../agent-onboarding-checklist.md`
+
 | Attribute | Value |
 |-----------|-------|
 | Framework | Lit 3.x (Web Components) |
@@ -25,11 +31,26 @@
 | Guide | Description | Status |
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | ✅ Filled |
+| [Core Interaction Flow](./core-interaction-flow.md) | User action -> controller -> gateway/API -> render chain | ✅ Filled |
 | [Pages / Tabs](./pages.md) | All 16 tabs: routes, Chinese names, view/controller files | ✅ Filled |
 | [Component Guidelines](./component-guidelines.md) | Web Component patterns, `@state`, lifecycle | ✅ Filled |
 | [Type Safety](./type-safety.md) | TypeScript conventions, type definitions | ✅ Filled |
 | [i18n Guidelines](./i18n-guidelines.md) | Translation system, locale files | ✅ Filled |
 | [Testing Guidelines](./testing-guidelines.md) | Vitest + Playwright patterns | ✅ Filled |
+
+---
+
+## Recommended Reading Order
+
+### Core Paths (Detailed)
+- `core-interaction-flow.md`
+- `pages.md`
+
+### General References (Concise)
+- `component-guidelines.md`
+- `type-safety.md`
+- `i18n-guidelines.md`
+- `testing-guidelines.md`
 
 ---
 

@@ -19,7 +19,7 @@ Use when:
 
 1. `spec/agent-onboarding-checklist.md`
 2. `spec/tech-framework-guidelines.md`
-3. Relevant core doc from `spec/index.md`
+3. Relevant core doc from `INDEX.md`
 
 Use when:
 - starting a feature/fix and need safe boundaries
@@ -28,7 +28,7 @@ Use when:
 
 ## 30 Minutes (Deep Understanding)
 
-1. `spec/index.md`
+1. `INDEX.md`
 2. `spec/backend/core-react-loop.md`
 3. `spec/frontend/core-interaction-flow.md`
 4. Domain core docs:

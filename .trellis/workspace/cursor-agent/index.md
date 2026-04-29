@@ -14,6 +14,26 @@
 
 ---
 
+## Agent Onboarding (30s)
+
+For project understanding, start here:
+
+1. `.trellis/INDEX.md`
+2. `.trellis/spec/tech-framework-guidelines.md`
+3. `.trellis/knowledge-graph.md`
+4. `.trellis/spec/guides/agent-fast-path.md` (task-first jumps)
+5. `.trellis/spec/guides/agent-onboarding-checklist.md` (15-minute runbook)
+
+Core business deep dives:
+- `.trellis/spec/backend/quotation-inventory-flow.md`
+- `.trellis/spec/backend/work-pipeline-core.md`
+- `.trellis/spec/backend/oos-shortage-lifecycle.md`
+
+Frontend runtime quick path:
+- `.trellis/spec/frontend/core-interaction-flow.md`
+
+---
+
 ## Active Documents
 
 <!-- @@@auto:active-documents -->

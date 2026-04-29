@@ -33,6 +33,19 @@ workspace/
 
 ## Getting Started
 
+### Fast Project Context (for any agent)
+
+Before deep implementation, read:
+
+1. `.trellis/INDEX.md`
+2. `.trellis/spec/tech-framework-guidelines.md`
+3. `.trellis/knowledge-graph.md`
+4. `.trellis/spec/guides/agent-fast-path.md`
+5. `.trellis/spec/secondary-modules-quick-reference.md`
+6. `.trellis/spec/guides/role-based-reading-paths.md`
+7. `.trellis/spec/guides/agent-onboarding-checklist.md`
+8. `.trellis/spec/guides/time-budget-reading.md`
+
 ### For New Developers
 
 Run the initialization script:

@@ -25,8 +25,8 @@ Related entry modes:
 | Update control-ui behavior | `spec/frontend/core-interaction-flow.md` | `spec/frontend/pages.md`, `spec/frontend/component-guidelines.md` |
 | Add/adjust tab/page UI | `spec/frontend/pages.md` | `spec/frontend/index.md`, `spec/frontend/type-safety.md` |
 | Check deployment/env issues | `spec/tech-framework-guidelines.md` | `spec/backend/config-reference.md`, `README.md` |
-| Handle non-core/peripheral task | `spec/secondary-modules-quick-reference.md` | `spec/index.md`, `INDEX.md` |
-| Understand project quickly from zero | `spec/index.md` | `INDEX.md`, then domain doc above |
+| Handle non-core/peripheral task | `spec/secondary-modules-quick-reference.md` | `INDEX.md`, `INDEX.md` |
+| Understand project quickly from zero | `INDEX.md` | `INDEX.md`, then domain doc above |
 
 ---
 

@@ -87,7 +87,7 @@
 
 ## 6) Recommended Read Order for New Contributors
 
-1. `spec/index.md`
+1. `INDEX.md`
 2. `spec/backend/index.md`
 3. `spec/frontend/index.md`
 4. `INDEX.md`

@@ -9,6 +9,12 @@
 Agent Team version3 is a **single-agent ReAct system** providing quotation, inventory lookup, OOS registration, and ERP modification tools.
 The backend is organized into `core/` (pure infrastructure) and `tools/` (business logic).
 
+Quick navigation:
+- Project index: `../index.md`
+- Technical framework baseline: `../tech-framework-guidelines.md`
+- Task-first navigation: `../agent-fast-path.md`
+- Onboarding checklist: `../agent-onboarding-checklist.md`
+
 ---
 
 ## Guidelines Index
@@ -25,6 +31,26 @@ The backend is organized into `core/` (pure infrastructure) and `tools/` (busine
 | [Tools Catalog](./tools-catalog.md) | All tools with schemas, return shapes, access patterns | ✅ Filled |
 | [API Routes + Gateway](./api-routes.md) | All REST endpoints + WebSocket gateway methods + SSE events | ✅ Filled |
 | [Reports System](./reports-system.md) | Weekly report pipeline: LLM analysis, phase-2 daemon, status polling, UI rendering | ✅ Filled |
+| [Core ReAct Loop](./core-react-loop.md) | Central loop: context, tool calls, observations, stop conditions | ✅ Filled |
+| [Quotation + Inventory Flow](./quotation-inventory-flow.md) | Core matching path: candidates, pre-filter, selector, rework | ✅ Filled |
+| [Work Pipeline Core](./work-pipeline-core.md) | Run/resume stream execution model for work tasks | ✅ Filled |
+| [OOS Shortage Lifecycle](./oos-shortage-lifecycle.md) | OOS registration, persistence, notifications, reporting path | ✅ Filled |
+
+---
+
+## Recommended Reading Order
+
+### Core Paths (Detailed)
+- `core-react-loop.md`
+- `quotation-inventory-flow.md`
+- `work-pipeline-core.md`
+- `oos-shortage-lifecycle.md`
+
+### General References (Concise)
+- `api-routes.md`
+- `tools-catalog.md`
+- `config-reference.md`
+- `quality-guidelines.md`
 
 ---
 
