@@ -37,3 +37,52 @@ class AgentExtension(ABC):
 
     def on_after_tool(self, name: str, args: dict, obs: str, context: dict | None = None) -> str:
         return obs
+
+    def on_before_tool(self, name: str, args: dict, context: dict) -> dict:
+        """工具执行前调用。返回归一化后的 args（可修改参数）。"""
+        return args
+
+    def should_stop_loop(
+        self, name: str, obs: str, context: dict
+    ) -> tuple[bool, str | None]:
+        """on_after_tool 之后调用。返回 (True, final_answer) 可提前终止 ReAct 循环。"""
+        return False, None
+
+    def on_tool_complete(
+        self,
+        name: str,
+        args: dict,
+        raw_obs: str,
+        obs: str,
+        context: dict,
+    ) -> None:
+        """工具执行完毕后的副作用钩子（写 session、memory 等）。返回值忽略。"""
+        pass
+
+    def augment_user_content(
+        self,
+        user_input: str,
+        user_content: str,
+        session: object | None,
+        context: dict,
+    ) -> str:
+        """session 注入完成后调用。返回追加业务注入文本后的 user_content。"""
+        return user_content
+
+    def tool_result_char_limit(
+        self, name: str, default_limit: int, excel_limit: int
+    ) -> int:
+        """按工具名选择结果截断上限（避免在 core 硬编码业务工具名）。"""
+        return default_limit
+
+    def record_tool_cycle_metrics(
+        self, name: str, args: dict, obs: str, context: dict
+    ) -> None:
+        """每步工具后记录跨步指标（如批量利润计数）。"""
+        pass
+
+    def get_tool_cache_short_circuit_obs(
+        self, name: str, args: dict, context: dict
+    ) -> str | None:
+        """在工具执行前命中「伪缓存」时返回合成 observation（如禁止重复解析 Excel）。"""
+        return None

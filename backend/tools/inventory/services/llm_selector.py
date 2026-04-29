@@ -85,6 +85,8 @@ _BUSINESS_KNOWLEDGE = """
 4. 场景词优先：如 排水/给水/电工套管/管件 等应与候选名称一致。
 5. 若都不匹配可返回 index=0。
 6. 原因必须简短、可解释，不超过 20 字。
+7. 默认排水（最高优先）：关键词不含 AW/给水 等明确标识时，必须优先选 D 排水系列，禁止选 AW 给水系列；仅当用户明确说 AW 或 给水 时才可选 AW 给水候选。
+8. 日标优先：关键词不含「国标」时，有日标(印尼)候选则优先选日标；关键词含「国标」则选无印尼前缀的候选。
 """.strip()
 
 _SYSTEM_SELECTOR = (
@@ -752,6 +754,16 @@ def _rule_based_fallback(
                 score += 8
             if "sn4" in low:
                 score -= 4
+
+        # 默认排水：关键词无 AW/给水 显式标识时，AW 给水候选大幅降权，D 排水候选加权
+        _has_water_supply_intent = any(
+            s in kw_low for s in ("给水", " aw", "aw给水", "冷给水", "热给水")
+        ) or kw_low.startswith("aw")
+        if not _has_water_supply_intent:
+            if "aw给水系列" in low or "(aw" in low:
+                score -= 15
+            if "d排水系列" in low or "排水配件" in low:
+                score += 8
 
         # source priority: 共同 > 历史报价 > 字段匹配
         rank = _source_rank(src)

@@ -1016,7 +1016,7 @@ def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str,
 
 _MATCH_QUOTATION_BATCH_MAX_ITEMS = int(
     getattr(config, "MATCH_QUOTATION_BATCH_MAX_ITEMS", 0) or 0
-) or 20  # 并行执行后可适当提高上限
+) or 30  # 并行执行后可适当提高上限
 _MATCH_QUOTATION_BATCH_MAX_WORKERS = int(
     getattr(config, "MATCH_QUOTATION_BATCH_MAX_WORKERS", 0) or 0
 ) or 8  # 单次最大并行线程数（受 LLM API 并发限制）

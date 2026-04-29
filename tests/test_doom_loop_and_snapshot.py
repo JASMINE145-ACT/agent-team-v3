@@ -148,9 +148,8 @@ class TestDoomLoopDetectionLogic:
                     doom_loop_detected = True
 
         assert doom_loop_detected is False
-        # Each tool should have streak of 1
-        for tool in tools_called:
-            assert _tool_streak.get(tool) == 1
+        # 换工具时 streak 会整表重置，最终只保留当前工具键
+        assert _tool_streak == {"calculate": 1}
 
     def test_streak_resets_on_different_tool(self):
         """Streak resets when different tool appears (implementation resets ALL streaks)."""
@@ -251,7 +250,9 @@ class TestSnapshotRecording:
 
         tool_calls = [MockToolCall("parse_excel_smart"), MockToolCall("search_products")]
         extracted = [
-            tc.get("function", {}).get("name", "") or getattr(tc.function, "name", "")
+            (tc.get("function", {}) or {}).get("name", "")
+            if isinstance(tc, dict)
+            else getattr(getattr(tc, "function", None), "name", "")
             for tc in tool_calls
         ]
 
@@ -394,7 +395,8 @@ class TestDoomLoopIntegration:
 
         assert doom_loop_detected is True
         assert len(snapshots) == 4
-        assert _tool_streak.get("search_products") == 3
+        # 无工具的最后一步会清空 streak
+        assert _tool_streak == {}
 
     def test_no_doom_loop_with_varied_tools(self):
         """Varied tools across steps should not trigger doom loop."""

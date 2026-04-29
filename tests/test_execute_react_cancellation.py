@@ -19,6 +19,12 @@ class _DummyRegistry:
             }
         ]
 
+    def get_p0_definitions(self):
+        return self.get_definitions()
+
+    def get_deferred_stubs(self):
+        return []
+
     async def execute(self, name: str, args: dict, ctx: dict) -> str:
         self.execute_called = True
         return "ok"
@@ -53,6 +59,8 @@ def _make_agent() -> CoreAgent:
     agent._extensions = []
     agent._store = None
     agent._registry = _DummyRegistry()
+    agent._use_anthropic = False
+    agent._fallback_client = None
     return agent
 
 

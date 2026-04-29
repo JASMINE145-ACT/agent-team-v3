@@ -33,6 +33,8 @@ def test_dispatch_out_of_stock_both_any_success(monkeypatch):
     from backend.tools.oos.services import alert_dispatch as ad
 
     monkeypatch.setattr(ad, "OOS_ALERT_MODE", "both")
+    # 无应用消息用户时走 Webhook 路径，避免单测误触真实应用消息 API
+    monkeypatch.setattr(ad, "WECOM_APP_NOTIFY_USERS", [])
 
     monkeypatch.setattr(ad, "send_out_of_stock_alert", lambda **kw: False)
     monkeypatch.setattr(ad, "is_wecom_group_configured", lambda: True)

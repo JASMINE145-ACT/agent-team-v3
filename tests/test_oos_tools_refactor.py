@@ -70,7 +70,8 @@ def test_get_all_tools_includes_inventory_quotation_and_oos():
     assert quote_names.issubset(all_names)
 
 
-def test_jagent_extension_registers_oos_tools_into_tool_registry():
+def test_jagent_extension_does_not_register_oos_tools_by_design():
+    """OOS 工具 schema 仍由 get_oos_tools_openai_format 提供，但当前不在 Chat 工具列表中注册。"""
     from backend.core.extension import ExtensionContext
     from backend.core.registry import ToolRegistry
     from backend.plugins.jagent.extension import JAgentExtension
@@ -79,7 +80,6 @@ def test_jagent_extension_registers_oos_tools_into_tool_registry():
     from backend.agent.session import SessionStore
 
     registry = ToolRegistry()
-    # SessionStore 在当前测试中不参与逻辑，仅为类型满足构造 ExtensionContext
     dummy_session_store = SessionStore(backend=MagicMock())
     ctx = ExtensionContext(registry=registry, session_store=dummy_session_store)
 
@@ -89,6 +89,5 @@ def test_jagent_extension_registers_oos_tools_into_tool_registry():
     registered_names = set(registry.names())
     oos_names = _tool_names(get_oos_tools_openai_format())
 
-    # 所有 OOS 工具名都应在 ToolRegistry 中可见
-    assert oos_names.issubset(registered_names)
+    assert oos_names.isdisjoint(registered_names)
 

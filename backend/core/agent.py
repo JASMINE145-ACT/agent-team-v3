@@ -33,13 +33,13 @@ from backend.core.context_compression import (
     make_summarizer,
 )
 from backend.core.extension import AgentExtension, ExtensionContext
-from backend.core.llm_client import get_openai_client
-from backend.core.registry import ToolRegistry
-from backend.tools.quotation.excel_summary import (
+from backend.core.excel_context import (
     ExcelSummaryEntry,
     format_excel_summary_for_prompt,
     get_excel_summary_for_context,
 )
+from backend.core.llm_client import get_openai_client
+from backend.core.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,6 @@ _LOOP_PHASE_HEADER_RE = re.compile(
     r"(?im)^\s*(?:#+\s*)?(?:\d+\s*[\.\)]\s*)?"
     r"(?:Plan|Gather(?:\s+Context)?|Act|Verify(?:\s+Results)?)\s*$"
 )
-_RENDERED_MARKER_PREFIX = "[已渲染到前端]"
 
 
 def _normalize_user_answer(text: str) -> str:
@@ -87,79 +86,6 @@ _MAX_STEPS_HINT = (
     "若尚有未处理完的项目，请在回复中友好说明：例如「已计算前 N 个产品的利润率；其余可继续说『继续算剩余产品』或分批询问」，不要向用户展示「步数限制」等系统术语。"
 )
 
-# Rework 意图检测
-_REWORK_KEYWORDS = ["错了", "不对", "不是这个", "不是这个", "重新选", "换一个", "不对，是", "不对，应该是", "选另一个", "换一下"]
-_INVENTORY_INTENT_KEYWORDS = ["库存", "可售", "有多少", "还有吗", "有没有货", "还有多少"]
-
-
-def _detect_rework_intent(user_input: str) -> bool:
-    """检测用户是否在表达"报价/选型错误"意图，触发 rework 流程。"""
-    return any(kw in user_input for kw in _REWORK_KEYWORDS)
-
-
-def _detect_inventory_intent(user_input: str) -> bool:
-    """检测用户是否明确在查询库存意图。"""
-    text = str(user_input or "")
-    return any(kw in text for kw in _INVENTORY_INTENT_KEYWORDS)
-
-
-_FOLLOWUP_CARD_HINT_WORDS = (
-    "这个", "对应", "上面", "那个", "其", "该产品", "这些", "这批", "上一条", "刚才", "对应库存"
-)
-
-
-def _detect_card_followup_intent(user_input: str) -> bool:
-    text = str(user_input or "").strip()
-    if not text:
-        return False
-    if len(text) > 50:
-        return False
-    return any(h in text for h in _FOLLOWUP_CARD_HINT_WORDS)
-
-
-def _extract_card_refs_from_obs(name: str, args: dict, obs: str) -> list[dict[str, Any]]:
-    refs: list[dict[str, Any]] = []
-    try:
-        data = json.loads(obs)
-    except Exception:
-        return refs
-    ts = int(time.time() * 1000)
-    if name == "match_quotation" and isinstance(data, dict) and data.get("single"):
-        chosen = data.get("chosen") or {}
-        refs.append(
-            {
-                "keywords": str(args.get("keywords") or "").strip(),
-                "code": str(chosen.get("code") or "").strip(),
-                "matched_name": str(chosen.get("matched_name") or "").strip(),
-                "unit_price": chosen.get("unit_price"),
-                "match_source": str(data.get("match_source") or "").strip(),
-                "chosen_index": data.get("chosen_index"),
-                "source_tool": name,
-                "ts": ts,
-            }
-        )
-    elif name == "match_quotation_batch" and isinstance(data, dict):
-        resolved_items = data.get("resolved_items") or []
-        if isinstance(resolved_items, list):
-            for item in resolved_items:
-                if not isinstance(item, dict):
-                    continue
-                chosen = item.get("chosen") or {}
-                refs.append(
-                    {
-                        "keywords": str(item.get("keywords") or "").strip(),
-                        "code": str(chosen.get("code") or "").strip(),
-                        "matched_name": str(chosen.get("matched_name") or "").strip(),
-                        "unit_price": chosen.get("unit_price"),
-                        "match_source": str(item.get("match_source") or "").strip(),
-                        "chosen_index": item.get("chosen_index"),
-                        "source_tool": name,
-                        "ts": ts,
-                    }
-                )
-    return refs
-
-
 def _should_use_anthropic_messages_api(base_url: str) -> bool:
     """
     是否对当前 base_url 使用 Anthropic Messages SDK（如 MiniMax …/anthropic）。
@@ -173,23 +99,6 @@ def _should_use_anthropic_messages_api(base_url: str) -> bool:
     if "bigmodel.cn" in bu:
         return False
     return True
-
-
-def _build_rework_injection(pending: dict) -> str:
-    """将待确认选择构造为 prompt 注入文本，展示给用户确认。"""
-    keywords = pending.get("keywords", "")
-    options = pending.get("options", [])
-    if not options:
-        return ""
-    lines = [f"\n【请确认正确选项】询价「{keywords}」时有多于候选，"]
-    lines.append("系统已按规则预选，但您可以推翻并指出正确选项：\n")
-    for i, opt in enumerate(options, 1):
-        code = opt.get("code", "")
-        name = opt.get("matched_name", "")
-        source = opt.get("source", "")
-        lines.append(f"  {i}. [{code}] {name} (来源: {source})")
-    lines.append("\n请直接回复选项序号或产品名称，指出正确选项。")
-    return "\n".join(lines)
 
 
 class CoreAgent:
@@ -265,7 +174,6 @@ class CoreAgent:
     ) -> Dict[str, Any]:
         if max_steps is None:
             try:
-                from backend.config import Config
                 max_steps = getattr(Config, "REACT_MAX_STEPS", 12)
             except Exception:
                 max_steps = 12
@@ -291,7 +199,6 @@ class CoreAgent:
 
         user_content = user_input.strip()
         ctx = context or {}
-        card_followup_intent = _detect_card_followup_intent(user_input)
         if session_id:
             ctx.setdefault("session_id", session_id)
         # 若上层未显式设置 preferred_lang，则在核心入口做一次轻量语言检测兜底
@@ -325,6 +232,7 @@ class CoreAgent:
                 "请在需要读取表格内容或进行统计/筛选/填表时调用相应的 Excel 工具，并传入该 file_id 或 file_path。）"
             )
 
+        session = None
         if session_id and self._store:
             session = self._store.load(session_id)
             if context and context.get("file_path"):
@@ -345,7 +253,15 @@ class CoreAgent:
                         user_content += f"\n\n{tool_injection}"
                 except Exception:
                     logger.debug("build_tool_memory_injection 失败，已忽略", exc_info=True)
-            if card_followup_intent:
+
+        for ext in self._extensions:
+            try:
+                user_content = ext.augment_user_content(user_input, user_content, session, ctx)
+            except Exception:
+                logger.warning("ext.augment_user_content 失败，已跳过", exc_info=True)
+
+        if session_id and self._store and session is not None:
+            if ctx.get("_card_followup"):
                 try:
                     card_injection = self._store.build_card_memory_injection(session, max_items=3)
                     if card_injection:
@@ -357,12 +273,6 @@ class CoreAgent:
                 last_q = (session.turns[-1].query or "").strip()[:80]
                 current_input = user_input.strip()[:50]
                 user_content += f"\n\n【当前主题】上一轮问：{last_q}。用户本句：{current_input}。请据此理解意图与所指产品。"
-
-            # Rework 机制：检测用户是否在纠正上次报价/选型错误
-            if _detect_rework_intent(user_input) and session.pending_human_choice:
-                rework_injection = _build_rework_injection(session.pending_human_choice)
-                if rework_injection:
-                    user_content += f"\n\n{rework_injection}"
 
         if Config.ENABLE_TOOL_DEFER:
             tools = self._registry.get_p0_definitions() + self._registry.get_deferred_stubs()
@@ -404,12 +314,12 @@ class CoreAgent:
         last_answer = ""
         last_usage = None
         tool_obs_cache: Dict[str, str] = {}
-        last_profit_batch_obs: Optional[str] = None
-        last_profit_batch_items: int = 0
-        inventory_intent = _detect_inventory_intent(user_input)
+        ctx.setdefault("_last_profit_batch_items", 0)
+        ctx["_last_profit_batch_obs"] = None
+        if session_id and self._store:
+            ctx["_session_store"] = self._store
 
         try:
-            from backend.config import Config
             max_tokens = getattr(Config, "LLM_MAX_TOKENS", 20000)
         except Exception:
             logger.warning("读取 LLM_MAX_TOKENS 失败，使用默认 20000", exc_info=True)
@@ -627,23 +537,11 @@ class CoreAgent:
                     continue
                 args = args if isinstance(args, dict) else {}
                 normalized_args = dict(args)
-                if name == "match_quotation":
-                    normalized_args["keywords"] = str(normalized_args.get("keywords") or "").strip()
-                    normalized_args["customer_level"] = (
-                        str(normalized_args.get("customer_level") or "B").strip().upper() or "B"
-                    )
-                    normalized_args["show_all_candidates"] = bool(normalized_args.get("show_all_candidates", False))
-                elif name == "match_quotation_batch":
-                    raw_list = normalized_args.get("keywords_list") or []
-                    if isinstance(raw_list, list):
-                        normalized_args["keywords_list"] = [
-                            str(x).strip() for x in raw_list if str(x).strip()
-                        ]
-                    else:
-                        normalized_args["keywords_list"] = []
-                    normalized_args["customer_level"] = (
-                        str(normalized_args.get("customer_level") or "B").strip().upper() or "B"
-                    )
+                for ext in self._extensions:
+                    try:
+                        normalized_args = ext.on_before_tool(name, normalized_args, ctx)
+                    except Exception:
+                        logger.warning("ext.on_before_tool 失败，已跳过 name=%s", name, exc_info=True)
 
                 try:
                     args_key = json.dumps(normalized_args, ensure_ascii=False, sort_keys=True, default=str)
@@ -651,25 +549,27 @@ class CoreAgent:
                     args_key = str(normalized_args)
                 cache_key = f"{name}|{args_key}"
                 cached_obs = tool_obs_cache.get(cache_key)
-                if (
-                    cached_obs is None
-                    and name == "parse_excel_smart"
-                    and last_profit_batch_items >= 20
-                    and last_profit_batch_obs
-                ):
-                    cached_obs = (
-                        f"{last_profit_batch_obs}\n\n"
-                        "提示：本轮已完成批量利润率查询（>=20 条），请直接基于该结果整理最终答复，"
-                        "不要再次调用 Excel 解析工具。"
-                    )
-                    trace.append(
-                        {
-                            "step": step + 1,
-                            "type": "tool_guard_hit",
-                            "name": name,
-                            "arguments": args,
-                        }
-                    )
+                if cached_obs is None:
+                    for ext in self._extensions:
+                        try:
+                            co = ext.get_tool_cache_short_circuit_obs(name, normalized_args, ctx)
+                            if co is not None:
+                                cached_obs = co
+                                trace.append(
+                                    {
+                                        "step": step + 1,
+                                        "type": "tool_guard_hit",
+                                        "name": name,
+                                        "arguments": normalized_args,
+                                    }
+                                )
+                                break
+                        except Exception:
+                            logger.warning(
+                                "ext.get_tool_cache_short_circuit_obs 失败，已跳过 name=%s",
+                                name,
+                                exc_info=True,
+                            )
 
                 if cached_obs is not None:
                     obs = (
@@ -681,7 +581,7 @@ class CoreAgent:
                             "step": step + 1,
                             "type": "tool_cache_hit",
                             "name": name,
-                            "arguments": args,
+                            "arguments": normalized_args,
                         }
                     )
                 else:
@@ -702,14 +602,21 @@ class CoreAgent:
                                         "phase": "start",
                                         "name": name,
                                         "toolCallId": tool_call_id,
-                                        "args": args,
+                                        "args": normalized_args,
                                     },
                                 },
                             )
                         except Exception:
                             logger.debug("on_event callback failed", exc_info=True)
 
-                    trace.append({"step": step + 1, "type": "tool_call", "name": name, "arguments": args})
+                    trace.append(
+                        {
+                            "step": step + 1,
+                            "type": "tool_call",
+                            "name": name,
+                            "arguments": normalized_args,
+                        }
+                    )
                     if allowed_tools is not None and name not in allowed_tools:
                         obs = json.dumps(
                             {
@@ -722,7 +629,9 @@ class CoreAgent:
                             ensure_ascii=False,
                         )
                     else:
-                        tool_task = asyncio.create_task(self._registry.execute(name, args, ctx))
+                        tool_task = asyncio.create_task(
+                            self._registry.execute(name, normalized_args, ctx)
+                        )
                         try:
                             while not tool_task.done():
                                 _raise_if_cancelled()
@@ -732,11 +641,14 @@ class CoreAgent:
                             if not tool_task.done():
                                 tool_task.cancel()
                             raise
-                    max_chars = (
-                        TOOL_RESULT_EXCEL_MAX_CHARS
-                        if name == "parse_excel_smart"
-                        else TOOL_RESULT_MAX_CHARS
-                    )
+                    max_chars = TOOL_RESULT_MAX_CHARS
+                    for ext in self._extensions:
+                        try:
+                            max_chars = ext.tool_result_char_limit(
+                                name, max_chars, TOOL_RESULT_EXCEL_MAX_CHARS
+                            )
+                        except Exception:
+                            logger.debug("ext.tool_result_char_limit 失败，已跳过", exc_info=True)
                     if len(obs) > max_chars:
                         obs = (
                             obs[:max_chars]
@@ -748,73 +660,31 @@ class CoreAgent:
                         try:
                             # 优先尝试带 context 的新签名，旧实现回退到三参版本
                             try:
-                                obs = ext.on_after_tool(name, args, obs, ctx)
+                                obs = ext.on_after_tool(name, normalized_args, obs, ctx)
                             except TypeError:
-                                obs = ext.on_after_tool(name, args, obs)  # type: ignore[call-arg]
+                                obs = ext.on_after_tool(
+                                    name, normalized_args, obs
+                                )  # type: ignore[call-arg]
                         except Exception:
                             logger.warning("ext.on_after_tool 失败，已跳过 name=%s", name, exc_info=True)
 
                     tool_obs_cache[cache_key] = obs
 
-                    # Rework 机制：当 match_quotation 返回 needs_human_choice 时，存入 session
-                    if name == "match_quotation" and session_id and self._store:
+                    for ext in self._extensions:
                         try:
-                            parsed_obs = json.loads(raw_obs)
-                            if isinstance(parsed_obs, dict) and parsed_obs.get("needs_human_choice"):
-                                self._store.set_pending_human_choice(session_id, parsed_obs)
-                            elif parsed_obs.get("single") and session_id:
-                                # 用户已确认（收到 single 结果），清除待确认状态
-                                self._store.clear_pending_human_choice(session_id)
+                            ext.record_tool_cycle_metrics(name, normalized_args, obs, ctx)
                         except Exception:
-                            pass
-                    if name == "get_profit_by_price_batch":
-                        items_arg = args.get("items")
-                        if isinstance(items_arg, list):
-                            last_profit_batch_items = len(items_arg)
-                        if "三类统计（按输入条目分类）" in obs:
-                            last_profit_batch_obs = obs
+                            logger.debug("ext.record_tool_cycle_metrics 失败，已跳过", exc_info=True)
 
-                    # Tool Memory：记录结构化工具调用摘要，供后续轮次注入。
-                    if session_id and self._store:
+                    for ext in self._extensions:
                         try:
-                            record: Dict[str, Any] = {
-                                "tool": name,
-                                "ts": int(time.time() * 1000),
-                                "args": args,
-                            }
-                            # 尝试从 JSON 结果中抽取 summary + 紧凑 data
-                            summary_text = ""
-                            data_obj: Any = None
-                            try:
-                                if obs and len(obs) <= 4000:
-                                    parsed = json.loads(obs)
-                                    if isinstance(parsed, dict):
-                                        data_obj = parsed
-                                        s = parsed.get("summary")
-                                        if isinstance(s, str):
-                                            summary_text = s.strip()
-                                    elif isinstance(parsed, list):
-                                        data_obj = parsed
-                            except Exception:
-                                # 非 JSON，退化为基于文本的简短摘要
-                                pass
-                            if not summary_text and obs:
-                                text = str(obs).strip()
-                                if len(text) > 0:
-                                    summary_text = text[:180] + ("…" if len(text) > 180 else "")
-                            if summary_text:
-                                record["summary"] = summary_text
-                            if data_obj is not None:
-                                record["data"] = data_obj
-                            self._store.append_tool_memory(session_id, record)
+                            ext.on_tool_complete(
+                                name, normalized_args, raw_obs, obs, ctx
+                            )
                         except Exception:
-                            logger.debug("append_tool_memory 失败，已忽略", exc_info=True)
-                        try:
-                            card_refs = _extract_card_refs_from_obs(name, args, raw_obs)
-                            if card_refs:
-                                self._store.append_card_refs(session_id, card_refs, limit=30)
-                        except Exception:
-                            logger.debug("append_card_refs 失败，已忽略", exc_info=True)
+                            logger.warning(
+                                "ext.on_tool_complete 失败，已跳过 name=%s", name, exc_info=True
+                            )
 
                     if on_event:
                         try:
@@ -834,14 +704,14 @@ class CoreAgent:
                         except Exception:
                             logger.debug("on_event callback failed", exc_info=True)
 
-                # 报价类：无论新执行还是 tool_obs_cache 命中，只要 observation 以渲染标记开头就强制收尾。
-                # 但库存意图需继续链路（match_quotation -> get_inventory_by_code），因此仅非库存场景对
-                # match_quotation 触发强制收尾；match_quotation_batch 维持原行为。
-                if name in ("match_quotation", "match_quotation_batch") and isinstance(obs, str):
-                    lead = obs.lstrip("\ufeff \t\r\n")
-                    if lead.startswith(_RENDERED_MARKER_PREFIX):
-                        if name == "match_quotation_batch" or not inventory_intent:
-                            force_final_answer = obs
+                for ext in self._extensions:
+                    try:
+                        stop, final = ext.should_stop_loop(name, obs, ctx)
+                        if stop and final is not None:
+                            force_final_answer = final
+                            break
+                    except Exception:
+                        logger.warning("ext.should_stop_loop 失败，已跳过 name=%s", name, exc_info=True)
 
                 trace.append({"step": step + 1, "type": "observation", "content": obs})
                 messages.append({"role": "tool", "tool_call_id": tool_call_id, "content": obs})

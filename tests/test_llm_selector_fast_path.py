@@ -87,6 +87,7 @@ class TestFastPathTriggered(unittest.TestCase):
             patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", "gpt-4o-mini"),
             patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", "sk-test"),
             patch.object(InventoryConfig, "LLM_SELECTOR_BASE_URL", ""),
+            patch.object(InventoryConfig, "LLM_SELECTOR_FAST_OUTPUT_TOKENS", 500),
         ):
             llm_select_best("直通 dn50", CANDIDATES)
 
@@ -106,6 +107,7 @@ class TestFastPathTriggered(unittest.TestCase):
             patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", "gpt-5-nano"),
             patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", "sk-test"),
             patch.object(InventoryConfig, "LLM_SELECTOR_BASE_URL", ""),
+            patch.object(InventoryConfig, "LLM_SELECTOR_FAST_OUTPUT_TOKENS", 500),
         ):
             llm_select_best("直通 dn50", CANDIDATES)
 
@@ -128,6 +130,7 @@ class TestFastPathTriggered(unittest.TestCase):
             patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", "gpt-5-nano"),
             patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", "sk-test"),
             patch.object(InventoryConfig, "LLM_SELECTOR_BASE_URL", ""),
+            patch.object(InventoryConfig, "LLM_SELECTOR_FAST_OUTPUT_TOKENS", 500),
         ):
             result = llm_select_best("直通 dn50", CANDIDATES)
 

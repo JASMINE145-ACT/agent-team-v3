@@ -128,11 +128,13 @@ def test_card_memory_injected_on_short_followup_query():
     client = MagicMock()
     client.chat.completions.create = fake_create
 
+    from backend.plugins.jagent.extension import JAgentExtension
+
     agent = CoreAgent(
         api_key="test",
         base_url="https://test",
         model="test",
-        extensions=[],
+        extensions=[JAgentExtension()],
         session_store=store,
     )
     agent.client = client

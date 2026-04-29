@@ -6,6 +6,8 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
+from backend.tools.inventory.config import InventoryConfig
+
 
 CANDIDATES = [
     {"code": "1000000001", "matched_name": "等径三通 PPR dn20", "unit_price": 5.0, "source": "字段匹配"},
@@ -41,6 +43,11 @@ def _make_openai_response_empty_with_reasoning(reasoning_content: str, finish_re
 
 
 class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
+    def setUp(self):
+        from backend.tools.inventory.services.llm_selector import _reset_selector_client
+
+        _reset_selector_client()
+
     def _run_with_anthropic_env(self, mock_openai_cls):
         """Simulate PRIMARY_LLM_PROTOCOL=anthropic and verify OpenAI path is used."""
         mock_client = MagicMock()
@@ -53,8 +60,13 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         fake_config.ANTHROPIC_BASE_URL = "https://api.minimaxi.com/anthropic"
         fake_config.LLM_MODEL = "MiniMax-M2.7"
 
-        with patch.dict("sys.modules", {"backend.config": MagicMock(Config=fake_config)}):
+        with (
+            patch.dict("sys.modules", {"backend.config": MagicMock(Config=fake_config)}),
+            patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", ""),
+            patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", ""),
+        ):
             from backend.tools.inventory.services.llm_selector import llm_select_best
+
             result = llm_select_best("等径三通 dn20", CANDIDATES)
 
         return result, mock_client
@@ -77,8 +89,14 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         mock_openai_cls.return_value = mock_client
 
         from backend.tools.inventory.services.llm_selector import llm_select_best
-        llm_select_best("等径三通 dn20", CANDIDATES)
 
+        with (
+            patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", ""),
+            patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", ""),
+        ):
+            llm_select_best("等径三通 dn20", CANDIDATES)
+
+        self.assertTrue(mock_client.chat.completions.create.called)
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         mt = call_kwargs.get("max_tokens", 99999)
         self.assertLessEqual(mt, 16000, f"max_tokens={mt} exceeds 16000")
@@ -91,7 +109,12 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         mock_openai_cls.return_value = mock_client
 
         from backend.tools.inventory.services.llm_selector import llm_select_best
-        result = llm_select_best("等径三通 dn20", CANDIDATES)
+
+        with (
+            patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", ""),
+            patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", ""),
+        ):
+            result = llm_select_best("等径三通 dn20", CANDIDATES)
 
         self.assertIsNotNone(result)
         self.assertIn("reasoning", result)
@@ -107,7 +130,12 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         mock_openai_cls.return_value = mock_client
 
         from backend.tools.inventory.services.llm_selector import llm_select_best
-        result = llm_select_best("等径三通 dn20", CANDIDATES)
+
+        with (
+            patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", ""),
+            patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", ""),
+        ):
+            result = llm_select_best("等径三通 dn20", CANDIDATES)
 
         self.assertIsNotNone(result)
         self.assertEqual(result.get("code"), "1000000002")
@@ -123,7 +151,12 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         mock_openai_cls.return_value = mock_client
 
         from backend.tools.inventory.services.llm_selector import llm_select_best
-        result = llm_select_best("等径三通 dn20", CANDIDATES)
+
+        with (
+            patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", ""),
+            patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", ""),
+        ):
+            result = llm_select_best("等径三通 dn20", CANDIDATES)
 
         self.assertIsNotNone(result)
         self.assertEqual(result.get("code"), "1000000002")
@@ -142,7 +175,12 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         ]
 
         from backend.tools.inventory.services.llm_selector import llm_select_best
-        result = llm_select_best("直通50", candidates)
+
+        with (
+            patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", ""),
+            patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", ""),
+        ):
+            result = llm_select_best("直通50", candidates)
 
         self.assertIsNotNone(result)
         self.assertEqual(result.get("code"), "C001")
@@ -176,7 +214,12 @@ class TestLlmSelectBestAlwaysGlm(unittest.TestCase):
         ]
 
         from backend.tools.inventory.services.llm_selector import llm_select_best
-        result = llm_select_best("双壁波纹管10KN DN300mm", candidates)
+
+        with (
+            patch.object(InventoryConfig, "LLM_SELECTOR_MODEL", ""),
+            patch.object(InventoryConfig, "LLM_SELECTOR_API_KEY", ""),
+        ):
+            result = llm_select_best("双壁波纹管10KN DN300mm", candidates)
 
         self.assertIsNotNone(result)
         self.assertEqual(result.get("code"), "8020035099")

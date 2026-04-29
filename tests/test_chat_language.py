@@ -147,7 +147,7 @@ def test_wecom_entrypoint_sets_preferred_lang_for_english_message():
 
     # 直接运行 handle_wecom_message，内部会调用 DummyAgent.execute_react
     result = asyncio.run(handle_wecom_message(agent, msg))
-    assert isinstance(result, str)
+    assert result == ["ok"]
     ctx = agent.last_context or {}
     assert ctx.get("preferred_lang") == "en"
     assert ctx.get("detected_lang") == "en"

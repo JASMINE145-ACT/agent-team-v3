@@ -378,6 +378,18 @@ CUN_INTEGER_TO_MM_STR = {
 # 脚本/旧测试兼容别名（仅「寸」映射；「分」见 FEN_TO_MM_STR）
 CUN_TO_MM = CUN_INTEGER_TO_MM_STR
 
+# 日标 PVC-U 排水管件：外径口语数字 → 公称通径 DN
+# 这些数字不在 MM_TO_INCH（标准 DN 系列）中，出现在查询里必然是外径，不是 DN：
+#   OD63  → DN50 (2")   OD110 → DN100 (4")   OD160 → DN150 (6")
+# 添加 DN 等价后，日标产品（Describrition 含 DN100/DN150）才能进入候选；
+# 原 OD 值同时保留，让国标产品（Describrition 含 dn110/dn160）也能命中，
+# 最终由 LLM 或 Product_Type 过滤在两类候选中选出正确结果。
+OD_TO_DN_JIS: dict[str, str] = {
+    "63": "50",    # OD63  → DN50  (2")
+    "110": "100",  # OD110 → DN100 (4")
+    "160": "150",  # OD160 → DN150 (6")
+}
+
 
 def _normalize(s: str) -> str:
     s = (s or "").lower().strip()
@@ -428,6 +440,15 @@ def _expand_unit_tokens(token: str, material: Optional[str] = None) -> set:
     if token.isdigit() and token in MM_TO_INCH:
         eqs.add("dn" + token)
         eqs.add(MM_TO_INCH[token])
+        return eqs
+    # 日标外径 → DN 等价（63→50, 110→100, 160→150）
+    # 原 OD 值（token）已在 eqs 中，保留以命中国标产品；DN 等价用于命中日标产品
+    if token.isdigit() and token in OD_TO_DN_JIS:
+        dn_num = OD_TO_DN_JIS[token]
+        eqs.add(dn_num)
+        eqs.add("dn" + dn_num)
+        if dn_num in MM_TO_INCH:
+            eqs.add(MM_TO_INCH[dn_num])
         return eqs
     if token in INCH_TO_MM:
         eqs.add(INCH_TO_MM[token])

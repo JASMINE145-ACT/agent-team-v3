@@ -46,6 +46,35 @@ class _RenderMarkerExt(AgentExtension):
             return '[已渲染到前端] "mock rendered quotation card"'
         return obs
 
+    def augment_user_content(
+        self, user_input: str, user_content: str, session: object | None, context: dict
+    ) -> str:
+        """与 JAgent 一致：写入 _inventory_intent，使 should_stop 可区分库存/询价。"""
+        from backend.plugins.jagent.extension import (
+            _detect_card_followup_intent,
+            _detect_inventory_intent,
+        )
+
+        context["_inventory_intent"] = _detect_inventory_intent(user_input)
+        context["_card_followup"] = _detect_card_followup_intent(user_input)
+        return user_content
+
+    def should_stop_loop(
+        self, name: str, obs: str, context: dict
+    ) -> tuple[bool, str | None]:
+        if name not in ("match_quotation", "match_quotation_batch"):
+            return False, None
+        if not isinstance(obs, str):
+            return False, None
+        lead = obs.lstrip("\ufeff \t\r\n")
+        if not lead.startswith("[已渲染到前端]"):
+            return False, None
+        if name == "match_quotation_batch":
+            return True, obs
+        if context.get("_inventory_intent"):
+            return False, None
+        return True, obs
+
 
 class _SequencedCompletions:
     def __init__(self, owner):
