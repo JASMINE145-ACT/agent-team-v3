@@ -80,13 +80,10 @@ def _reset_selector_client() -> None:
 _BUSINESS_KNOWLEDGE = """
 候选选择业务规则（摘要）：
 1. 选择与关键词最贴近的规格、材质、口径、用途。
-2. 口径优先：如 dn50、50、1-1/2 需对应转换后再比对。
+2. 口径优先：dn50、50、1-1/2 需对应转换后再比对。
 3. 材质优先：PPR/PVC-U/PE 不能混选，除非关键词未指定且候选强相关。
-4. 场景词优先：如 排水/给水/电工套管/管件 等应与候选名称一致。
-5. 若都不匹配可返回 index=0。
-6. 原因必须简短、可解释，不超过 20 字。
-7. 默认排水（最高优先）：关键词不含 AW/给水 等明确标识时，必须优先选 D 排水系列，禁止选 AW 给水系列；仅当用户明确说 AW 或 给水 时才可选 AW 给水候选。
-8. 日标优先：关键词不含「国标」时，有日标(印尼)候选则优先选日标；关键词含「国标」则选无印尼前缀的候选。
+4. 来源是 tie-breaker：共同>历史报价>字段匹配，但语义冲突时语义优先。
+5. 若都不匹配可返回 index=0。原因须 >=10 字。
 """.strip()
 
 _SYSTEM_SELECTOR = (
@@ -394,7 +391,7 @@ def _fast_path(
         in ("1", "true", "yes")
     )
 
-    sorted_candidates = _sort_candidates_by_source(candidates)
+    sorted_candidates = _apply_candidate_pre_filter(keywords, candidates)
     llm_candidates = sorted_candidates[:candidate_limit]
 
     knowledge = (
@@ -547,7 +544,7 @@ def llm_select_best(
         os.environ.get("INVENTORY_LLM_SELECTOR_FULL_KNOWLEDGE", "1").strip().lower() in ("1", "true", "yes")
     )
 
-    sorted_candidates = _sort_candidates_by_source(candidates)
+    sorted_candidates = _apply_candidate_pre_filter(keywords, candidates)
     llm_candidates = sorted_candidates[:candidate_limit]
 
     lines: list[str] = []
@@ -697,75 +694,103 @@ def _candidate_to_result(c: dict[str, Any], reasoning: str = "") -> dict[str, An
     }
 
 
-def _rule_based_fallback(
+def _apply_candidate_pre_filter(
     keywords: str,
     candidates: list[dict[str, Any]],
-    reason: str = "llm_error",
-) -> Optional[dict[str, Any]]:
+) -> list[dict[str, Any]]:
+    """
+    Apply deterministic scoring rules to candidates before LLM selection.
+    Returns candidates sorted by _pre_score descending.
+    Only re-ranks — never filters. LLM can still override edge cases.
+    """
     if not candidates:
-        return None
+        return candidates
 
-    kw_tokens = _extract_keyword_tokens(keywords)
     kw_low = (keywords or "").lower()
-    m_size_mm = re.search(r"(?:dn\s*)?(\d{2,4})\s*mm", kw_low)
-    mm_size = m_size_mm.group(1) if m_size_mm else None
-    kw_corrugated = ("双壁波纹管" in kw_low) or ("corrugated" in kw_low)
 
-    best = None
-    best_score = -10**9
+    has_water_supply = (
+        "给水" in kw_low
+        or "aw给水" in kw_low
+        or "冷给水" in kw_low
+        or "热给水" in kw_low
+        or re.search(r"(^|[^a-z0-9])aw($|[^a-z0-9])", kw_low) is not None
+    )
+    has_guobiao = "国标" in kw_low
+    has_hot_water = "热水" in kw_low or "热给水" in kw_low
+    has_cold_water = "冷水" in kw_low or "冷给水" in kw_low
+    has_pressure = bool(re.search(r"\d+\.?\d*\s*mpa|pn\s*\d+", kw_low))
+    has_corrugated = "双壁波纹管" in kw_low or "corrugated" in kw_low
+    has_10kn = "10kn" in kw_low
+    explicit_pressure: str | None = None
+    m_mpa = re.search(r"(\d+(?:\.\d+)?)\s*mpa", kw_low)
+    if m_mpa:
+        explicit_pressure = m_mpa.group(1)
+    else:
+        m_pn = re.search(r"pn\s*(\d+(?:\.\d+)?)", kw_low)
+        if m_pn:
+            try:
+                explicit_pressure = f"{float(m_pn.group(1)) / 10:.2f}".rstrip("0").rstrip(".")
+            except Exception:
+                explicit_pressure = None
+
+    scored: list[dict[str, Any]] = []
     for c in candidates:
-        name = (c.get("matched_name") or "")
-        low = name.lower()
-        src = (c.get("source") or "").strip()
         score = 0
+        name_raw: str = c.get("matched_name") or ""
+        name = name_raw.lower()
+        src = (c.get("source") or "").strip()
 
-        # token overlap
-        for t in kw_tokens:
-            if t in low:
-                score += 3
-        # prefer full dn hit
-        m_dn = re.search(r"dn\s*(\d+)", (keywords or "").lower())
-        if m_dn and f"dn{m_dn.group(1)}" in low.replace(" ", ""):
-            score += 5
-        # support non-DN size text such as "300mm" against names like "SN8 300"
-        if mm_size and re.search(rf"(?<!\d){re.escape(mm_size)}(?!\d)", low):
-            score += 4
+        if not has_water_supply:
+            if "aw给水系列" in name or "(aw" in name:
+                score -= 15
+            if "d排水系列" in name or "排水配件" in name:
+                score += 8
 
-        # semantic hard preferences (higher than source tie-break)
-        if "双壁波纹管" in kw_low:
-            if "双壁波纹管" in low:
-                score += 12
+        if has_guobiao:
+            if "印尼(日标)" in name_raw:
+                score -= 10
             else:
-                score -= 8
-        if "热水" in kw_low or "热给水" in kw_low:
-            if "热给水" in low:
+                score += 6
+        elif "印尼(日标)" in name_raw:
+            score += 6
+
+        if has_corrugated:
+            if "双壁波纹管" in name or "corrugated" in name:
+                score += 20
+            else:
+                score -= 12
+        if has_10kn:
+            if "sn8" in name:
+                score += 12
+            if "sn4" in name:
+                score -= 6
+
+        if has_hot_water:
+            if "热给水" in name:
                 score += 8
-            if "冷给水" in low:
+            if "冷给水" in name:
                 score -= 7
-        if "冷水" in kw_low or "冷给水" in kw_low:
-            if "冷给水" in low:
+        if has_cold_water:
+            if "冷给水" in name:
                 score += 8
-            if "热给水" in low:
+            if "热给水" in name:
                 score -= 7
 
-        # rating level hints in drainage corrugated pipe domain: 10KN ~= SN8
-        if kw_corrugated and "10kn" in kw_low:
-            if "sn8" in low:
-                score += 8
-            if "sn4" in low:
+        if not has_pressure:
+            if "1.0mpa" in name or "1 mpa" in name or "1.0 mpa" in name:
+                score += 3
+            if "1.25mpa" in name or "1.6mpa" in name:
+                score -= 2
+        elif explicit_pressure:
+            name_no_space = name.replace(" ", "")
+            if f"{explicit_pressure}mpa" in name_no_space:
+                score += 10
+            elif "mpa" in name_no_space:
                 score -= 4
 
-        # 默认排水：关键词无 AW/给水 显式标识时，AW 给水候选大幅降权，D 排水候选加权
-        _has_water_supply_intent = any(
-            s in kw_low for s in ("给水", " aw", "aw给水", "冷给水", "热给水")
-        ) or kw_low.startswith("aw")
-        if not _has_water_supply_intent:
-            if "aw给水系列" in low or "(aw" in low:
-                score -= 15
-            if "d排水系列" in low or "排水配件" in low:
-                score += 8
+        if "联塑" in name_raw:
+            score += 2
 
-        # source priority: 共同 > 历史报价 > 字段匹配
         rank = _source_rank(src)
         if rank == 0:
             score += 9
@@ -774,14 +799,22 @@ def _rule_based_fallback(
         elif rank == 2:
             score += 3
 
-        # shorter name slightly preferred for tie-break (usually more canonical)
-        score -= int(len(name) / 200)
+        entry = dict(c)
+        entry["_pre_score"] = score
+        scored.append(entry)
 
-        if score > best_score:
-            best_score = score
-            best = c
+    return sorted(scored, key=lambda x: x["_pre_score"], reverse=True)
 
-    c = best or candidates[0]
+
+def _rule_based_fallback(
+    keywords: str,
+    candidates: list[dict[str, Any]],
+    reason: str = "llm_error",
+) -> Optional[dict[str, Any]]:
+    if not candidates:
+        return None
+    sorted_candidates = _apply_candidate_pre_filter(keywords, candidates)
+    c = sorted_candidates[0]
     return {
         "code": (c.get("code") or "").strip(),
         "matched_name": (c.get("matched_name") or "")[:200],
@@ -789,8 +822,6 @@ def _rule_based_fallback(
         "reasoning": f"[规则回退] {reason}",
         "_selection_meta": {
             "from_rule_fallback": True,
-            "reason": reason,
-            "chosen_source": (c.get("source") or "").strip(),
-            "source_rank": _source_rank((c.get("source") or "").strip()),
+            "pre_score": c.get("_pre_score", 0),
         },
     }

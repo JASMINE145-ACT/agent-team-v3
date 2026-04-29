@@ -10,6 +10,20 @@
 
 ---
 
+## 执行状态（2026-04-29）
+
+- [x] Task 1 测试文件已创建并扩展到 13 个 case（含国标/显式压强回归）
+- [x] Task 2 `_apply_candidate_pre_filter()` 已实现并通过单测
+- [x] Task 3 已接入 LLM 路径与 `_rule_based_fallback`（回退逻辑已简化）
+- [x] Task 4 `_BUSINESS_KNOWLEDGE` 已精简为 5 条
+- [x] Task 5 `wanding_business_knowledge.md` 已瘦身至 70 行
+- [x] Code-review agent PASS（阻塞项修复后复审通过）
+- [x] Test-agent PASS（目标测试 20 passed）
+- [x] 全量非 live 回归 PASS（`373 passed, 2 deselected`）
+- [ ] 提交与推送（按需执行）
+
+---
+
 ## 文件变更地图
 
 | 文件 | 操作 | 职责 |
