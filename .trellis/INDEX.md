@@ -144,18 +144,116 @@
 
 ## 概念快查
 
-| 我想了解… | 看这里 |
-|----------|--------|
-| 整体后端架构 | `spec/backend/index.md` |
-| 为什么选了错误的产品 | `spec/backend/llm-selector-architecture.md` |
-| 会话上下文是怎么注入的 | `spec/backend/memory-context.md` |
-| 所有工具的参数格式 | `spec/backend/tools-catalog.md` |
-| 环境变量怎么配 | `spec/backend/config-reference.md` |
+> 知道要找什么概念但不知道看哪个文件时用这里。
+
+### 核心架构
+
+| 概念 | 文件 |
+|------|------|
+| 整体后端架构 / 项目入口 | `spec/backend/index.md` · `spec/tech-framework-guidelines.md` |
+| ReAct 循环 / CoreAgent | `spec/backend/index.md` · `spec/backend/core-react-loop.md` · `workflow.md` |
+| 单 Agent vs 多 Agent | `claude.md`（架构章节） |
+| Skills 系统（skills.py） | `spec/backend/skills-system.md` · `claude.md` |
+| 工具注册（AgentExtension / Extension 钩子） | `spec/backend/tools-catalog.md` · `spec/backend/directory-structure.md` |
+| Session 持久化 | `spec/backend/memory-context.md` · `spec/backend/database-guidelines.md` |
+
+### LLM / 模型路由
+
+| 概念 | 文件 |
+|------|------|
+| PRIMARY_LLM_PROTOCOL（openai vs anthropic） | `spec/backend/index.md` · `claude.md` |
+| Anthropic Messages API 路由 | `spec/backend/index.md`（1211 fix 章节） |
+| 降级链（GLM-4.5-air fallback） | `spec/backend/config-reference.md` · `claude.md` |
+| GLM / MiniMax thinking 模型 | `claude.md` · `doc/待办事宜.md` |
+| Token budget / max_tokens | `spec/backend/config-reference.md` |
+
+### 业务逻辑
+
+| 概念 | 文件 |
+|------|------|
+| match_quotation 选型链路（万鼎） | `spec/backend/index.md` · `spec/backend/skills-system.md` |
+| 为什么选了错误的产品 / 选型架构 | `spec/backend/llm-selector-architecture.md` |
+| 新增业务规则：加代码还是加 md | `spec/backend/llm-selector-architecture.md` 第 7 节 |
+| get_inventory_by_code（库存查询） | `spec/backend/tools-catalog.md` · `claude.md` |
+| 无货 / OOS 登记 | `spec/backend/tools-catalog.md` · `spec/backend/oos-shortage-lifecycle.md` |
+| 报价单填充流水线（Work） | `spec/backend/work-pipeline-core.md` · `spec/backend/tools-catalog.md` |
+| 业务知识文件（wanding_business_knowledge.md） | `spec/backend/llm-selector-architecture.md` · `spec/backend/skills-system.md` |
+| Rework / 纠错机制 | `spec/backend/index.md`（Rework 章节） · `workflow.md` |
+| 报价单→库存端到端流程 | `spec/backend/quotation-inventory-flow.md` |
+| 所有工具参数格式 | `spec/backend/tools-catalog.md` |
+
+### 会话上下文 & 存储
+
+| 概念 | 文件 |
+|------|------|
+| 会话上下文注入（7步流程） | `spec/backend/memory-context.md` |
+| Neon Postgres（OOS/Shortage） | `spec/backend/database-guidelines.md` · `README.md` |
+| SQLite fallback | `spec/backend/database-guidelines.md` |
+| Session store（data/sessions/） | `spec/backend/memory-context.md` · `README.md` |
 | 数据库表结构 | `spec/backend/database-guidelines.md` |
-| 前端页面路由 | `spec/frontend/pages.md` |
-| 跑一个匹配测试 | `scripts/run_one_wanding_test.py` |
-| 价格库格式/上传 | `scripts/build_wanding_standard_price_library.py` + `scripts/upload_price_library_to_neon.py` |
-| 新增业务规则该加代码还是 md | `spec/backend/llm-selector-architecture.md` 第 7 节 |
+| 环境变量配置 | `spec/backend/config-reference.md` |
+| 业务文件（价格库/映射表）位置 | `README.md` · `claude.md` |
+
+### 前端 / UI
+
+| 概念 | 文件 |
+|------|------|
+| Lit Web Components 规范 | `spec/frontend/index.md` · `spec/frontend/component-guidelines.md` |
+| 前端核心交互流程（消息→流式→渲染） | `spec/frontend/core-interaction-flow.md` |
+| 16 个 Tab / 页面路由 | `spec/frontend/pages.md` |
+| GatewayBrowserClient（WebSocket） | `spec/frontend/index.md` |
+| Controller 模式 | `spec/frontend/index.md` |
+| i18n 国际化 | `spec/frontend/i18n-guidelines.md` |
+| TypeScript 类型安全 | `spec/frontend/type-safety.md` |
+
+### Thinking 显示（推理链路）
+
+| 概念 | 文件 |
+|------|------|
+| Model Thinking vs Selector Reasoning | `spec/backend/index.md`（Reasoning/Thinking 显示链路） |
+| reasoningLevel 渲染 | `spec/frontend/thinking-display-config.md` · `spec/frontend/index.md` |
+| save_turn(thinking=...) | `spec/backend/index.md`（会话持久化） |
+
+### 管理面板 / Control UI
+
+| 概念 | 文件 |
+|------|------|
+| 价格库管理 API | `spec/backend/api-routes.md`（routes_admin） |
+| 产品映射表管理 | `spec/backend/api-routes.md` |
+| 报表系统 UI | `spec/backend/reports-system.md` |
+
+### 企业微信集成
+
+| 概念 | 文件 |
+|------|------|
+| HTTP 回调接入 | `claude.md` · `doc/wecom_excel_逻辑说明.md` |
+| 长连接 Bot | `claude.md` · `start_wecom_bot.py` |
+| 告警发送（dispatch_out_of_stock_alert） | `claude.md` |
+
+### 质量 & 流程
+
+| 概念 | 文件 |
+|------|------|
+| 技术框架基线 / 技术选型约束 | `spec/tech-framework-guidelines.md` |
+| Agent 快速入手（任务导向） | `spec/agent-fast-path.md` |
+| Agent 接手检查清单 | `spec/agent-onboarding-checklist.md` |
+| 索引维护规范 | `spec/index-maintenance.md` |
+| 按角色阅读计划 | `spec/role-based-reading-paths.md` |
+| 按时间预算阅读 | `spec/time-budget-reading.md` |
+| Trellis 工作流规范 | `workflow.md` |
+| Slash 命令（/trellis:*） | `.cursor/commands/trellis-*.md` |
+| 跨层思考指南 | `spec/guides/cross-layer-thinking-guide.md` |
+| 代码复用思考指南 | `spec/guides/code-reuse-thinking-guide.md` |
+| Lint / 测试命令 | `README.md` · `claude.md` |
+
+### 部署
+
+| 概念 | 文件 |
+|------|------|
+| 云端部署清单 | `doc/云端部署准备清单.md` · `README.md` |
+| Render / Railway / Vercel | `README.md` |
+| Docker | `README.md` · `Dockerfile` |
+| 环境变量（部署用） | `spec/backend/config-reference.md` |
 
 ---
 
