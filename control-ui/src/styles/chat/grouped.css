@@ -310,7 +310,8 @@ img.chat-avatar {
   border-radius: 12px;
   padding: 16px 20px;
   max-width: min(900px, calc(100% - 60px));
-  animation: fade-in 200ms ease-out;
+  animation: fade-in 180ms ease-out;
+  will-change: transform, opacity;
 }
 
 .price-result-card__badge {
@@ -358,7 +359,9 @@ img.chat-avatar {
   border-radius: 12px;
   padding: 14px 16px;
   max-width: min(900px, calc(100% - 60px));
-  animation: fade-in 200ms ease-out;
+  animation: fade-in 180ms ease-out;
+  will-change: transform, opacity;
+  transition: opacity 150ms ease-out;
 }
 
 .candidates-preview-card__title {

@@ -63,6 +63,19 @@ def analyze_sales_orders(week_start: date, week_end: date, orders: List[Dict[str
     df["amount_num"] = df["totalAmount"].apply(_to_float)
     df["customerName"] = df["customer"].apply(_customer_name)
     df["status"] = df["statusName"].fillna("未知状态")
+    # 服务端硬过滤，避免上游接口日期过滤异常导致周报污染。
+    df = df[df["date"].notna()]
+    df = df[(df["date"] >= week_start) & (df["date"] <= week_end)]
+    if df.empty:
+        return ReportPayload(
+            week_start=week_start.isoformat(),
+            week_end=week_end.isoformat(),
+            total_sales_amount=0.0,
+            total_order_count=0,
+            daily_stats=[],
+            top_customers=[],
+            status_stats=[],
+        )
 
     day_group = (
         df.groupby("date", dropna=True)

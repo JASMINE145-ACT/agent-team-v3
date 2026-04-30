@@ -406,3 +406,207 @@ Completed workspace quick-entry list by adding onboarding checklist and time-bud
 ### Status
 
 [OK] **Completed (workspace quick-entry completion)**
+
+---
+
+## Session 74: 2026-04-30 — Weekly report hardening + loop iteration 2
+
+**Date**: 2026-04-30  
+**Task**: Harden weekly report data boundary/concurrency and update loop document
+
+### Summary
+
+Implemented two blocking fixes in reports flow (server-side week range hard filtering and safe reanalyze state transition), then re-validated with code-review + test-agent gates and updated loop documentation for iteration 2 roadmap.
+
+### Main Changes
+
+- Updated `backend/reports/analyzer.py`
+  - Added server-side date hard filter (`week_start <= date <= week_end`) before aggregation.
+- Updated `backend/server/api/routes_reports.py`
+  - Added reanalyze concurrency guard (`running/pending -> 409`).
+  - Changed pending mark timing to after payload parse + atomic conditional update, avoiding pending leakage on 422 parse errors.
+- Updated tests:
+  - `tests/test_reports_analyzer.py`
+  - `tests/test_reports_routes.py`
+- Updated loop document:
+  - `to-do-list/周报优化循环文档.md` (Iteration 2 additions: P0/P1/P2, DB/API/state-machine drafts)
+
+### Validation Evidence
+
+- Code-review gate: PASS (no blocking issues)
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `6 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report hardening + loop iteration 2)**
+
+---
+
+## Session 75: 2026-04-30 — Weekly report loop iteration 3 (plan deepening)
+
+**Date**: 2026-04-30  
+**Task**: Deepen weekly-report optimization plan and update loop document
+
+### Summary
+
+Expanded iteration 3 planning details with executable P0 issue breakdown, SSE reconnect/continuity strategy, and frontend accessibility improvements for reports tab.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 3
+  - Added:
+    - Iteration 3 conclusions
+    - P0 issue decomposition (goal/acceptance/risk/rollback)
+    - SSE minimal integration draft (`Last-Event-ID`, fallback polling, heartbeat)
+    - Frontend accessibility checklist
+    - Iteration 4 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `6 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 3 planning update)**
+
+---
+
+## Session 76: 2026-04-30 — Weekly report loop iteration 4 (MVP contract level)
+
+**Date**: 2026-04-30  
+**Task**: Produce report events MVP design + SSE contract + reports-tab accessibility checklist
+
+### Summary
+
+Iteration 4 focused on implementation-level artifacts for next-step execution: event table DDL, SSE streaming contract semantics, and minimal accessibility task list for reports tab.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 4
+  - Added:
+    - `report_analysis_events` MVP DDL + write-path pseudocode + query sketch
+    - SSE contract draft (`Last-Event-ID`, snapshot fallback event, headers)
+    - `reports-tab.ts` accessibility minimum change list
+    - Iteration 5 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `6 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 4 contract update)**
+
+---
+
+## Session 77: 2026-04-30 — Weekly report loop iteration 5 (file-level execution map)
+
+**Date**: 2026-04-30  
+**Task**: Convert iteration plan into file-level implementation map and validate gates
+
+### Summary
+
+Iteration 5 converted prior design into actionable file-by-file change scope for backend SSE/events and frontend controller/view integration, plus added acceptance test suggestions.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 5
+  - Added:
+    - File-level change checklist (backend + frontend)
+    - FastAPI SSE implementation notes
+    - EventSource fallback strategy
+    - Accessibility and regression acceptance test suggestions
+    - Iteration 6 action plan
+- Fixed blocking bug before doc update:
+  - `backend/server/api/routes_reports.py`
+    - Guard malformed string `report_json` parsing in `reanalyze_record` and return controlled 422
+  - `tests/test_reports_routes.py`
+    - Added malformed JSON regression test (`422`)
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 5 execution map update)**
+
+---
+
+## Session 78: 2026-04-30 — Weekly report loop iteration 6 (contract-to-pseudocode)
+
+**Date**: 2026-04-30  
+**Task**: Promote SSE/DQ design from checklist into endpoint and controller pseudocode
+
+### Summary
+
+Iteration 6 translated plan artifacts into executable pseudocode level: backend SSE route skeleton, frontend EventSource fallback wiring, and DQ contract fields for cross-team implementation alignment.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 6
+  - Added:
+    - `routes_reports.py` SSE endpoint pseudocode
+    - `reports.ts` EventSource + fallback polling pseudocode
+    - DQ gate response contract (`dq_score`, dimensions, failed rules)
+    - Lit-oriented performance deepening suggestions
+    - Iteration 7 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 6 contract-to-pseudocode update)**
+
+---
+
+## Session 79: 2026-04-30 — Weekly report loop iteration 7 (PR slicing)
+
+**Date**: 2026-04-30  
+**Task**: Create minimal PR slicing and delivery cadence for weekly report optimization
+
+### Summary
+
+Iteration 7 converted architecture notes into executable delivery structure: three-PR slicing, one-week sequencing, and reusable acceptance gate checklist.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 7
+  - Added:
+    - 3-PR split (backend events / frontend SSE / accessibility+disclosure)
+    - 1-week execution cadence
+    - Iteration 7 acceptance template
+    - Additional references for multi-instance SSE and progressive disclosure
+    - Iteration 8 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 7 PR slicing update)**

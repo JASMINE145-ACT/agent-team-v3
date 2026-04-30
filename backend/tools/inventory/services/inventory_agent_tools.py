@@ -94,6 +94,69 @@ def _build_batch_formatted_response(
     return "\n".join(lines)
 
 
+# ============================================================
+# 库存查询格式化函数
+# ============================================================
+
+def _build_inventory_single_formatted_response(item: Optional[Any], code: str) -> str:
+    """
+    格式化单个库存查询结果为 Markdown 表格。
+    逐编号强约束：code, name, qty_warehouse, qty_available 必须有值。
+    """
+    if item is None:
+        return (
+            f"| 物料编号 | 产品名称 | 库存数量 | 可售数量 |\n"
+            f"|---|---|---|---|\n"
+            f"| {code} | — | — | — |"
+        )
+    name = getattr(item, "item_name", "—") or "—"
+    qty_wh = getattr(item, "qty_warehouse", 0.0) or 0.0
+    qty_av = getattr(item, "qty_available", 0.0) or 0.0
+    return (
+        f"| 物料编号 | 产品名称 | 库存数量 | 可售数量 |\n"
+        f"|---|---|---|---|\n"
+        f"| {code} | {name} | {qty_wh} | {qty_av} |"
+    )
+
+
+def _build_inventory_batch_formatted_response(items_with_status: list[dict[str, Any]]) -> str:
+    """
+    格式化批量库存查询结果为 Markdown 表格。
+    逐编号强约束，每行必须包含：code, name, qty_warehouse, qty_available。
+    """
+    lines = []
+    lines.append("**批量库存查询结果**")
+    lines.append("")
+    lines.append("| 序号 | 物料编号 | 产品名称 | 库存数量 | 可售数量 | 状态 |")
+    lines.append("|---|---|---|---|---|---|")
+
+    for idx, item in enumerate(items_with_status, 1):
+        code = item.get("code", "—") or "—"
+        status = item.get("item_status", "unknown")
+        if status == "found":
+            # 优先用 item_summary（可 JSON 序列化），回退到原始 item 对象
+            summary = item.get("item_summary") or {}
+            if summary:
+                name = summary.get("item_name", "—") or "—"
+                qty_wh = summary.get("qty_warehouse", 0.0) or 0.0
+                qty_av = summary.get("qty_available", 0.0) or 0.0
+            elif item.get("item"):
+                obj = item["item"]
+                name = getattr(obj, "item_name", "—") or "—"
+                qty_wh = getattr(obj, "qty_warehouse", 0.0) or 0.0
+                qty_av = getattr(obj, "qty_available", 0.0) or 0.0
+            else:
+                name, qty_wh, qty_av = "—", 0.0, 0.0
+            lines.append(f"| {idx} | {code} | {name} | {qty_wh} | {qty_av} | found |")
+        elif status == "not_found":
+            lines.append(f"| {idx} | {code} | — | — | — | not_found |")
+        elif status == "invalid_code":
+            lines.append(f"| {idx} | {code} | — | — | — | invalid_code |")
+        else:
+            lines.append(f"| {idx} | {code} | — | — | — | {status} |")
+    return "\n".join(lines)
+
+
 def _build_formatted_response(payload: dict[str, Any], keywords: str = "") -> str:
     """
     为 single 结果预渲染 Markdown 输出，供主 LLM 原文复用，避免弱模型字段解析失败。
@@ -836,12 +899,15 @@ def _execute_get_profit_by_price_batch(arguments: dict[str, Any]) -> dict[str, A
     }
 
 
-def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str, Any]:
+def _execute_get_inventory_by_code_batch(arguments: dict[str, Any], push_event=None) -> dict[str, Any]:
     """
     批量按 code 查库存（只读，ACCURATE 库存表）：
     - 入参：codes 为 list[str]，每项为 10 位物料编号；单次最多 50 条，超出仅处理前 50 条。
-    - 返回：{ success, result, data: { items, stats } }。data.items 与输入 1:1，每项含 input_index、code、item_status、item；
+    - 返回：{ success, result, data: { items, stats }, formatted_response, compact }。
+      data.items 与输入 1:1，每项含 input_index、code、item_status、item；
       item_status 为 found | not_found | invalid_code，item 为 table.get_item_by_code 的原始结果（未找到时为 None）。
+      formatted_response: Markdown 格式表格（逐编号强约束）
+      compact: 紧凑摘要（供 LLM 回复用）
     """
     from backend.tools.inventory.config import config
 
@@ -924,13 +990,63 @@ def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str,
                 },
             }
 
-    # 构建 code -> Item 映射（以 item_no 为主，必要时回退到列表遍历）
+    def _safe_str(v: Any) -> str:
+        return str(v or "").strip()
+
+    def _item_code(it: Any) -> str:
+        if it is None:
+            return ""
+        if isinstance(it, dict):
+            for k in ("item_no", "no", "code"):
+                v = _safe_str(it.get(k))
+                if v:
+                    return v
+            return ""
+        for k in ("item_no", "no", "code"):
+            try:
+                v = _safe_str(getattr(it, k, ""))
+            except Exception:
+                v = ""
+            if v:
+                return v
+        return ""
+
+    def _item_summary(it: Any) -> dict[str, Any]:
+        if it is None:
+            return {}
+
+        def _get(obj: Any, key: str) -> Any:
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return getattr(obj, key, None)
+
+        code = _safe_str(_get(it, "item_no") or _get(it, "no") or _get(it, "code"))
+        name = _safe_str(_get(it, "item_name") or _get(it, "name"))
+        item_type = _safe_str(_get(it, "item_type") or _get(it, "type"))
+        unit = _safe_str(_get(it, "unit"))
+        qty_warehouse = _get(it, "qty_warehouse")
+        qty_available = _get(it, "qty_available")
+        try:
+            qty_warehouse = float(qty_warehouse) if qty_warehouse is not None else 0.0
+        except Exception:
+            qty_warehouse = 0.0
+        try:
+            qty_available = float(qty_available) if qty_available is not None else 0.0
+        except Exception:
+            qty_available = 0.0
+        return {
+            "item_no": code,
+            "item_name": name,
+            "item_type": item_type,
+            "unit": unit,
+            "qty_warehouse": qty_warehouse,
+            "qty_available": qty_available,
+        }
+
+    # 构建 code -> Item 映射（以 item_no 为主，必要时回退到兼容字段）
     code_to_item: dict[str, Any] = {}
     for it in items or []:
-        try:
-            key = (it.item_no or "").strip()
-        except Exception:
-            key = ""
+        key = _item_code(it)
         if key:
             # 仅第一次出现生效，后续重复忽略，避免覆盖
             code_to_item.setdefault(key, it)
@@ -958,12 +1074,14 @@ def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str,
         item = code_to_item.get(code)
         if item:
             found += 1
+            # 只存 item_summary（可 JSON 序列化），不存原始 Item 对象
             items_with_status.append(
                 {
                     "input_index": idx,
                     "code": code,
                     "item_status": "found",
-                    "item": item,
+                    "item": None,  # 避免 JSON 序列化失败，原始对象不放入 result
+                    "item_summary": _item_summary(item),
                 }
             )
         else:
@@ -985,6 +1103,27 @@ def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str,
     lines.append(f"- 编码无效或查询失败：{invalid}")
     lines.append(f"- 已处理编号：{len(codes)}")
 
+    lines.append("")
+    lines.append("按输入逐项明细：")
+    lines.append("| 序号 | 物料编号 | 状态 | 产品名称 | 库存 | 可售 |")
+    lines.append("|---|---|---|---|---:|---:|")
+    for entry in items_with_status:
+        idx = int(entry.get("input_index", -1))
+        code = str(entry.get("code") or "")
+        status = str(entry.get("item_status") or "")
+        if status == "found":
+            summary = entry.get("item_summary") or {}
+            lines.append(
+                f"| {idx + 1} | {code} | found | "
+                f"{summary.get('item_name') or '—'} | "
+                f"{summary.get('qty_warehouse', 0.0)} | "
+                f"{summary.get('qty_available', 0.0)} |"
+            )
+        elif status == "not_found":
+            lines.append(f"| {idx + 1} | {code} | not_found | — | — | — |")
+        else:
+            lines.append(f"| {idx + 1} | {code or '—'} | invalid_code | — | — | — |")
+
     try:
         # 补充一段紧凑的明细表，便于人读
         found_items = [it for it in items_with_status if it.get("item_status") == "found" and it.get("item")]
@@ -997,9 +1136,37 @@ def _execute_get_inventory_by_code_batch(arguments: dict[str, Any]) -> dict[str,
         # 明细表渲染失败不影响主结构
         pass
 
+    # 生成结构化 formatted_response（逐编号强约束 Markdown 表格）
+    formatted_response = _build_inventory_batch_formatted_response(items_with_status)
+
+    # 生成紧凑摘要
+    compact = (
+        f"[已渲染到前端] 批量库存查询 {len(codes)} 个编号："
+        f"found={found}, not_found={not_found}, invalid={invalid}。"
+        f"库存数据已渲染到前端卡片，禁止重复描述表格内容。"
+    )
+
     return {
         "success": True,
-        "result": "\n".join(lines),
+        "result": json.dumps({
+            "success": True,
+            "result": compact,
+            "data": {
+                "items": items_with_status,
+                "stats": {
+                    "found": found,
+                    "not_found": not_found,
+                    "invalid": invalid,
+                    "input_count": len(codes),
+                    "truncated": truncated,
+                    "input_total": len(raw_codes),
+                },
+            },
+            "formatted_response": formatted_response,
+            "compact": compact,
+        }, ensure_ascii=False),
+        "formatted_response": formatted_response,
+        "compact": compact,
         "data": {
             "items": items_with_status,
             "stats": {
@@ -1525,7 +1692,7 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any], push_even
     if name == "get_profit_by_price_batch":
         return _execute_get_profit_by_price_batch(arguments)
     if name == "get_inventory_by_code_batch":
-        return _execute_get_inventory_by_code_batch(arguments)
+        return _execute_get_inventory_by_code_batch(arguments, push_event=push_event)
     if name == "modify_inventory":
         try:
             from backend.tools.inventory.services.inventory_modify_service import modify_inventory as do_modify
@@ -1590,7 +1757,34 @@ def _execute_inventory_tool_impl(name: str, arguments: dict[str, Any], push_even
             return {"success": True, "result": "请提供 Item Code。"}
         try:
             item = table.get_item_by_code(code)
-            return {"success": True, "result": sql_agent.format_response([item] if item else [])}
+            # 生成结构化 formatted_response
+            formatted_response = _build_inventory_single_formatted_response(item, code)
+            # 生成紧凑摘要
+            if item is not None:
+                name_str = getattr(item, "item_name", "—") or "—"
+                qty_wh = getattr(item, "qty_warehouse", 0.0) or 0.0
+                qty_av = getattr(item, "qty_available", 0.0) or 0.0
+                compact = (
+                    f"[已渲染到前端] 物料编号 {code} 库存：{qty_wh}，可售：{qty_av}。"
+                    f"产品名称：{name_str}。"
+                )
+            else:
+                compact = f"[已渲染到前端] 物料编号 {code} 未找到库存记录。"
+            return {
+                "success": True,
+                "result": json.dumps({
+                    "success": True,
+                    "result": compact,
+                    "data": {
+                        "item": None,  # 避免 JSON 序列化失败，原始对象不放入 result
+                        "code": code,
+                    },
+                    "formatted_response": formatted_response,
+                    "compact": compact,
+                }, ensure_ascii=False),
+                "formatted_response": formatted_response,
+                "compact": compact,
+            }
         except Exception as e:
             logger.exception("get_inventory_by_code 失败")
             return {"success": False, "error": str(e), "result": f"查询失败: {e}"}

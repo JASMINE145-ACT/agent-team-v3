@@ -255,10 +255,12 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     let didLoadHistoryForNewSession = false;
     if (state === "final" || state === "error" || state === "aborted") {
       resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
-      // Clear live tool_render SSE buffer when a run ends. Otherwise history already
-      // contains virtual tool_render messages from chat.history, and stale
-      // toolRenderItems fall through to buildChatItems bottom fallback → duplicate cards.
-      resetToolRender(host as unknown as Parameters<typeof resetToolRender>[0]);
+      // For error/aborted: no history reload follows, clear tool_render immediately.
+      // For final: defer to after loadChatHistory resolves so live cards stay visible
+      // during the async gap — prevents the "card disappears then reappears" flicker.
+      if (state !== "final") {
+        resetToolRender(host as unknown as Parameters<typeof resetToolRender>[0]);
+      }
       void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
       const runId = payload?.runId;
       if (runId && host.refreshSessionsAfterChat.has(runId)) {
@@ -307,7 +309,13 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     }
     if (state === "final" || state === "foreign_final") {
       if (!didLoadHistoryForNewSession) {
-        void loadChatHistory(host as unknown as OpenClawApp);
+        // Defer resetToolRender until history is in state: keeps live cards visible
+        // during loadChatHistory async gap, then clears once history confirms them.
+        void loadChatHistory(host as unknown as OpenClawApp).then(() => {
+          if (state === "final") {
+            resetToolRender(host as unknown as Parameters<typeof resetToolRender>[0]);
+          }
+        });
       }
     }
     return;

@@ -159,6 +159,97 @@ def _handle_batch_obs(obs: str, context: dict | None, _logger: Any) -> str:
     return compact
 
 
+def _handle_inventory_single_obs(obs: str, context: dict | None, _logger: Any) -> str:
+    """
+    处理 get_inventory_by_code 的 observation：
+    - 推送 tool_render SSE + 返回紧凑摘要
+    obs 格式：{ success, result: "{inner_json}", data: {item, code}, formatted_response, compact }
+    """
+    try:
+        data = json.loads(obs)
+    except Exception:
+        _logger.info("[on_after_tool] inventory single obs is plain text (len=%d)", len(obs))
+        return obs if obs.startswith(RENDERED_MARKER) else f"{RENDERED_MARKER} {obs}"
+
+    # 尝试从内层 result 中提取 data
+    inner_result = data
+    try:
+        result_str = data.get("result", "")
+        if isinstance(result_str, str):
+            inner_result = json.loads(result_str)
+    except Exception:
+        pass
+
+    push = (context or {}).get("push_event")
+    formatted_response = data.get("formatted_response") or inner_result.get("formatted_response", "")
+    if callable(push) and formatted_response:
+        push("tool_render", {
+            "formatted_response": formatted_response,
+            "keywords": inner_result.get("code", "") or data.get("code", ""),
+            "chosen": {},
+            "chosen_index": None,
+            "match_source": "inventory",
+            "selection_reasoning": "",
+        })
+        _logger.info("[on_after_tool] inventory single tool_render SSE pushed")
+
+    compact = (
+        data.get("compact")
+        or inner_result.get("compact")
+        or f"{RENDERED_MARKER} 物料编号 {inner_result.get('code', data.get('code', ''))} "
+        f"库存={inner_result.get('qty_warehouse', '—')}，可售={inner_result.get('qty_available', '—')}。"
+    )
+    _logger.info("[on_after_tool] inventory single compact (len=%d): %s", len(compact), compact[:80])
+    return compact
+
+
+def _handle_inventory_batch_obs(obs: str, context: dict | None, _logger: Any) -> str:
+    """
+    处理 get_inventory_by_code_batch 的 observation：
+    - 推送 tool_render SSE + 返回紧凑摘要
+    obs 格式：{ success, result: "{inner_json}", data: {items, stats}, formatted_response, compact }
+    """
+    try:
+        data = json.loads(obs)
+    except Exception:
+        _logger.info("[on_after_tool] inventory batch obs is plain text (len=%d)", len(obs))
+        return obs if obs.startswith(RENDERED_MARKER) else f"{RENDERED_MARKER} 批量库存查询完成。{obs}"
+
+    # 尝试从内层 result 中提取 data
+    inner_result = data
+    try:
+        result_str = data.get("result", "")
+        if isinstance(result_str, str):
+            inner_result = json.loads(result_str)
+    except Exception:
+        pass
+
+    push = (context or {}).get("push_event")
+    formatted_response = data.get("formatted_response") or inner_result.get("formatted_response", "")
+    if callable(push) and formatted_response:
+        push("tool_render", {
+            "formatted_response": formatted_response,
+            "keywords": "批量库存查询",
+            "chosen": {},
+            "chosen_index": None,
+            "match_source": "inventory_batch",
+            "selection_reasoning": "",
+            "batch_mode": True,
+        })
+        _logger.info("[on_after_tool] inventory batch tool_render SSE pushed")
+
+    # 从 data.stats 获取统计信息
+    stats = inner_result.get("data", {}).get("stats", {}) if isinstance(inner_result, dict) else {}
+    compact = (
+        data.get("compact")
+        or inner_result.get("compact")
+        or f"{RENDERED_MARKER} 批量库存查询完成（found={stats.get('found', 0)}, "
+        f"not_found={stats.get('not_found', 0)}）。"
+    )
+    _logger.info("[on_after_tool] inventory batch compact (len=%d): %s", len(compact), compact[:80])
+    return compact
+
+
 class JAgentExtension(AgentExtension):
     """业务扩展：聚合三个领域工具注册，技能/输出格式由 PromptProvider 提供。"""
 
@@ -309,6 +400,14 @@ class JAgentExtension(AgentExtension):
                     return compact
                 else:
                     logger.info("[on_after_tool] single=False/None, returning raw obs unchanged")
+
+        # ── get_inventory_by_code: 推送 SSE + 返回紧凑摘要 ────────────────────────
+        if name == "get_inventory_by_code":
+            return _handle_inventory_single_obs(obs, context, logger)
+
+        # ── get_inventory_by_code_batch: 推送 SSE + 返回紧凑摘要 ──────────────────
+        if name == "get_inventory_by_code_batch":
+            return _handle_inventory_batch_obs(obs, context, logger)
 
         # ── 保留原有 run_quotation_fill 结果截断逻辑 ──────────────────────────
         if name == "run_quotation_fill" and len(obs) > 3000:

@@ -813,7 +813,7 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
     return lines.join("\n");
   };
 
-  const pushCardFromItem = (card: ToolRenderItem, fallbackTimestamp: number, fallbackIndex: number) => {
+  const pushCardFromItem = (card: ToolRenderItem, fallbackTimestamp: number) => {
     const rendered = (
       card.payload.batch_mode
         ? buildBatchSummaryMarkdown(card.payload)
@@ -824,7 +824,10 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
     }
     items.push({
       kind: "message",
-      key: `tool-render:${props.sessionKey}:${card.id}:${fallbackIndex}`,
+      // Stable key based solely on card.id so repeat() reuses the same DOM node
+      // whether the card is in live-bottom or history-matched position — prevents
+      // DOM remount and fade-in re-animation during the live→history transition.
+      key: `tool-render:${props.sessionKey}:${card.id}`,
       message: {
         role: "assistant",
         content: [{ type: "text", text: rendered }],
@@ -962,7 +965,7 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       if (cards && cards.length > 0) {
         for (let cardIndex = 0; cardIndex < cards.length; cardIndex++) {
           const card = cards[cardIndex];
-          pushCardFromItem(card, normalized.timestamp ?? Date.now(), i * 1000 + cardIndex);
+          pushCardFromItem(card, normalized.timestamp ?? Date.now());
         }
       } else {
         items.push({
@@ -1036,7 +1039,7 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       continue;
     }
     fallbackSeenTexts.add(rendered);
-    pushCardFromItem(card, card.ts || Date.now(), history.length + i);
+    pushCardFromItem(card, card.ts || Date.now());
   }
 
   if (props.stream !== null) {

@@ -308,8 +308,9 @@ function renderGroupedMessage(
   const hasFiles = attachedFiles.length > 0;
 
   const extractedText = extractTextCached(message);
-  const extractedThinking =
-    opts.showReasoning && role === "assistant" ? extractThinkingCached(message) : null;
+  // Thinking blocks (plan/gather/etc.) are intentionally never rendered in the chat UI.
+  // The LLM still generates and uses thinking; only the display is suppressed.
+  const extractedThinking = null;
   const markdownBase = extractedText?.trim() ? extractedText : null;
   const reasoningMarkdown = extractedThinking ? formatReasoningMarkdown(extractedThinking) : null;
   const isUser = normalizeRoleForGrouping(role) === "user";

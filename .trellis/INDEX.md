@@ -38,7 +38,7 @@
 | `spec/backend/error-handling.md` | 错误处理规范 |
 | `spec/backend/logging-guidelines.md` | 日志规范 |
 | `spec/backend/quality-guidelines.md` | 代码质量标准 |
-| `spec/backend/quotation-inventory-flow.md` | 报价单→库存查询端到端流程 |
+| `spec/backend/quotation-inventory-flow.md` | 报价单→库存查询端到端流程（含 SSE 推送机制） |
 | `spec/backend/work-pipeline-core.md` | Work 执行生命周期 |
 | `spec/backend/oos-shortage-lifecycle.md` | 无货/短缺登记生命周期 |
 | `spec/backend/reports-system.md` | 报表系统（含 Phase-2 daemon 修复记录） |
@@ -259,6 +259,7 @@
 
 | 时间 | 变更 | 相关文件 |
 |------|------|---------|
+| 2026-04-30 | 库存查询 SSE 推送 + Compact 摘要机制（对齐 match_quotation） | `spec/backend/quotation-inventory-flow.md` |
 | 2026-04-29 | 规则/判断分层：新增 `_apply_candidate_pre_filter`，md 瘦身至 70 行 | `spec/backend/llm-selector-architecture.md` |
 | 2026-04-29 | OD→DN 日标外径映射（110→DN100、160→DN150） | `backend/tools/inventory/services/wanding_fuzzy_matcher.py` |
 | 2026-04-29 | `spec/backend/memory-context.md` 重写（基于实际 Python 实现） | `spec/backend/memory-context.md` |

@@ -305,29 +305,41 @@ async def reanalyze_record(
     """重跑 LLM 分析，不重新抓数据。"""
     _require_reports_token(x_reports_token)
 
-    def _load_for_reanalyze() -> Dict[str, Any] | None:
+    def _prepare_reanalyze() -> Dict[str, Any] | None:
         conn = _conn()
         try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT task_key, report_json FROM report_records WHERE id=%s",
-                    (record_id,),
-                )
-                row = cur.fetchone()
-            if not row or not row[1]:
-                return None
-            return {"task_key": str(row[0]), "report_json": row[1]}
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT task_key, report_json, analysis_status FROM report_records WHERE id=%s FOR UPDATE",
+                        (record_id,),
+                    )
+                    row = cur.fetchone()
+                    if not row or not row[1]:
+                        return None
+                    status = str(row[2]).lower() if row[2] is not None else ""
+                    if status in {"running", "pending"}:
+                        return {
+                            "busy": True,
+                            "analysis_status": status,
+                        }
+            return {"task_key": str(row[0]), "report_json": row[1], "busy": False}
         finally:
             conn.close()
 
-    record = await asyncio.to_thread(_load_for_reanalyze)
+    record = await asyncio.to_thread(_prepare_reanalyze)
     if not record:
         raise HTTPException(
             status_code=404, detail=f"record not found or has no report_json: {record_id}"
         )
+    if record.get("busy") is True:
+        raise HTTPException(
+            status_code=409,
+            detail=f"analysis already {record.get('analysis_status')}, please wait",
+        )
 
-    rj = record["report_json"] if isinstance(record["report_json"], dict) else json.loads(record["report_json"])
     try:
+        rj = record["report_json"] if isinstance(record["report_json"], dict) else json.loads(record["report_json"])
         payload = ReportPayload(
             week_start=str(rj.get("week_start", "")),
             week_end=str(rj.get("week_end", "")),
@@ -339,6 +351,28 @@ async def reanalyze_record(
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"invalid report_json: {exc}")
+
+    def _mark_pending_if_available() -> bool:
+        conn = _conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE report_records
+                        SET analysis_status='pending'
+                        WHERE id=%s
+                          AND COALESCE(analysis_status, '') NOT IN ('running', 'pending')
+                        """,
+                        (record_id,),
+                    )
+                    return bool(cur.rowcount)
+        finally:
+            conn.close()
+
+    marked = await asyncio.to_thread(_mark_pending_if_available)
+    if not marked:
+        raise HTTPException(status_code=409, detail="analysis already running or pending, please wait")
 
     db_url = get_database_url()
     threading.Thread(
