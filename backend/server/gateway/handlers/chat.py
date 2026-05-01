@@ -323,6 +323,12 @@ async def handle_chat_send(
             context.setdefault("_tool_renders", []).append(data)
         _schedule_emit_agent_stream(stream, data)
 
+    def on_tool_calls_ready_callback(_: int) -> None:
+        # Do not clear accumulated stream text here.
+        # Tool calls can be selected after partial token emission; resetting would
+        # truncate the eventual assistant content (e.g. leave only "1.").
+        return
+
     await send_res({"ok": True, "runId": run_id})
 
     agent = ws.app.state.agent
@@ -336,6 +342,7 @@ async def handle_chat_send(
             session_id=session_key,
             on_token=on_token,
             on_event=on_event,
+            on_tool_calls_ready=on_tool_calls_ready_callback,
             should_cancel=cancel_ev.is_set,
         )
         if cancel_ev.is_set():

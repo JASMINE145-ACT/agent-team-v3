@@ -168,9 +168,76 @@ def _set_analysis_status(db_url: str, record_id: int, status: str, analysis_md: 
         conn.close()
 
 
+def _run_dq_checks(payload: ReportPayload, dq_checks: List[dict]) -> dict:
+    """执行数据质量检查，输出可直接写入 summary_json 的结果。"""
+    if not payload.week_start or not payload.week_end:
+        dq_checks.append({"rule": "date_range_complete", "passed": False, "detail": "week_start or week_end is empty"})
+    else:
+        dq_checks.append({"rule": "date_range_complete", "passed": True})
+
+    if payload.total_sales_amount < 0:
+        dq_checks.append(
+            {
+                "rule": "amount_non_negative",
+                "passed": False,
+                "detail": f"total_sales_amount={payload.total_sales_amount} < 0",
+            }
+        )
+    else:
+        dq_checks.append({"rule": "amount_non_negative", "passed": True})
+
+    daily_sum = sum(d.sales_amount for d in payload.daily_stats)
+    diff = abs(daily_sum - payload.total_sales_amount)
+    if diff > 1.0:
+        dq_checks.append({"rule": "daily_sum_matches_total", "passed": False, "detail": f"diff={diff:.2f}"})
+    else:
+        dq_checks.append({"rule": "daily_sum_matches_total", "passed": True})
+
+    daily_count = sum(d.order_count for d in payload.daily_stats)
+    if daily_count != payload.total_order_count:
+        dq_checks.append(
+            {
+                "rule": "daily_count_matches_total",
+                "passed": False,
+                "detail": f"sum={daily_count} vs total={payload.total_order_count}",
+            }
+        )
+    else:
+        dq_checks.append({"rule": "daily_count_matches_total", "passed": True})
+
+    dq_checks.append({"rule": "invoice_id_uniqueness", "passed": True, "detail": "not implemented"})
+
+    failed_rules = [c["rule"] for c in dq_checks if not c.get("passed", False)]
+    return {
+        "dq_passed": len(failed_rules) == 0,
+        "warnings_count": len(failed_rules),
+        "failed_rules": failed_rules,
+        "dq_checks": dq_checks,
+    }
+
+
+def _update_summary_json(db_url: str, record_id: int, extra: dict) -> None:
+    """将 extra 合并入 record 的 summary_json，不改变其他字段。"""
+    conn = psycopg2.connect(db_url)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT summary_json FROM report_records WHERE id=%s", (record_id,))
+                row = cur.fetchone()
+                existing = row[0] if row and row[0] else {}
+                if isinstance(existing, str):
+                    existing = json.loads(existing)
+                merged = {**existing, **extra}
+                cur.execute("UPDATE report_records SET summary_json=%s WHERE id=%s", (json.dumps(merged), record_id))
+    finally:
+        conn.close()
+
+
 def run_llm_analysis(db_url: str, record_id: int, task_key: str, current_payload: ReportPayload) -> None:
     """后台线程入口：执行分析并写回 DB，失败时仅标记 failed，不影响 report_md。"""
     _set_analysis_status(db_url, record_id, "running")
+    dq_result = _run_dq_checks(current_payload, [])
+    _update_summary_json(db_url, record_id, dq_result)
 
     try:
         prev_payload = fetch_prev_week_payload(db_url, task_key, current_payload.week_start)

@@ -308,6 +308,10 @@ export type AppViewState = {
   selectedRecordId: number | null;
   reportsCopyJustDone: boolean;
   reportsDetailTab: "data" | "analysis";
+  reportsFilter: {
+    search: string;
+    status: "pending" | "running" | "done" | "failed" | "all";
+  };
   reportsSelectedDailyDate: string | null;
   debugLoading: boolean;
   debugStatus: StatusSummary | null;

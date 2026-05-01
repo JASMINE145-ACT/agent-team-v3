@@ -542,6 +542,34 @@ describe("chat view", () => {
     expect(text.indexOf("CARD-NEW")).toBeGreaterThan(text.indexOf("Q1"));
   });
 
+  it("skips empty trailing assistant messages that only contain hidden thinking blocks", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "PRODUCT-TABLE" }],
+              timestamp: 1000,
+              __openclaw: { kind: "tool_render", runId: "run-1", seq: 1 },
+            },
+            {
+              role: "assistant",
+              content: [{ type: "thinking", thinking: "1. Plan\n2. Gather\n3. Act" }],
+              timestamp: 1001,
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const assistantGroups = container.querySelectorAll(".chat-group.assistant");
+    expect(assistantGroups.length).toBe(1);
+    expect(container.textContent ?? "").toContain("PRODUCT-TABLE");
+  });
+
   it("renders candidates preview card when candidatePreviews has items", () => {
     const container = document.createElement("div");
     render(

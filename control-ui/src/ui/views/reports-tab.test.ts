@@ -49,6 +49,7 @@ function createParams(overrides: Partial<ReportsTabParams> = {}): ReportsTabPara
     reportsDetailTab: "data",
     reportsEditingTaskId: null,
     reportsEditForm: {} as ReportTaskConfig,
+    reportsFilter: { search: "", status: "all" },
     onTokenChange: () => undefined,
     onRefresh: () => undefined,
     onRun: () => undefined,
@@ -61,6 +62,7 @@ function createParams(overrides: Partial<ReportsTabParams> = {}): ReportsTabPara
     onCancelEdit: () => undefined,
     onEditFormChange: () => undefined,
     onSaveEdit: () => undefined,
+    onFilterChange: () => undefined,
     ...overrides,
   };
 }
@@ -166,5 +168,39 @@ describe("reports tab view", () => {
     const style = selectedRow?.getAttribute("style") ?? "";
     expect(style).toContain("font-weight:600");
     expect(style).toContain("accent-soft");
+  });
+
+  it("shows troubleshooting section on failed analysis", () => {
+    const failedRecord: ReportRecord = {
+      ...createRecord(),
+      id: 42,
+      analysis_status: "failed",
+      error_message: "anthropic API error",
+    };
+    const container = document.createElement("div");
+    render(
+      renderReportsTab(
+        createParams({
+          reportDetail: failedRecord,
+          reportsDetailTab: "analysis",
+        }),
+      ),
+      container,
+    );
+    expect(container.querySelector("details")).not.toBeNull();
+    expect(container.textContent ?? "").toContain("record_id=42");
+  });
+
+  it("renders history filters and emits onFilterChange", () => {
+    const onFilterChange = vi.fn();
+    const container = document.createElement("div");
+    render(renderReportsTab(createParams({ onFilterChange })), container);
+    const input = container.querySelector("input[placeholder]") as HTMLInputElement | null;
+    const select = container.querySelector("select") as HTMLSelectElement | null;
+    expect(input).not.toBeNull();
+    expect(select).not.toBeNull();
+    input!.value = "2026-04";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(onFilterChange).toHaveBeenCalled();
   });
 });

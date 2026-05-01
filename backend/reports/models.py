@@ -109,6 +109,19 @@ _DDL = [
     CREATE INDEX IF NOT EXISTS idx_report_records_task_started
     ON report_records(task_key, started_at DESC);
     """,
+    """
+    CREATE TABLE IF NOT EXISTS report_analysis_events (
+        id BIGSERIAL PRIMARY KEY,
+        record_id BIGINT NOT NULL REFERENCES report_records(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        event_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_report_analysis_events_record_created
+    ON report_analysis_events(record_id, created_at DESC, id DESC);
+    """,
 ]
 
 
@@ -168,4 +181,55 @@ def reset_stale_running_analyses() -> int:
 
 def json_dumps(data: Dict[str, Any]) -> str:
     return json.dumps(data, ensure_ascii=False)
+
+
+def append_analysis_event(record_id: int, event_type: str, event_payload: Optional[Dict[str, Any]] = None) -> int:
+    payload = event_payload or {}
+    conn = psycopg2.connect(get_database_url())
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO report_analysis_events(record_id, event_type, event_payload)
+                    VALUES (%s, %s, %s::jsonb)
+                    RETURNING id
+                    """,
+                    (record_id, event_type, json_dumps(payload)),
+                )
+                row = cur.fetchone()
+                return int(row[0]) if row else 0
+    finally:
+        conn.close()
+
+
+def list_analysis_events(record_id: int, after_id: int = 0, limit: int = 100) -> List[Dict[str, Any]]:
+    safe_limit = max(1, min(limit, 500))
+    conn = psycopg2.connect(get_database_url())
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, record_id, event_type, event_payload, created_at
+                FROM report_analysis_events
+                WHERE record_id=%s
+                  AND id > %s
+                ORDER BY id ASC
+                LIMIT %s
+                """,
+                (record_id, after_id, safe_limit),
+            )
+            rows = cur.fetchall()
+        return [
+            {
+                "event_id": int(r[0]),
+                "record_id": int(r[1]),
+                "event_type": str(r[2]),
+                "event_payload": r[3] if isinstance(r[3], dict) else {},
+                "created_at": r[4].isoformat() if r[4] else None,
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
 

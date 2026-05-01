@@ -83,6 +83,20 @@ class _DummyPushEventAgent:
         return {"answer": "ok", "thinking": None, "trace": []}
 
 
+class _DummyToolReadyAccumulationAgent:
+    async def execute_react(self, user_input: str, context: dict, session_id: str, **kwargs: object) -> dict:
+        on_token = kwargs.get("on_token")
+        on_tool_calls_ready = kwargs.get("on_tool_calls_ready")
+        if callable(on_token):
+            on_token("库存结果")
+        if callable(on_tool_calls_ready):
+            on_tool_calls_ready(1)
+        if callable(on_token):
+            on_token("1.")
+        await asyncio.sleep(0.01)
+        return {"answer": "", "thinking": None, "trace": []}
+
+
 def test_websocket_entrypoint_sets_preferred_lang_for_english_message():
     agent = _DummyAgent()
     ws = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(agent=agent)))
@@ -134,6 +148,40 @@ def test_chat_send_forwards_push_event_as_agent_tool_render_stream():
     assert data.get("match_source") == "历史报价"
     assert isinstance(data.get("formatted_response"), str)
     assert "查询结果" in data.get("formatted_response")
+
+
+def test_chat_send_does_not_reset_accumulated_stream_on_tool_calls_ready():
+    ws = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(agent=_DummyToolReadyAccumulationAgent()))
+    )
+    params = {
+        "sessionKey": "tool-ready-session",
+        "message": "查库存",
+        "context": {},
+    }
+    sent_events = []
+
+    async def _fake_send_res(payload: dict) -> None:
+        return None
+
+    async def _fake_send_event(payload: dict) -> None:
+        sent_events.append(payload)
+
+    asyncio.run(handle_chat_send(ws, "req-tool-ready-1", params, _fake_send_res, _fake_send_event))
+
+    chat_events = [e for e in sent_events if e.get("event") == "chat"]
+    final_events = [e for e in chat_events if (e.get("payload") or {}).get("state") == "final"]
+    assert len(final_events) >= 1
+    final_payload = final_events[-1].get("payload") or {}
+    final_message = final_payload.get("message") or {}
+    content = final_message.get("content") or []
+    text_blocks = [
+        b.get("text")
+        for b in content
+        if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
+    ]
+    assert text_blocks
+    assert text_blocks[-1] == "库存结果1."
 
 
 def test_wecom_entrypoint_sets_preferred_lang_for_english_message():

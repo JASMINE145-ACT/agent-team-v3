@@ -9,9 +9,13 @@
  * In all cases the LLM still uses the reasoning correctly; only the display is suppressed.
  */
 
-/** Returns true when text opens with the Plan/Gather/Act/Verify numbered structure. */
+/**
+ * Returns true when text opens with the Plan/Gather/Act/Verify numbered structure.
+ * Triggers as early as the period in "1." — catches all streaming partials before
+ * any letter of "Plan" can reach the screen.
+ */
 function startsWithPlanBlock(text: string): boolean {
-  return /^(?:###\s*)?1\.\s*Plan\b/i.test(text);
+  return /^(?:###\s*)?1\./.test(text);
 }
 
 /** Returns true when text opens with a bare "Reasoning:" prefix. */

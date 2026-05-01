@@ -9,6 +9,7 @@ import {
   renderStreamingGroup,
 } from "../chat/grouped-render.ts";
 import { extractTextCached } from "../chat/message-extract.ts";
+import { stripThinkingTags } from "../format.ts";
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
 import { icons } from "../icons.ts";
 import { toSanitizedMarkdownHtml } from "../markdown.ts";
@@ -731,6 +732,75 @@ function groupMessages(items: ChatItem[]): Array<ChatItem | MessageGroup> {
   return result;
 }
 
+function hasRenderableNonTextBlocks(message: unknown): boolean {
+  const m = message as Record<string, unknown>;
+  const content = m.content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const item = block as Record<string, unknown>;
+    const kind = typeof item.type === "string" ? item.type.toLowerCase() : "";
+
+    if (
+      kind === "toolcall" ||
+      kind === "tool_call" ||
+      kind === "tooluse" ||
+      kind === "tool_use" ||
+      kind === "toolresult" ||
+      kind === "tool_result"
+    ) {
+      return true;
+    }
+
+    if (typeof item.name === "string" && item.arguments != null) {
+      return true;
+    }
+
+    if (kind === "file" && typeof item.file_name === "string" && item.file_name.trim()) {
+      return true;
+    }
+
+    if (kind === "image") {
+      if (typeof item.url === "string" && item.url.trim()) {
+        return true;
+      }
+      const source = item.source as Record<string, unknown> | undefined;
+      if (
+        source?.type === "base64" &&
+        typeof source.data === "string" &&
+        source.data.trim()
+      ) {
+        return true;
+      }
+    }
+
+    if (kind === "image_url") {
+      const imageUrl = item.image_url as Record<string, unknown> | undefined;
+      if (typeof imageUrl?.url === "string" && imageUrl.url.trim()) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function shouldSkipEmptyAssistantMessage(message: unknown, normalizedRole: string): boolean {
+  if (normalizedRole.toLowerCase() !== "assistant") {
+    return false;
+  }
+  if (hasRenderableNonTextBlocks(message)) {
+    return false;
+  }
+  const visibleText = (extractTextCached(message) ?? "").trim();
+  return visibleText.length === 0;
+}
+
 function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   const items: ChatItem[] = [];
   const renderedCardTexts = new Set<string>();
@@ -985,6 +1055,10 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       }
     }
 
+    if (shouldSkipEmptyAssistantMessage(msg, normalized.role)) {
+      continue;
+    }
+
     items.push({
       kind: "message",
       key: messageKey(msg, i),
@@ -1044,7 +1118,11 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
 
   if (props.stream !== null) {
     const key = `stream:${props.sessionKey}:${props.streamStartedAt ?? "live"}`;
-    if (props.stream.trim().length > 0) {
+    // Use filtered text for the length check: if the stream only contains reasoning
+    // content (Plan/Gather/Act or <think> blocks), show the reading indicator instead
+    // of an empty/invisible streaming bubble.
+    const visibleStream = stripThinkingTags(props.stream);
+    if (visibleStream.trim().length > 0) {
       items.push({
         kind: "stream",
         key,

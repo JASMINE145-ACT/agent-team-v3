@@ -671,6 +671,7 @@ export function renderApp(state: AppViewState) {
                 reportsDetailTab: state.reportsDetailTab,
                 reportsEditingTaskId: state.reportsEditingTaskId,
                 reportsEditForm: state.reportsEditForm,
+                reportsFilter: state.reportsFilter,
                 onTokenChange: (token) => {
                   state.reportsAdminToken = token;
                 },
@@ -716,6 +717,10 @@ export function renderApp(state: AppViewState) {
                       state.reportsEditForm = {};
                     }
                   });
+                },
+                onFilterChange: (filter) => {
+                  state.reportsFilter = filter;
+                  void loadReports(state);
                 },
               })
             : nothing

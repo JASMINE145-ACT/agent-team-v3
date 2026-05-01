@@ -610,3 +610,592 @@ Iteration 7 converted architecture notes into executable delivery structure: thr
 ### Status
 
 [OK] **Completed (weekly report loop iteration 7 PR slicing update)**
+
+---
+
+## Session 80: 2026-04-30 — Weekly report loop iteration 8 (SLO + rollback gates)
+
+**Date**: 2026-04-30  
+**Task**: Add measurable SLO template, accessibility manual script, and SSE rollback thresholds
+
+### Summary
+
+Iteration 8 added operations-oriented verification and release safety controls on top of implementation planning: SLO/error-budget targets, manual accessibility scripts, and clear rollback thresholds for SSE rollout.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 8
+  - Added:
+    - Weekly-report SLO template (availability/latency/DQ pass rate)
+    - Error budget policy and freeze thresholds
+    - PR-3 accessibility manual test script
+    - SSE rollout rollback thresholds and actions
+    - Iteration 9 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 8 SLO/rollback update)**
+
+---
+
+## Session 81: 2026-04-30 — Weekly report loop iteration 9 (matrix + templates)
+
+**Date**: 2026-04-30  
+**Task**: Deliver PR-1/PR-2/PR-3 execution artifacts (field matrix, state event table, manual record template)
+
+### Summary
+
+Iteration 9 transformed planning points into implementation-ready artifacts: PR-1 field-level matrix, PR-2 state-event transition table, and PR-3 reusable manual validation record template.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 9
+  - Added:
+    - PR-1 field-level change checklist + test matrix
+    - PR-2 state machine event table
+    - PR-3 manual test pass/fail record template
+    - SSE feature-flag progressive rollout recommendation
+    - Iteration 10 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 9 matrix/template update)**
+
+---
+
+## Session 82: 2026-04-30 — Weekly report loop iteration 10 (mapping to executable drafts)
+
+**Date**: 2026-04-30  
+**Task**: Map PR-1/2/3 planning items into executable draft artifacts
+
+### Summary
+
+Iteration 10 refined prior planning into near-implementation artifacts: route/analyzer test-case mapping, frontend transition pseudocode, and explicit documentation delivery path for accessibility manual records.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 10
+  - Added:
+    - PR-1 test-case mapping to current test files
+    - PR-2 `reports.ts` transition pseudocode
+    - PR-3 template file delivery suggestion (`test/` directory)
+    - SSE auth implementation caveats (EventSource header limits)
+    - Safe DB migration strategy (expand-contract)
+    - Iteration 11 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 10 executable-draft mapping)**
+
+---
+
+## Session 83: 2026-04-30 — Weekly report loop iteration 11 (assertion-level refinement)
+
+**Date**: 2026-04-30  
+**Task**: Refine PR-1/2/3 artifacts to assertion-level and test-coverage-level details
+
+### Summary
+
+Iteration 11 turned high-level test and transition plans into assertion-level checklists and explicit coverage strategy (0-switch / 1-switch), plus concrete file-structure recommendations for manual accessibility records.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 11
+  - Added:
+    - PR-1 assertion-level test checklist (input/expected/boundary)
+    - PR-2 state-machine coverage strategy
+    - PR-3 template file structure and fill-in rules
+    - `reports.ts` function-splitting recommendations
+    - Iteration 12 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 11 assertion-level refinement)**
+
+---
+
+## Session 84: 2026-04-30 — Weekly report loop iteration 12 (skeleton drafting)
+
+**Date**: 2026-04-30  
+**Task**: Draft executable skeleton artifacts for PR-1/PR-2/PR-3
+
+### Summary
+
+Iteration 12 materialized the next-step plan into practical draft assets: pytest function skeletons, controller state-transition case table, and a reusable markdown accessibility test template structure.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 12
+  - Added:
+    - PR-1 pytest skeleton draft
+    - PR-2 controller test-case table
+    - PR-3 markdown template first draft
+    - Feature-flag observation checklist
+    - Iteration 13 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 12 skeleton drafting)**
+
+---
+
+## Session 85: 2026-04-30 — Weekly report loop iteration 13 (observability + QA handoff)
+
+**Date**: 2026-04-30  
+**Task**: Add SSE observability metrics and feature-flag QA handoff checklist
+
+### Summary
+
+Iteration 13 focused on rollout reliability readiness: observable SSE lifecycle metrics, alert thresholds, and a structured QA handoff checklist for progressive delivery phases.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 13
+  - Added:
+    - SSE monitoring metrics system (connection/delivery/recovery)
+    - Feature-flag QA handoff checklist
+    - Assertion refinements for PR-1/PR-2
+    - Iteration 14 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 13 observability/handoff update)**
+
+---
+
+## Session 86: 2026-04-30 — Weekly report loop iteration 14 (prioritization + release template)
+
+**Date**: 2026-04-30  
+**Task**: Deliver implementation prioritization board, lightweight SSE log-metric mapping, and reusable go/no-go template
+
+### Summary
+
+Iteration 14 emphasized rollout execution readiness by turning strategy into decision artifacts: a prioritization board, minimal log-derived SSE metrics, and a fixed release decision template.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 14
+  - Added:
+    - implementation prioritization board (do/defer/high-risk)
+    - log-field to SSE-metric mapping (lightweight observability)
+    - reusable go/no-go release template
+    - Iteration 15 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 14 prioritization/template update)**
+
+---
+
+## Session 87: 2026-04-30 — Weekly report loop iteration 15 (template hardening + drill script)
+
+**Date**: 2026-04-30  
+**Task**: Harden release template into file-ready form, add structured log examples, and deliver PR-2 fault drill script
+
+### Summary
+
+Iteration 15 strengthened execution readiness by adding file-oriented release template guidance, concrete structured logging payloads, and a practical fault-injection drill flow for SSE fallback validation.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 15
+  - Added:
+    - file-ready release template adoption guidance
+    - structured JSON log examples for reports/SSE flow
+    - PR-2 fault drill script (disconnect/timeout/fallback/recovery)
+    - Iteration 16 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 15 template/drill update)**
+
+---
+
+## Session 88: 2026-04-30 — Weekly report loop iteration 16 (instrumentation map + reviewable bundles)
+
+**Date**: 2026-04-30  
+**Task**: Convert rollout planning into concrete logger touchpoints and minimal reviewable change bundles
+
+### Summary
+
+Iteration 16 focused on implementation handoff readiness by mapping structured logging touchpoints by file and splitting work into minimal reviewable bundles for backend and frontend.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 16
+  - Added:
+    - backend logger instrumentation touchpoint map
+    - minimal reviewable bundle split (PR-1a/1b/2a/2b)
+    - staged rollout coordination and explicit abort criteria
+    - Iteration 17 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 16 instrumentation/bundle update)**
+
+---
+
+## Session 89: 2026-04-30 — Weekly report loop iteration 17 (logging convention + branch plan)
+
+**Date**: 2026-04-30  
+**Task**: Convert logging touchpoints into consistent key conventions and define branch/commit execution plan
+
+### Summary
+
+Iteration 17 converted logging intent into copy-ready structured log snippets with normalized keys, and transformed review bundles into an explicit branch and commit strategy for phased implementation.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 17
+  - Added:
+    - unified logging key conventions
+    - copy-ready logger statement drafts
+    - branch and commit planning recommendations
+    - conventional commit examples
+    - Iteration 18 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 17 logging/branch-plan update)**
+
+---
+
+## Session 90: 2026-04-30 — Weekly report loop iteration 18 (compatibility + cardinality guardrails)
+
+**Date**: 2026-04-30  
+**Task**: Add API compatibility checklist and structured logging cardinality guardrails for implementation readiness
+
+### Summary
+
+Iteration 18 focused on preventing rollout regressions and observability cost blowups by defining explicit API compatibility checks and high-cardinality logging constraints before coding begins.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 18
+  - Added:
+    - high-cardinality logging governance rules
+    - API contract compatibility checklist for bundle B
+    - coding-start trigger conditions for iteration 19
+    - Iteration 19 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 18 compatibility/cardinality update)**
+
+---
+
+## Session 91: 2026-04-30 — Weekly report loop iteration 19 (go/no-go hardening)
+
+**Date**: 2026-04-30  
+**Task**: Add final go/no-go decision card, SSE fallback UX messaging strategy, and coding-start execution gate
+
+### Summary
+
+Iteration 19 consolidated release-decision readiness by adding an explicit go/no-go card, user-facing fallback messaging strategy, and a hard execution switch for moving from planning to coding.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 19
+  - Added:
+    - final go/no-go decision card
+    - SSE failure-copy and retry interaction strategy
+    - coding-start execution gate for iteration 20
+    - Iteration 20 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 19 go/no-go hardening)**
+
+---
+
+## Session 92: 2026-04-30 — Weekly report loop iteration 20 (coding-ready package)
+
+**Date**: 2026-04-30  
+**Task**: Finalize coding-ready package for bundle A/B with execution checks and response examples
+
+### Summary
+
+Iteration 20 prepared coding kickoff artifacts: bundle A execution checklist, bundle B response envelope examples, and a non-blocking UI risk record to carry into implementation.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 20
+  - Added:
+    - bundle A execution checklist
+    - bundle B API response example conventions
+    - non-blocking UI nested-button risk note
+    - Iteration 21 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 20 coding-ready package update)**
+
+---
+
+## Session 93: 2026-04-30 — Weekly report loop iteration 21 (integration gates + coding switch)
+
+**Date**: 2026-04-30  
+**Task**: Add backend-frontend integration checklist, accessibility release gates, and final coding-start prerequisites
+
+### Summary
+
+Iteration 21 bridged planning to execution by defining practical integration gates, dual-track accessibility release checks, and explicit prerequisites to start real coding safely.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 21
+  - Added:
+    - backend/frontend integration checklist
+    - accessibility release gate (automation + manual)
+    - final coding-start prerequisite checklist
+    - Iteration 22 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 21 integration/coding-switch update)**
+
+---
+
+## Session 94: 2026-04-30 — Weekly report loop iteration 22 (runbook + rollback drill)
+
+**Date**: 2026-04-30  
+**Task**: Add minimal release runbook, rollback drill checklist, and role-based coding-start script
+
+### Summary
+
+Iteration 22 finalized operational execution guidance before coding by adding a minimal runbook, a time-bounded rollback drill checklist, and explicit role ownership for coding kickoff.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 22
+  - Added:
+    - minimal release runbook template
+    - rollback drill checklist (5-minute recovery target)
+    - role-based coding-start execution script
+    - Iteration 23 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 22 runbook/drill update)**
+
+---
+
+## Session 95: 2026-04-30 — Weekly report loop iteration 23 (coding kickoff handbook)
+
+**Date**: 2026-04-30  
+**Task**: Add coding-kickoff handbook, evidence-based signoff fields, and phased implementation order
+
+### Summary
+
+Iteration 23 prepared immediate implementation by adding a one-page coding kickoff playbook, auditable signoff data fields, and an execution order that prioritizes stability and compatibility.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 23
+  - Added:
+    - coding kickoff one-page handbook
+    - evidence-based release signoff field set
+    - phased implementation order (A -> B -> C -> D)
+    - Iteration 24 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 23 coding-kickoff handbook update)**
+
+---
+
+## Session 96: 2026-04-30 — Weekly report loop iteration 24 (acceptance/evidence loop)
+
+**Date**: 2026-04-30  
+**Task**: Add implementation-phase acceptance loop, evidence retention fields, and ongoing gate cadence
+
+### Summary
+
+Iteration 24 formalized how execution will be validated and audited during real coding, with a practical acceptance loop and a required evidence field set for each batch.
+
+### Main Changes
+
+- Updated `to-do-list/周报优化循环文档.md`
+  - Set current iteration to 24
+  - Added:
+    - coding batch acceptance loop
+    - evidence retention field checklist
+    - ongoing gate cadence after coding starts
+    - Iteration 25 action plan
+
+### Validation Evidence
+
+- Code-review gate: PASS
+- Test-agent gate: PASS
+  - `python -m pytest "Agent Team version3/tests/test_reports_analyzer.py" "Agent Team version3/tests/test_reports_routes.py" -q`
+  - Result: `7 passed, 0 failed`
+
+### Status
+
+[OK] **Completed (weekly report loop iteration 24 acceptance/evidence update)**
+
+---
+
+## Session 97: 2026-04-30 — Weekly report loop iteration 27 (Package A events chain)
+
+**Date**: 2026-04-30  
+**Task**: 按 `周报优化循环文档` Iteration 27 计划实现包 A 最小链路（events table + adapter + query API）
+
+### Summary
+
+完成周报分析事件链路的最小可用实现：新增事件表与读写适配，并在 `reanalyze` 关键分支写入事件；提供最小查询接口供后续 SSE 补漏与前端游标机制复用。
+
+### Main Changes
+
+- `backend/reports/models.py`
+  - 新增 DDL：`report_analysis_events` 与索引 `idx_report_analysis_events_record_created`
+  - 新增 `append_analysis_event(record_id, event_type, event_payload)`
+  - 新增 `list_analysis_events(record_id, after_id, limit)`
+- `backend/server/api/routes_reports.py`
+  - `POST /api/reports/records/{id}/reanalyze` 接入事件写入（busy/invalid/race/enqueued）
+  - 成功响应新增 `data.record_id`、`data.current_status`、`data.event_id`
+  - 新增 `GET /api/reports/records/{id}/events`（含 record 存在性校验 + `after_id` 归一化）
+- `tests/test_reports_routes.py`
+  - 更新原有 `reanalyze` 断言以适配新响应
+  - 新增事件接口测试（正常返回、404、负 `after_id` 归一化）
+
+### Verification Gate Evidence
+
+1) **Code-review agent: PASS**
+- 复审结论：无阻塞问题；前次建议项已修复（record 404 语义、`after_id` 归一化、测试补齐）。
+
+2) **Test-agent: PASS**
+- `D:\Projects\agent-jk\venv\Scripts\python.exe -m pytest -q tests/test_reports_routes.py tests/test_reports_analyzer.py`
+- 结果：`10 passed, 2 warnings`
+
+### Status
+
+[OK] **Completed (Package A minimal chain landed)**

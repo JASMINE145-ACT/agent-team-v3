@@ -80,6 +80,74 @@ function normalizeAbortedAssistantMessage(message: unknown): Record<string, unkn
   return candidate;
 }
 
+function hasRenderableNonTextBlocks(message: unknown): boolean {
+  const m = message as Record<string, unknown>;
+  const toolCalls = m.tool_calls;
+  if (Array.isArray(toolCalls) && toolCalls.length > 0) {
+    return true;
+  }
+  const content = m.content;
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const item = block as Record<string, unknown>;
+    const kind = typeof item.type === "string" ? item.type.toLowerCase() : "";
+    if (
+      kind === "toolcall" ||
+      kind === "tool_call" ||
+      kind === "tooluse" ||
+      kind === "tool_use" ||
+      kind === "toolresult" ||
+      kind === "tool_result"
+    ) {
+      return true;
+    }
+    if (typeof item.name === "string" && item.arguments != null) {
+      return true;
+    }
+    if (kind === "file" && typeof item.file_name === "string" && item.file_name.trim()) {
+      return true;
+    }
+    if (kind === "image") {
+      if (typeof item.url === "string" && item.url.trim()) {
+        return true;
+      }
+      const source = item.source as Record<string, unknown> | undefined;
+      if (
+        source?.type === "base64" &&
+        typeof source.data === "string" &&
+        source.data.trim()
+      ) {
+        return true;
+      }
+    }
+    if (kind === "image_url") {
+      const imageUrl = item.image_url as Record<string, unknown> | undefined;
+      if (typeof imageUrl?.url === "string" && imageUrl.url.trim()) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function shouldAppendAssistantMessage(message: unknown): boolean {
+  const m = message as Record<string, unknown>;
+  const role = typeof m.role === "string" ? m.role.toLowerCase() : "";
+  if (role !== "assistant") {
+    return true;
+  }
+  if (hasRenderableNonTextBlocks(message)) {
+    return true;
+  }
+  const visibleText = (extractText(message) ?? "").trim();
+  return visibleText.length > 0;
+}
+
 /** 上传 Excel/PDF 到服务端，返回 file_path/file_name，供 chat.send 的 context 使用 */
 export async function uploadChatFile(
   basePath: string,
@@ -269,21 +337,28 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload): C
       }
     }
   } else if (payload.state === "final") {
+    if (payload.message && shouldAppendAssistantMessage(payload.message)) {
+      state.chatMessages = [
+        ...state.chatMessages,
+        { ...(payload.message as Record<string, unknown>), timestamp: Date.now() },
+      ];
+    }
     state.chatStream = null;
     state.chatRunId = null;
     state.chatStreamStartedAt = null;
   } else if (payload.state === "aborted") {
     const normalizedMessage = normalizeAbortedAssistantMessage(payload.message);
-    if (normalizedMessage) {
+    if (normalizedMessage && shouldAppendAssistantMessage(normalizedMessage)) {
       state.chatMessages = [...state.chatMessages, normalizedMessage];
     } else {
       const streamedText = state.chatStream ?? "";
-      if (streamedText.trim()) {
+      const visibleStreamedText = streamedText.trim();
+      if (visibleStreamedText) {
         state.chatMessages = [
           ...state.chatMessages,
           {
             role: "assistant",
-            content: [{ type: "text", text: streamedText }],
+            content: [{ type: "text", text: visibleStreamedText }],
             timestamp: Date.now(),
           },
         ];

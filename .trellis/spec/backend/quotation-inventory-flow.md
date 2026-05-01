@@ -103,7 +103,54 @@ Handler (`on_after_tool`) parses outer JSON first, then tries to parse `result` 
 
 ---
 
-## 7) Related Specs
+## 7) Frontend SSE Rendering Smoothness（2026-04-30）
+
+Frontend changes that eliminate the "flash/stutter" visible when tool_render cards transition from live SSE state to chat history.
+
+### Problem: Double visual update on run end
+
+```
+T+0ms:   final event → resetToolRender() → live card DISAPPEARS → re-render
+T+~200ms: loadChatHistory() resolves  → card RE-APPEARS from history → re-render
+```
+
+This caused a visible "blank flash" between the two renders.
+
+### Fix 1: Deferred `resetToolRender` (`app-gateway.ts`)
+
+For `final` state only, `resetToolRender` is now called **after** `loadChatHistory` resolves:
+
+```typescript
+void loadChatHistory(host).then(() => {
+  if (state === "final") {
+    resetToolRender(host);
+  }
+});
+```
+
+`error` / `aborted` states still call `resetToolRender` immediately (no history reload follows).
+
+### Fix 2: Stable card DOM key (`views/chat.ts`)
+
+`pushCardFromItem` previously included `fallbackIndex` in the key, causing Lit's `repeat` to destroy and recreate the DOM node when a card moved from live-bottom to history-matched position — triggering a second `fade-in` animation.
+
+Key is now: `tool-render:${sessionKey}:${card.id}` (stable, no fallbackIndex).
+
+### Fix 3: GPU-composited card animation (`grouped.css`)
+
+Added `will-change: transform, opacity` to `.price-result-card` and `.candidates-preview-card` so the browser pre-promotes them to compositor layers before the animation starts.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `control-ui/src/ui/app-gateway.ts` | Defer `resetToolRender` until after `loadChatHistory` |
+| `control-ui/src/ui/views/chat.ts` | Stable card key (remove `fallbackIndex`) |
+| `control-ui/src/styles/chat/grouped.css` | `will-change` on result cards |
+
+---
+
+## 8) Related Specs
 
 - `llm-selector-architecture.md`
 - `tools-catalog.md`

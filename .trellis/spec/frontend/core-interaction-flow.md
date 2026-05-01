@@ -37,6 +37,11 @@ This is the fastest entry point for UI-related debugging.
 4. stream handlers in UI update message/tool-render state
 5. chat timeline re-renders with final structured result
 
+**SSE tool_render smoothness contract** (2026-04-30):
+- Live `tool_render` cards remain visible until `loadChatHistory` resolves — `resetToolRender` is deferred, not immediate on `final`.
+- Card DOM key is stable (`tool-render:${sessionKey}:${card.id}`) so `repeat` reuses the same node during live→history transition; no second fade-in.
+- Stream text is pre-filtered via `stripThinkingTags` before the length check in `buildChatItems`; if the stream only contains Plan/Gather/Act reasoning the reading indicator is shown instead of an empty bubble.
+
 ### B) Work chain (P1)
 1. user triggers work run in `views/work.ts`
 2. work endpoint executes run/stream pipeline

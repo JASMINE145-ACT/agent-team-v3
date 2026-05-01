@@ -51,6 +51,10 @@ export type ReportsTabParams = {
   reportsDetailTab: "data" | "analysis";
   reportsEditingTaskId: string | null;
   reportsEditForm: ReportTaskConfig;
+  reportsFilter: {
+    search: string;
+    status: "pending" | "running" | "done" | "failed" | "all";
+  };
   onTokenChange: (token: string) => void;
   onRefresh: () => void;
   onRun: (taskKey: string) => void;
@@ -63,6 +67,7 @@ export type ReportsTabParams = {
   onCancelEdit: () => void;
   onEditFormChange: (patch: ReportTaskConfig) => void;
   onSaveEdit: (taskKey: string) => void;
+  onFilterChange: (filter: { search: string; status: "pending" | "running" | "done" | "failed" | "all" }) => void;
 };
 
 function renderDataTab(params: ReportsTabParams) {
@@ -265,10 +270,43 @@ function renderAnalysisTab(params: ReportsTabParams) {
     `;
   }
   if (aStatus === "failed") {
+    const recordId = params.reportDetail?.id;
     return html`
       <div style="padding:24px;display:flex;flex-direction:column;align-items:center;gap:12px;">
-        <div style="color:var(--color-danger,#ef4444);">${t("agents.reports.analysisFailed")}</div>
-        <button class="btn btn--sm" @click=${() => params.onReanalyze(params.reportDetail!.id)}>${t("agents.reports.reanalyzeBtn")}</button>
+        <div style="color:var(--color-danger,#ef4444);font-size:14px;font-weight:600;">${t("agents.reports.analysisFailed")}</div>
+        <div style="font-size:12px;color:var(--text-muted);max-width:320px;text-align:center;">
+          ${t("agents.reports.analysisFailedHint")}
+        </div>
+        <details style="width:100%;max-width:360px;margin-top:4px;">
+          <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);user-select:none;">
+            ${t("agents.reports.troubleshooting")}
+          </summary>
+          <div style="margin-top:8px;padding:10px;background:var(--surface-2);border-radius:6px;font-size:12px;display:flex;flex-direction:column;gap:8px;">
+            <div><span style="color:var(--text-secondary);">1. </span><span>${t("agents.reports.stepCheckToken")}</span></div>
+            <div><span style="color:var(--text-secondary);">2. </span><span>${t("agents.reports.stepCheckBackendLog")}</span></div>
+            <div><span style="color:var(--text-secondary);">3. </span><span>${t("agents.reports.stepRetry")}</span></div>
+            ${recordId
+              ? html`<div style="margin-top:4px;display:flex;align-items:center;gap:6px;">
+                  <code style="font-size:11px;background:var(--surface-1);padding:2px 6px;border-radius:4px;color:var(--text-muted);">
+                    record_id=${recordId}
+                  </code>
+                  <button
+                    class="btn btn--sm"
+                    style="font-size:11px;"
+                    @click=${async (e: Event) => {
+                      e.stopPropagation();
+                      await navigator.clipboard.writeText(String(recordId));
+                    }}
+                  >
+                    ${t("agents.reports.copy")}
+                  </button>
+                </div>`
+              : nothing}
+          </div>
+        </details>
+        <button class="btn btn--sm primary" @click=${() => params.onReanalyze(params.reportDetail!.id)}>
+          ${t("agents.reports.reanalyzeBtn")}
+        </button>
       </div>
     `;
   }
@@ -389,6 +427,36 @@ export function renderReportsTab(params: ReportsTabParams) {
             style="font-size:11px;color:var(--text-muted);padding:10px 12px 6px;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--border);"
           >
             历史记录
+          </div>
+          <div style="padding:6px 8px;border-bottom:1px solid var(--border);display:flex;gap:6px;">
+            <input
+              style="flex:1;font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;"
+              placeholder=${t("agents.reports.filterSearch")}
+              .value=${params.reportsFilter.search}
+              @input=${(e: Event) => {
+                const val = (e.target as HTMLInputElement).value;
+                params.onFilterChange({ search: val, status: params.reportsFilter.status });
+              }}
+            />
+            <select
+              style="font-size:12px;padding:4px;border:1px solid var(--border);border-radius:6px;"
+              .value=${params.reportsFilter.status}
+              @change=${(e: Event) => {
+                const val = (e.target as HTMLSelectElement).value as
+                  | "pending"
+                  | "running"
+                  | "done"
+                  | "failed"
+                  | "all";
+                params.onFilterChange({ search: params.reportsFilter.search, status: val });
+              }}
+            >
+              <option value="all">${t("agents.reports.filterAll")}</option>
+              <option value="done">${t("agents.reports.filterDone")}</option>
+              <option value="failed">${t("agents.reports.filterFailed")}</option>
+              <option value="pending">${t("agents.reports.filterPending")}</option>
+              <option value="running">${t("agents.reports.filterRunning")}</option>
+            </select>
           </div>
           <div style="overflow-y:auto;flex:1;padding:8px;">
             ${params.reportsRecords.length === 0

@@ -13,7 +13,16 @@ from fastapi import APIRouter, Header, HTTPException
 from backend.reports.accurate_fetcher import ping_accurate
 from backend.reports.formatter import format_report_md
 from backend.reports.llm_analyzer import run_llm_analysis
-from backend.reports.models import CustomerStat, DayStats, ReportPayload, StatusStat, TaskConfigPatch, get_database_url
+from backend.reports.models import (
+    CustomerStat,
+    DayStats,
+    ReportPayload,
+    StatusStat,
+    TaskConfigPatch,
+    append_analysis_event,
+    get_database_url,
+    list_analysis_events,
+)
 from backend.reports.runner import run_report_task
 from backend.reports.service import _parse_cron, reload_task
 
@@ -172,22 +181,47 @@ async def update_task(
 
 
 @router.get("/api/reports/records")
-async def list_records(limit: int = 20, x_reports_token: str | None = Header(default=None)) -> Dict[str, Any]:
+async def list_records(
+    limit: int = 20,
+    offset: int = 0,
+    search: str | None = None,
+    status: str | None = None,
+    x_reports_token: str | None = Header(default=None),
+) -> Dict[str, Any]:
     _require_reports_token(x_reports_token)
     safe_limit = max(1, min(limit, 200))
+    safe_offset = max(0, offset)
+    safe_status = (status or "").strip().lower()
+    if safe_status and safe_status not in {"pending", "running", "done", "failed"}:
+        raise HTTPException(status_code=422, detail="status must be one of: pending, running, done, failed")
+    search_text = (search or "").strip()
+
     def _list_records_sync() -> List[Dict[str, Any]]:
         conn = _conn()
         try:
             with conn.cursor() as cur:
+                where_sql: List[str] = []
+                params: List[Any] = []
+                if safe_status:
+                    where_sql.append("COALESCE(analysis_status, 'pending') = %s")
+                    params.append(safe_status)
+                if search_text:
+                    where_sql.append(
+                        "(TO_CHAR(started_at, 'YYYY-MM-DD') ILIKE %s OR COALESCE(summary_json->>'total_sales_amount', '') ILIKE %s)"
+                    )
+                    like = f"%{search_text}%"
+                    params.extend([like, like])
+                where_clause = f"WHERE {' AND '.join(where_sql)}" if where_sql else ""
                 cur.execute(
-                    """
+                    f"""
                     SELECT id, task_key, status, trigger_type, started_at, finished_at,
                            error_message, summary_json, analysis_status
                     FROM report_records
+                    {where_clause}
                     ORDER BY id DESC
-                    LIMIT %s
+                    LIMIT %s OFFSET %s
                     """,
-                    (safe_limit,),
+                    (*params, safe_limit, safe_offset),
                 )
                 rows = cur.fetchall()
             return [
@@ -333,6 +367,12 @@ async def reanalyze_record(
             status_code=404, detail=f"record not found or has no report_json: {record_id}"
         )
     if record.get("busy") is True:
+        await asyncio.to_thread(
+            append_analysis_event,
+            record_id,
+            "reanalyze_rejected_busy",
+            {"analysis_status": record.get("analysis_status")},
+        )
         raise HTTPException(
             status_code=409,
             detail=f"analysis already {record.get('analysis_status')}, please wait",
@@ -350,6 +390,12 @@ async def reanalyze_record(
             status_stats=[StatusStat(**item) for item in (rj.get("status_stats") or [])],
         )
     except Exception as exc:
+        await asyncio.to_thread(
+            append_analysis_event,
+            record_id,
+            "reanalyze_rejected_invalid_payload",
+            {"error": str(exc)},
+        )
         raise HTTPException(status_code=422, detail=f"invalid report_json: {exc}")
 
     def _mark_pending_if_available() -> bool:
@@ -372,15 +418,64 @@ async def reanalyze_record(
 
     marked = await asyncio.to_thread(_mark_pending_if_available)
     if not marked:
+        await asyncio.to_thread(
+            append_analysis_event,
+            record_id,
+            "reanalyze_rejected_race",
+            {"reason": "analysis already running or pending"},
+        )
         raise HTTPException(status_code=409, detail="analysis already running or pending, please wait")
 
     db_url = get_database_url()
+    event_id = await asyncio.to_thread(
+        append_analysis_event,
+        record_id,
+        "reanalyze_enqueued",
+        {"record_id": record_id, "current_status": "pending"},
+    )
     threading.Thread(
         target=run_llm_analysis,
         args=(db_url, record_id, record["task_key"], payload),
         daemon=True,
     ).start()
-    return {"success": True}
+    return {
+        "success": True,
+        "data": {
+            "record_id": record_id,
+            "current_status": "pending",
+            "event_id": event_id,
+        },
+    }
+
+
+@router.get("/api/reports/records/{record_id}/events")
+async def get_record_events(
+    record_id: int,
+    after_id: int = 0,
+    limit: int = 100,
+    x_reports_token: str | None = Header(default=None),
+) -> Dict[str, Any]:
+    _require_reports_token(x_reports_token)
+    safe_after_id = max(0, int(after_id))
+
+    def _record_exists_sync() -> bool:
+        conn = _conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM report_records WHERE id=%s", (record_id,))
+                return bool(cur.fetchone())
+        finally:
+            conn.close()
+
+    exists = await asyncio.to_thread(_record_exists_sync)
+    if not exists:
+        raise HTTPException(status_code=404, detail=f"record not found: {record_id}")
+
+    events = await asyncio.to_thread(list_analysis_events, record_id, safe_after_id, limit)
+    return {
+        "success": True,
+        "data": events,
+    }
 
 
 @router.post("/api/reports/reset-stale")

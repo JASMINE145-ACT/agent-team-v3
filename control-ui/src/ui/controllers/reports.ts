@@ -11,6 +11,10 @@ export type ReportsState = {
   reportDetailLoading: boolean;
   selectedRecordId: number | null;
   reportsDetailTab: "data" | "analysis";
+  reportsFilter: {
+    search: string;
+    status: "pending" | "running" | "done" | "failed" | "all";
+  };
 };
 
 function apiUrl(basePath: string, path: string): string {
@@ -44,9 +48,16 @@ export async function loadReports(state: ReportsState): Promise<void> {
   state.reportsLoading = true;
   state.reportsError = null;
   try {
+    const params = new URLSearchParams({ limit: "50" });
+    if (state.reportsFilter.search.trim()) {
+      params.set("search", state.reportsFilter.search.trim());
+    }
+    if (state.reportsFilter.status !== "all") {
+      params.set("status", state.reportsFilter.status);
+    }
     const [tasksRes, recordsRes] = await Promise.all([
       fetch(apiUrl(state.basePath, "/api/reports/tasks"), { headers: headers(state.reportsAdminToken) }),
-      fetch(apiUrl(state.basePath, "/api/reports/records?limit=20"), {
+      fetch(apiUrl(state.basePath, `/api/reports/records?${params.toString()}`), {
         headers: headers(state.reportsAdminToken),
       }),
     ]);
